@@ -845,6 +845,28 @@ AffineTransform = Transform{:multmatrix}
 """
     mult_matrix(a, [center=c], solid...)
     mult_matrix(a, b, solid...)
+    mult_matrix(a, b) * solid
+
+Represents the affine operation `x -> a*x + b`.
+
+# Extended help
+!!! note "Types of `mult_matrix` parameters"
+
+    The precise type of parameters `a` and `b` is not specified.
+    Usually, `a` will be a matrix and `b` a vector, but this is left open
+    on purpose; for instance, `a` can be a scalar (for a scaling)
+    and `b` can be `Val(false)` for a linear operation. Any types so that
+    `a * Vector + b` is defined will be accepted.
+
+    Conversion to a matrix will be done when converting to OpenSCAD
+    format.
+
+!!! note "Matrix multiplication"
+
+    Chained `mult_matrix` operations will be combined into a single
+    operation when possible. This saves time: multiple 
+    (3 × n) matrix multiplications are replaced by
+    (3 × 3) multiplications, followed by a single (3 × n).
 """
 @inline mult_matrix(a, s...; kwargs...) =
 	AffineTransform(Affine(a; kwargs...), s...)

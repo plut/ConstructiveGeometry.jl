@@ -47,6 +47,7 @@
    - or also allow `Nothing` in vectors of objects
  - import `.stl` and `.ply`
 # Transformations
+ - Complex * 2d object
  * a move system (= a representation of abstract affine rotations)
    - allow `NamedTuple` for this
  - possible via `move(origin, s...; direction, spin)`

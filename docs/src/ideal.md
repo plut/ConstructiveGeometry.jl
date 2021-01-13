@@ -21,7 +21,7 @@ Solids.NeutralSolid
 
 ## Transformations
 
-Transformations accept two possible syntaxes:
+All transformations accept two possible syntaxes:
 ```julia
     transform(parameters, solid1, solid2, ...)
     transform(parameters) * solid1
@@ -30,8 +30,8 @@ The second, multiplicative form allows easy chaining of transformations:
 ```julia
     transform1(param1) * transform2(param2) * solid
 ```
-It may also be applied to several solids by either wrapping them in a
-`union`, or equivalently, by applying it to a `Vector` of Solidss:
+This form may also be applied to several solids by either wrapping them in a
+`union`, or equivalently, by applying it to a `Vector` of Solids:
 ```julia
     transform(parameters) * [ solid1, solid2, ... ]
 ```
@@ -44,7 +44,8 @@ Solids.scale
 Solids.rotate
 Solids.mirror
 ```
-TODO: Solids.project
+
+TODO: `Solids.project`, `Solids.cut`.
 
 ### Extrusion
 ```@docs
@@ -68,7 +69,7 @@ Solids.set_parameters
 
 ### Defining a custom transformation
 
-## CSG operations
+## Operations
 ```@docs
 Solids.union
 Solids.intersect
