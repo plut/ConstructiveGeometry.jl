@@ -3,16 +3,17 @@ module Solids
 # is a (dynamic) Matrix
 #
 
-using Printf
+# using Printf
 using LinearAlgebra, StaticArrays, FixedPointNumbers
-using Clipper, MiniQhull, Polyhedra, GLPK, Triangle
+using Clipper, Polyhedra, GLPK, Triangle
+# using MiniQhull
 import Rotations
 import Colors
 
 import Base: show, print, length, getindex, size
 import Base: union, intersect, setdiff, -
 import Base: *, +, -
-import Clipper: IntPoint
+# import Clipper: IntPoint
 
 #————————————————————— Ideal objects —————————————————————————————— <<<1
 #>>>1
