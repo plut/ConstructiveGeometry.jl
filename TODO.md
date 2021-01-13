@@ -1,15 +1,24 @@
+# 2d vs 3d
+ - Objects should really have *two* dimensions: intrinsic and embedding.
+ E.g. a `square(1)` has dimensions `(2,2)`, while its translation by
+ `[0,0,1]` has dimensions `(2,3)` and an embedding given by the
+ corresponding matrix.
+ - CSG operations may be performed either
+   * on objects of the same dimension, same embedding
+   * `hull`: use embedding to push all objects to same space if possible
+   * `minkowski`: ditto
 # Immediate work
+ - make transformations even lazier, so that they are evaluated only once
+   their subjects (and more importantly, their dimension) are known
  - use `import` for modules used only a few times once (`Color`, all geometry)
- - test suite
+   to avoid polluting the namespace
+ * test suite
  - distinguish ideal solid and elements
- + replace include() by a function that reads a `Solid` from a `JuliaFile`
  - Minkowski difference
  - what to do for polygons with holes?
  - replace minkowski with circle by an offset
- + implement polygon convolution
  - finish grouping all Clipper stuff in one section
  - fix `Offset` for `Region` values
-  + add a NamedTuple to convert symbols to ClipperJoinType
  - choose a correct value for `Clipper` precision
  * check `convex_hull`
 # Basic types
@@ -38,7 +47,6 @@
    - or also allow `Nothing` in vectors of objects
  - import `.stl` and `.ply`
 # Transformations
- + make `hull`, `minkowski` formal and `Region`-able
  * a move system (= a representation of abstract affine rotations)
    - allow `NamedTuple` for this
  - possible via `move(origin, s...; direction, spin)`
@@ -55,14 +63,9 @@
       :left => Y, :right => Z,
     ] # as array *or* tuple
 # Issues in other packages
- + `HybridArrays.jl`: fix the type of static * hybrid matrix
-   multiplication (currently fully dynamic...)
  - `StaticArrays.jl`: SDiagonal is currently *not* a static matrix?
     julia> SDiagonal(1,2,3) isa StaticMatrix
     false
- + `Clipper.jl`: IntPoint should really be a `StaticVector{2,Fixed}`
-   (even better: an abstract type, or a labelled vector...).
- + `Clipper.jl`: Minkowski sum
  - `Rotations.jl`: using the same type for angles and coordinates is not
    terribly useful (in particular with angles in radians).
  - *Julia*: add `cossin` to `sincos` (helps with complex units).

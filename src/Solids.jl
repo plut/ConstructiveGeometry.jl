@@ -5,9 +5,9 @@ module Solids
 
 using Printf
 using LinearAlgebra, StaticArrays, FixedPointNumbers
-import Rotations
 using Clipper, MiniQhull, Polyhedra, GLPK, Triangle
-using Colors
+import Rotations
+import Colors
 
 import Base: show, print, length, getindex, size
 import Base: union, intersect, setdiff, -
@@ -712,12 +712,13 @@ Paint = Transform{:color}
 
 Paints objects `s...` in the given color.
 """
-@inline color(c::Colorant, s...) = Paint(c, s...)
-@inline color(c::AbstractString, s...) = color(parse(Colorant, c), s...)
+@inline color(c::Colors.Colorant, s...) = Paint(c, s...)
+@inline color(c::AbstractString, s...) =
+	color(parse(Colors.Colorant, c), s...)
 @inline color(c::AbstractString, a::Real, s...) =
-	color(coloralpha(parse(Colorant, c), a), s...)
+	color(Colors.coloralpha(parse(Colors.Colorant, c), a), s...)
 
-@inline scad_parameters(io::IO, c::Colorant) =
+@inline scad_parameters(io::IO, c::Colors.Colorant) =
 	print(io, round.(Float64.([red(c), green(c), blue(c), alpha(c)]), digits=3))
 
 # Linear extrusion<<<2
