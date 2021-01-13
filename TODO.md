@@ -1,23 +1,12 @@
-# 2d vs 3d
- - Objects should really have *two* dimensions: intrinsic and embedding.
- E.g. a `square(1)` has dimensions `(2,2)`, while its translation by
- `[0,0,1]` has dimensions `(2,3)` and an embedding given by the
- corresponding matrix.
- - CSG operations may be performed either
-   * on objects of the same dimension, same embedding
-   * `hull`: use embedding to push all objects to same space if possible
-   * `minkowski`: ditto
 # Immediate work
- - make transformations even lazier, so that they are evaluated only once
-   their subjects (and more importantly, their dimension) are known
  - use `import` for modules used only a few times once (`Color`, all geometry)
    to avoid polluting the namespace
- * test suite
- - distinguish ideal solid and elements
+ + test suite
+ - a common name for meshing objects (either `Mesh` or `elements` ?)
  - Minkowski difference
  - what to do for polygons with holes?
  - replace minkowski with circle by an offset
- - finish grouping all Clipper stuff in one section
+ * finish grouping all Clipper stuff in one section
  - fix `Offset` for `Region` values
  - choose a correct value for `Clipper` precision
  * check `convex_hull`
@@ -38,6 +27,15 @@
    *no*, feature request written
  - abstract directions (`up`, `left`) etc., interpreted differently
    depending on the dimension.
+# 2d vs 3d
+ - Objects should really have *two* dimensions: intrinsic and embedding.
+ E.g. a `square(1)` has dimensions `(2,2)`, while its translation by
+ `[0,0,1]` has dimensions `(2,3)` and an embedding given by the
+ corresponding matrix.
+ - CSG operations may be performed either
+   * on objects of the same dimension, same embedding
+   * `hull`: use embedding to push all objects to same space if possible
+   * `minkowski`: ditto
 # Primitives
  + decide whether to use Square or square as a name
  suggestion: `Square` is the raw constructor;
@@ -88,6 +86,8 @@
  - really really stupid idea: *n*-dimensional matrix actually arranges
    objects in a matrix...
 # Transformations
+ - make transformations even lazier, so that they are evaluated only once
+   their subjects (and more importantly, their dimension) are known
  * call Clipper to provide offset algorithm
 	- orientation, area, pointinpolygon
 	- this provides polygon intersection, difference, …

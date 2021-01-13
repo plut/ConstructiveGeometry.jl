@@ -5,10 +5,11 @@ module Solids
 
 # using Printf
 using LinearAlgebra, StaticArrays, FixedPointNumbers
-using Clipper, Polyhedra, GLPK, Triangle
+using Polyhedra, GLPK, Triangle
 # using MiniQhull
 import Rotations
 import Colors
+import Clipper
 
 import Base: show, print, length, getindex, size
 import Base: union, intersect, setdiff, -

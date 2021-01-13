@@ -46,5 +46,10 @@ end
 @test color("red", s) == color(parse(Colorant, "red"), s)
 end
 end
+@testset "Clipper" begin
+s = Square(1)
+end
 
+#>>>1
 # vim: noet ts=2 fmr=<<<,>>>
+
