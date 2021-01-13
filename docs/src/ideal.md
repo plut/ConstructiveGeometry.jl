@@ -1,22 +1,22 @@
-# Ideal `Solid` objects
+# Ideal `Solids` objects
 ```@meta
-CurrentModule = Solid
+CurrentModule = Solids
 ```
 
 ```@docs
-Solid.AbstractSolid
+Solids.AbstractSolid
 ```
 ## Primitive solids
 
 ```@docs
-Solid.Square
-Solid.Circle
-Solid.Cube
-Solid.Cylinder
-Solid.Sphere
-Solid.Polygon
-Solid.Surface
-Solid.NeutralSolid
+Solids.Square
+Solids.Circle
+Solids.Cube
+Solids.Cylinder
+Solids.Sphere
+Solids.Polygon
+Solids.Surface
+Solids.NeutralSolid
 ```
 
 ## Transformations
@@ -31,26 +31,26 @@ The second, multiplicative form allows easy chaining of transformations:
     transform1(param1) * transform2(param2) * solid
 ```
 It may also be applied to several solids by either wrapping them in a
-`union`, or equivalently, by applying it to a `Vector` of Solids:
+`union`, or equivalently, by applying it to a `Vector` of Solidss:
 ```julia
     transform(parameters) * [ solid1, solid2, ... ]
 ```
 
 ### Affine transformations
 ```@docs
-Solid.mult_matrix
-Solid.translate
-Solid.scale
-Solid.rotate
-Solid.mirror
+Solids.mult_matrix
+Solids.translate
+Solids.scale
+Solids.rotate
+Solids.mirror
 ```
-TODO: Solid.project
+TODO: Solids.project
 
 ### Extrusion
 ```@docs
-Solid.linear_extrude
-Solid.rotate_extrude
-Solid.path_extrude
+Solids.linear_extrude
+Solids.rotate_extrude
+Solids.path_extrude
 ```
 
 ### Inserting metadata
@@ -62,17 +62,17 @@ i.e. either as `transform(parameters, s...)`
 or as a product `transform(parameters) * s`.
 
 ```@docs
-Solid.color
-Solid.set_parameters
+Solids.color
+Solids.set_parameters
 ```
 
 ### Defining a custom transformation
 
 ## CSG operations
 ```@docs
-Solid.union(::Solid.AbstractSolid...)
-Solid.intersect
-Solid.difference
-Solid.hull
-Solid.minkowski
+Solids.union
+Solids.intersect
+Solids.difference
+Solids.hull
+Solids.minkowski
 ```

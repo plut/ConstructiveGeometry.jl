@@ -1,4 +1,4 @@
-# Solid.jl Documentation
+# Solids.jl Documentation
 ```@docs
-Solid.AbstractSolid
+Solids.AbstractSolid
 ```

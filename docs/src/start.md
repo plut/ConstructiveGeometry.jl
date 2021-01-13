@@ -2,8 +2,8 @@
 
 ## Basic example
 ```julia
-using Solid
-import Solid: Square, Circle, mult_matrix, translate, scale, color
+using Solids
+import Solids: Square, Circle, mult_matrix, translate, scale, color
 
 union(
   color("pink")*
@@ -20,7 +20,7 @@ union(
 ## I/O
 
 ```@docs
-Solid.include
-Solid.scad
+Solids.include
+Solids.scad
 ```
 

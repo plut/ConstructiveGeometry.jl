@@ -1,4 +1,6 @@
 # Immediate work
+ - use `import` for modules used only a few times once (`Color`, all geometry)
+ - test suite
  - distinguish ideal solid and elements
  + replace include() by a function that reads a `Solid` from a `JuliaFile`
  - Minkowski difference
