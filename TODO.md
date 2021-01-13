@@ -22,6 +22,8 @@
  - choose a correct value for `Clipper` precision
  * check `convex_hull`
 # Basic types
+ - add a LineNode reference to constructors
+   (i.e. first thing in call stack outside module).
  - add something for fake-3d objects (embedded in a subspace):
    this would represent both `mult_matrix` with zero determinant,
    `mult_matrix` of 2d object with 3d matrix,
@@ -71,6 +73,7 @@
    terribly useful (in particular with angles in radians).
  - *Julia*: add `cossin` to `sincos` (helps with complex units).
 # Syntax
+ - find something like OpenSCAD' # ! % operators.
  - think of replacing parameters by kwargs
  +  ∪, ∩, \
  - `+ ⊕` Minkowski sum; translation
