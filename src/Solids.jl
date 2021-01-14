@@ -14,7 +14,6 @@ import Clipper
 import Base: show, print, length, getindex, size
 import Base: union, intersect, setdiff, -
 import Base: *, +, -
-# import Clipper: IntPoint
 
 #————————————————————— Ideal objects —————————————————————————————— <<<1
 #>>>1
@@ -128,7 +127,7 @@ const AnyPath{D,T<:Real} = AnyList{AnyVec{D,T}}
 # Path{D,T}(v::AnyPath{D,T}, fill = zero(T)) where{D,T} =
 #		Path{D,T}([p[i] for i in 1:D, p in v])
 
-const Paths{T} = AbstractVector{<:AbstractVector{T}}
+# const Paths{T} = AbstractVector{<:Path{T}}
 
 # Angle types<<<2
 # to keep it simple, angles are just Float64 (in degrees).
@@ -173,7 +172,6 @@ out of planar objects, and 3 otherwise.
 """
 @inline dim(::AbstractSolid{D}) where{D} = D
 @inline Base.eltype(::Type{<:AbstractSolid{D,T}}) where{D,T} = T
-export dim
 
 @inline children(::AbstractSolid) = NeutralSolid{:empty,Bool}[]
 @inline parameters(::AbstractSolid) = NamedTuple()
@@ -209,20 +207,20 @@ function scad(io::IO, s::AbstractSolid, spaces::AbstractString)
 end
 
 @inline scad_parameters(io::IO, s::AbstractSolid) =
-	scad_parameters(io, parameters(s))
+	scad_parameters(io, Val(scad_name(s)), parameters(s))
 
-function scad_parameters(io::IO, t::NamedTuple)
+function scad_parameters(io::IO, name::Val, t::NamedTuple)
 	first = true
 	print(io, "(")
 	for (key, val) in pairs(t)
 		if first first = false; else print(io, ", "); end
 		print(io, key, "=")
 		# this allows a different treatment depending on (object name, key):
-		scad(io, val)
+		scad_param_value(io, name, Val(key), val)
 	end
 	print(io, ")")
 end
-@inline scad_param_value(io::IO, k::Val, val) = scad(io, val)
+@inline scad_param_value(io::IO, n::Val, k::Val, val) = scad(io, val)
 @inline scad(io::IO, val) = print(io, val)
 @inline scad(io::IO, val::Fixed) = print(io, Float64(val))
 function scad(io::IO, v::AbstractVector)
@@ -431,7 +429,8 @@ Surface{T,V} = PrimitiveSolid{:polyhedron,3,T,
 @inline _infer_type(::Type{<:Surface}; points, faces) =
 	real_type(eltype.(points)...)
 # OpenSCAD is zero-indexed
-@inline function scad(io::IO, ::Surface, ::Val{:faces}, faces)
+@inline function scad_param_value(io::IO,
+		::Val{:polyhedron}, ::Val{:faces}, faces)
 	print(io, "[")
 	join(io, [f .- 1 for f in faces], ",")
 	print(io, "]")
@@ -601,9 +600,6 @@ Represents the difference `s1 ∖ (s2 ∪ ..)`.
 @inline difference(x::AbstractVector{<:AbstractSolid},
 				y::AbstractVector{<:AbstractSolid}) =
 	DerivedSolid{foldr(max,dim.(x);init=3),:difference}(union(x...), y...)
-export difference
-
-export hull, minkowski
 
 # General transforms<<<1
 # Curry<<<2
@@ -951,7 +947,6 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 
 ⋃ = Base.union
 ⋂ = Base.intersect
-export ⋃, ⋂
 
 # Attachments<<<1
 # Anchor system<<<2
@@ -1412,6 +1407,18 @@ function offset(v::AbstractVector{Path{2,T}}, r::Real;
 	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
 	execute(c, r)
 end
+function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
+		join = :round,
+		ends = :closed,
+		miter_limit = 2.,
+		precision = 0.2
+		)::Vector{Vector{Path{2,T}}} where{T}
+	# “Simultaneously” computes offset for several offset values.
+	# Used by path_extrude() below.
+	c = ClipperOffset(T, miter_limit, precision)
+	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
+	[ execute(c, ρ) for ρ in r]
+end
 @inline function simplify(p::Vector{<:AnyPath{2,T}}; fill=:nonzero) where{T}
 	return from_clipper(T,
 		Clipper.simplify_polygons(to_clipper(T, p), _CLIPPER_ENUM.fill[fill]))
@@ -1508,7 +1515,6 @@ function convex_hull(p::AbstractVector{<:Vec{3,T}}) where{T}
 	Surface(V, triangles)
 end
 
-export convex_hull
 
 # Minkowski sum<<<1
 # Convolution of polygons<<<2
@@ -1669,7 +1675,6 @@ end
 # 	# not implemented in Clipper.jl...
 # end
 
-export PolyUnion
 
 # Offset and draw <<<2
 """
@@ -1693,8 +1698,6 @@ function offset(U::PolyUnion{T}, u::Real;
 end
 @inline offset(x::AbstractSolid{2}, args...; kwargs...) =
 	offset(PolyUnion(x), args...; kwargs...)
-
-export offset
 
 # Draw <<<2
 """
@@ -1751,186 +1754,171 @@ end
 # # 	return vcat([ [ p; h-z ] for p in p1], [[p; h+z ] for p in p2 ])
 # # end
 # 
-# # Extrusion <<<1
-# # Path extrusion <<<2
+# Extrusion <<<1
+# Path extrusion <<<2
 # poly_dist_type(::Type{Vec{2,T}}) where{T} = T
 # poly_dist_type(::Type{Clipper.IntPoint}) = Int
-# distance2(x::Vec{2,T}, y::Vec{2,T}) where{T} = let z = x .- y
-# 	z[1]*z[1] + z[2]*z[2]
-# end
-# distance2(x::Clipper.IntPoint, y::Clipper.IntPoint)::Int =
-# 	let (zx, zy) = (x.X-y.X, x.Y-y.Y)
-# 	zx*zx + zy*zy
-# end
-# 
-# # triangulate_between: triangulate between two parallel paths<<<
-# """
-# 		triangulate_between(poly1, poly2, start1, start2)
-# 
-# Given two polygons `poly1` and `poly2`, both of them represented as a
-# vector of paths, and produced as offsets from a common path,
-# find a triangulation for the region between the two polygons.
-# 
-# This functions returns a pair `(triangulation, edge)`, where:
-# 
-#  - the triangulation is a vector of `SVector{3,Int}`,
-# where each point is represented by its index. Indices in `poly1` start at
-# value `start1`, and in `poly2` at `start2`.
-# 
-#  - the edge is a pair `(lastidx1, lastidx2)` corresponding to the last
-# 	 points visited on each polygon. (this will be useful for closing the
-# 	 extrusion).
-# 
-# """
-# function triangulate_between(poly1::Paths{T}, poly2::Paths{T},
-# 		start1::Int = 1, start2::Int = 1) where {T}
+distance2(x::Vec{2,T}, y::Vec{2,T}) where{T} = let z = x .- y
+	z[1]*z[1] + z[2]*z[2]
+end
+
+# triangulate_between: triangulate between two parallel paths<<<
+"""
+		triangulate_between(poly1, poly2, start1, start2)
+
+Given two polygons `poly1` and `poly2`, both of them represented as a
+vector of paths, and produced as offsets from a common path,
+find a triangulation for the region between the two polygons.
+
+This functions returns a pair `(triangulation, edge)`, where:
+
+ - the triangulation is a vector of `SVector{3,Int}`,
+where each point is represented by its index. Indices in `poly1` start at
+value `start1`, and in `poly2` at `start2`.
+
+ - the edge is a pair `(lastidx1, lastidx2)` corresponding to the last
+	 points visited on each polygon. (this will be useful for closing the
+	 extrusion).
+
+"""
+function triangulate_between(
+		poly1::AbstractVector{<:Path{D,T}},
+		poly2::AbstractVector{<:Path{D,T}},
+		start1::Int = 1, start2::Int = 1) where {D,T}
+	println("T=$T")
+	Big = typemax(T)
 # 	Distance = poly_dist_type(T); Big = typemax(Distance)
-# 	Triangle = SVector{3,Int}
-# 	triangles = Triangle[]
-# 	# head is the marker of current leading edge
-# 	# headpoint[i] is the point marked to by head[i]
-# 	# headidx is the new index for this marked point
-# 	# status[i][j] is the number of last used point in j-th path of i-th poly
-# 	head = [(1,1), (1,1)]
-# 	headpoint = [poly1[1][1], poly2[1][1]]
-# 	headidx = [start1, start2]
-# 	status = zeros.(Int,length.((poly1, poly2)))
-# 	# so far we used exactly one point on each side:
-# 	status[1][1] = status[2][1] = 1
-# 
-# 	# we need a way to convert (poly, path, index) to integer index<<<
-# 	function first_indices(start::Int, l::Vector{Int})::Vector{Int}
-# 		f = zeros.(Int, length(l))
-# 		f[1] = start
-# 		for i in 1:length(l)-1
-# 			@inbounds f[i+1] = f[i] + l[i]
-# 		end
-# 		f
-# 	end
-# 	# firstindex[poly][path] is the first index for this path
-# 	# firstindex[1][1] = start1
-# 	# firstindex[1][2] = start1 + len(poly1[1]) etc.
-# 	firstindex = (first_indices(start1, length.(poly1)),
-# 								first_indices(start2, length.(poly2)))
-# 	newindex(poly::Int, path::Int, index::Int)::Int =
-# 		firstindex[poly][path] + index - 1
-# #>>>
-# 	# computing diagonal distances to find the smallest one:<<<
-# 	function distance(pt::T, path::AbstractVector{T}, i::Int)::Distance
-# 		i > length(path) ? Big : distance2(pt, path[i])
-# 	end
-# 
-# 	function closest(pt::T, poly::Paths{T},
-# 			status::AbstractVector{Int})::Tuple{Int, Distance}
-# 
-# 		distances::Vector{Distance} =
-# 			[ distance(pt, poly[i], status[i]+1) for i in 1:length(poly) ]
-# 		findmin(distances)
-# 	end
-# #>>>
-# 
-# 	while true
-# 		d1, i1 = closest(headpoint[2], poly1, status[1])
-# 		d2, i2 = closest(headpoint[1], poly2, status[2])
-# 		# if no more points are left, we return:
-# 		(d1 == d2 == Big) && break
-# 
-# 		if d1 < d2 # we append a point from poly1
-# 			# add the triangle: head1, head2, newpoint
-# 			s = status[1][i1] += 1
-# 			newidx = newindex(1, i1, s)
-# 			push!(triangles, SA[headidx[1], headidx[2], newidx])
-# 			# update head1 to point to new point
-# 			headidx[1] = newidx
-# 			head[1] = (i1, s)
-# 			headpoint[1] = poly1[i1][s]
-# 		else
-# 			# add the triangle: head1, head2, newpoint
-# 			s = status[2][i2] += 1
-# 			newidx = newindex(2, i2, s)
-# 			push!(triangles, SA[headidx[1], headidx[2], newidx])
-# 			# update head1 to point to new point
-# 			headidx[2] = newidx
-# 			head[2] = (i2, s)
-# 			headpoint[2] = poly2[i2][s]
-# 		end
-# 	end
-# 	(triangles, (headidx[1], headidx[2]))
-# end#>>>
-# # path_extrude<<<
-# """
-# 		path_extrude(path, shape, options...)
-# 
-# Extrudes the given shape (a path of points forming a simple loop)
-# along the given path. Both arguments are provided as a
-# `Vector{SVector{2}}`.
-# 
-# Returns a `Surface` (defined by points and a triangulation).
-# """
-# function path_extrude(path::Path{2},
-# 	shape::Path{2};
-# 	join_type::Clipper.JoinType = JoinTypeRound,
-# 	miter_limit::Float64 = 2.0,
-# 	precision::Float64 = 0.25,
-# 	closed::Bool = true,
-# 	S::Int = INTPOINT_SCALE)
-# 
-# 	Rpath = Clipper.IntPoint.(path, S)
-# 	N = length(shape)
-# #		Rshape= Clipper.IntPoint.(shape, S)
-# 	C = ClipperOffset(miter_limit, precision/10*S)
-# 	add_path!(C, Rpath, join_type,
-# 		closed ? Clipper.EndTypeClosedPolygon : EndTypeOpenButt)
-# 	# for each point (x,y) in R: we offset by x
-# 	# and move y to z
-# 	Epoints = [ Clipper.execute(C, Float64(S*pt[1])) for pt in shape ]
-# 	return(Epoints)
-# 	function lift(pt::IntPoint, z::Real)::Vec{3}
-# 		 [Vec{2}(pt, S)...; z]
-# 	end
-# 	# make a flat list of all (x,y,z) points produced:
-# 	Zpoints = vcat(map(1:N) do i
-# 		vcat([ lift.(newpath, shape[i][2]) for newpath in Epoints[i] ]...)
-# 	end...)
-# 
-# 	# first index for each path
-# 	firstface = zeros(Int, N)
-# 	firstface[1] = 1
-# 	for i in 1:N-1
-# 		firstface[i+1] = firstface[i] + sum(length.(Epoints[i]))
-# 	end
-# 	println("firstface=$firstface")
-# 
-# 	triangles = map(1:N) do i
-# 		i1 = (i%N) + 1
-# 		triangulate_between(Epoints[i], Epoints[i1],
-# 			firstface[i], firstface[i1])
-# 		# XXX keep the last edge for closing the shape
-# 	end
-# 	# this completes the set of triangles for the tube:
-# 	tubetriangles = vcat([ t[1] for t in triangles ]...)
-# 	lastface = [ t[2][1] for t in triangles ]
-# 	println("lastface=$lastface")
-# 	# here we decide if it is closed or open
-# 	# if open, triangulate the two facets
-# 	# if closed, join them together
-# 	if closed
-# 		moretriangles = vcat(map(1:N) do i
-# 			j = (i%N)+1
-# 			[ SA[firstface[i], lastface[i], firstface[j]],
-# 				SA[firstface[j], lastface[i], lastface[j]] ]
-# 		end...)
-# 		println("moretriangles=$moretriangles")
-# 		tubetriangles = [ tubetriangles; moretriangles ]
-# 	else
-# 	# TODO: triangulate the surface
-# 	# or, for now, close with two non-triangular facets...
-# 		moretriangles = [ reverse(firstface), lastface ]
-# 		println("moretriangles=$moretriangles")
-# 	end
-# 	Surface( Zpoints, tubetriangles )
-# end#>>>
-# 
+	Triangle = SVector{3,Int}
+	triangles = Triangle[]
+	# head is the marker of current leading edge
+	# headpoint[i] is the point marked to by head[i]
+	# headidx is the new index for this marked point
+	# status[i][j] is the number of last used point in j-th path of i-th poly
+	head = [(1,1), (1,1)]
+	headpoint = [poly1[1][1], poly2[1][1]]
+	headidx = [start1, start2]
+	status = zeros.(Int,length.((poly1, poly2)))
+	# so far we used exactly one point on each side:
+	status[1][1] = status[2][1] = 1
+
+	# we need a way to convert (poly, path, index) to integer index<<<
+	function first_indices(start::Int, l::Vector{Int})::Vector{Int}
+		f = zeros.(Int, length(l))
+		f[1] = start
+		for i in 1:length(l)-1
+			@inbounds f[i+1] = f[i] + l[i]
+		end
+		f
+	end
+	# firstindex[poly][path] is the first index for this path
+	# firstindex[1][1] = start1
+	# firstindex[1][2] = start1 + len(poly1[1]) etc.
+	firstindex = (first_indices(start1, length.(poly1)),
+								first_indices(start2, length.(poly2)))
+	newindex(poly::Int, path::Int, index::Int)::Int =
+		firstindex[poly][path] + index - 1
+#>>>
+	# computing diagonal distances to find the smallest one:<<<
+	distance(pt, path, i) =
+		i > length(path) ? Big : distance2(pt, path[i])
+
+	closest(pt, poly, status) =
+		findmin([distance(pt, poly[i], status[i]+1) for i in 1:length(poly)])
+#>>>
+
+	while true
+		d1, i1 = closest(headpoint[2], poly1, status[1])
+		d2, i2 = closest(headpoint[1], poly2, status[2])
+		# if no more points are left, we return:
+		(d1 == d2 == Big) && break
+
+		if d1 < d2 # we append a point from poly1
+			# add the triangle: head1, head2, newpoint
+			s = status[1][i1] += 1
+			newidx = newindex(1, i1, s)
+			push!(triangles, SA[headidx[1], headidx[2], newidx])
+			# update head1 to point to new point
+			headidx[1] = newidx
+			head[1] = (i1, s)
+			headpoint[1] = poly1[i1][s]
+		else
+			# add the triangle: head1, head2, newpoint
+			s = status[2][i2] += 1
+			newidx = newindex(2, i2, s)
+			push!(triangles, SA[headidx[1], headidx[2], newidx])
+			# update head1 to point to new point
+			headidx[2] = newidx
+			head[2] = (i2, s)
+			headpoint[2] = poly2[i2][s]
+		end
+	end
+	(triangles, (headidx[1], headidx[2]))
+end#>>>
+# path_extrude<<<
+"""
+		path_extrude(path, poly, options...)
+
+Extrudes the given polygon (a path of points forming a simple loop)
+along the given path. Both arguments are provided as a
+`Vector{SVector{2}}`.
+
+Returns a `Surface` (defined by points and a triangulation).
+"""
+function path_extrude(path::Path{2,T},
+	poly::Path{2};
+	join = :round,
+	miter_limit::Float64 = 2.0,
+	precision::Float64 = 0.25,
+	closed::Bool = true
+	) where{T}
+
+	N = length(poly)
+	# offset_path is a vector of vector of paths
+	offset_path = offset([path], [pt[1] for pt in poly],
+		join = join, ends = closed ? :closed : :butt)
+	global OP = offset_path
+	# new_points is a flat list of all 3d points produced
+	new_points = [[
+		[ SA[pt[1], pt[2], poly[i][2]] for pt in [p...;] ]
+		for (i, p) in pairs(offset_path)
+	]...;]
+	println("returning new_points:")
+
+	# first index for each path
+	first_face = cumsum([1; # initial
+		map(p->sum(length.(p)), offset_path)])
+	println("first_face=$first_face")
+
+	triangles = map(1:N) do i
+		i1 = mod1(i+1, N)
+		triangulate_between(offset_path[i], offset_path[i1],
+			first_face[i], first_face[i1])
+		# XXX keep the last edge for closing the poly
+	end
+	# this completes the set of triangles for the tube:
+	tube_triangles = vcat([ t[1] for t in triangles ]...)
+	last_face = [ t[2][1] for t in triangles ]
+	println("last_face=$last_face")
+	# here we decide if it is closed or open
+	# if open, triangulate the two facets
+	# if closed, join them together
+	if closed
+		more_triangles = vcat(map(1:N) do i
+			j = (i%N)+1
+			[ SA[first_face[i], last_face[i], first_face[j]],
+				SA[first_face[j], last_face[i], last_face[j]] ]
+		end...)
+		println("more_triangles=$more_triangles")
+		tube_triangles = [ tube_triangles; more_triangles ]
+	else
+	# TODO: triangulate the surface
+	# or, for now, close with two non-triangular facets...
+		more_triangles = [ reverse(first_face), last_face ]
+		println("more_triangles=$more_triangles")
+	end
+	Surface( new_points, tube_triangles )
+end#>>>
+
 # # Annotations <<<1
 # abstract type AbstractAnnotation{D} end
 # 
@@ -1976,16 +1964,25 @@ end
 # # the offset is just a hint; we let the visualizer take care of using
 # # this
 # 
+#
+# Exports <<<1
+export dim
+export Square, Circle, Cube, Cylinder, Polygon
+export PolyUnion
+export difference
+export ⋃, ⋂
+export offset, hull, minkowski, convex_hull
+
 end #<<<1 module
 # >>>1
 
-macro use(m)#<<<
-	N = filter(x->x != m, names(eval(m)))
-	Expr(:block, :(using .$m),
-		map(N) do x quote
-			$(esc(x))(args...) = eval($(esc(m))).$x(args...)
-		end
-	end...)
-end#>>>
+# macro use(m)#<<<
+# 	N = filter(x->x != m, names(eval(m)))
+# 	Expr(:block, :(using .$m),
+# 		map(N) do x quote
+# 			$(esc(x))(args...) = eval($(esc(m))).$x(args...)
+# 		end
+# 	end...)
+# end#>>>
 
 # vim: fdm=marker fmr=<<<,>>> noet ts=2:
