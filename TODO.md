@@ -1,15 +1,15 @@
 # Immediate work
- - use `import` for modules used only a few times once (`Color`, all geometry)
+ * use `import` for modules used only a few times once (`Color`, all geometry)
    to avoid polluting the namespace
  + test suite
  - a common name for meshing objects (either `Mesh` or `elements` ?)
  - Minkowski difference
  - what to do for polygons with holes?
  - replace minkowski with circle by an offset
- * finish grouping all Clipper stuff in one section
- - fix `Offset` for `Region` values
+ + finish grouping all Clipper stuff in one section
+ - fix `Offset` for polygon unions
  - choose a correct value for `Clipper` precision
- * check `convex_hull`
+ * check `convex_hull` works
 # Basic types
  - add a LineNode reference to constructors
    (i.e. first thing in call stack outside module).
@@ -101,15 +101,15 @@
  - minkowski has a convexity parameter
   - `convexity`'s place is in `SetParameters`
 # Packaging
- - write a minimal regression test
+ * write a minimal regression test
  * make this a proper package
- - distinguish between core and sub-packages (implementing BOSL2 stuff)
+ - distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
 [https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
- - Minkowski with Clipper.jl
  - interface with CGAL for computing CSG in 3d
  - add some visualization (`Makie`?)
  - export to SVG/STL/PLY
+   - `MeshIO`
 # Extras
  - improve `unit_n_gon` to take advantage of symmetries
  + Color

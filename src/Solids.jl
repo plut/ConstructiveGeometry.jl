@@ -4,21 +4,31 @@ module Solids
 #
 
 # using Printf
-using LinearAlgebra, StaticArrays, FixedPointNumbers
-using Polyhedra, GLPK, Triangle
+using LinearAlgebra
+using StaticArrays
+using FixedPointNumbers
+using SparseArrays
+
+import Polyhedra
+import GLPK
+# hide the Triangle name so that we may yet use it for a type:
+module Triangulate
+	import Triangle: basic_triangulation
+end; import .Triangulate
 # using MiniQhull
 import Rotations
 import Colors
 import Clipper
+import LightGraphs
 
 import Base: show, print, length, getindex, size
 import Base: union, intersect, setdiff, -
 import Base: *, +, -
 
-#————————————————————— Ideal objects —————————————————————————————— <<<1
-#>>>1
-# Types<<<1
-# Numeric types <<<2
+#————————————————————— Ideal objects —————————————————————————————— ««1
+#»»1
+# Types««1
+# Numeric types ««2
 
 """
     Solids._FIXED
@@ -59,7 +69,20 @@ The type of real numbers to which objects of type `T` are promoted.
 @inline Base.rem2pi(a::T, r) where{T<:FixedPoint} =
 	T(Base.rem2pi(Float64(a), r))
 
-# Static vectors and paths<<<2
+# Array indices ««2
+"""
+    cyclindex(i, a, [count=1])
+
+Returns the index following `i` in the indices of array `a`, looping past
+the end of `a` if needed.
+If `count` is provided, advance by `count` steps instead.
+"""
+@inline cyclindex(i::Int, a) = _cyclindex(i, eachindex(a))
+@inline _cyclindex(i::Int, a::Base.OneTo) = mod(i, a.stop)+1
+@inline _cyclindex(i::Int, a::Base.OneTo, count::Int) =
+	mod1(i+count, a.stop)
+
+# Static vectors and paths««2
 """
     Vec{D,T}
 The type used for representing `D`-dimensional vectors (or points) with
@@ -129,7 +152,7 @@ const AnyPath{D,T<:Real} = AnyList{AnyVec{D,T}}
 
 # const Paths{T} = AbstractVector{<:Path{T}}
 
-# Angle types<<<2
+# Angle types««2
 # to keep it simple, angles are just Float64 (in degrees).
 # Just in case we might change this in the future, we define two types:
 # Angle and AnyAngle (= input type).
@@ -141,18 +164,18 @@ const ° = 1.
 @inline degrees(x::Angle) = x
 @inline degrees(x::AnyAngle) = degrees(Angle(x))
 
-# Library parameters<<<2
+# Library parameters««2
 @inline polyhedra_lib(T::Type{<:Real}) =
 	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
 
-# AbstractSolid <<<1
+# AbstractSolid ««1
 # Some reasons not to use `GeometryBasics.jl`:
 # - (as of 2021-01-14) not documented
 # - matrix × rectangle multiplication is incorrectly defined (it returns
 # a bounding box for the product)
 # - inconsistency between types (e.g. Rectangle is always parallel to
 # axes but Cylinder has an arbitrary orientation)
-# the AbstractSolid type<<<2
+# the AbstractSolid type««2
 """
 		AbstractSolid{D,T}
 
@@ -176,7 +199,7 @@ out of planar objects, and 3 otherwise.
 @inline children(::AbstractSolid) = NeutralSolid{:empty,Bool}[]
 @inline parameters(::AbstractSolid) = NamedTuple()
 
-# OpenSCAD conversion <<<2
+# OpenSCAD conversion ««2
 @inline Base.show(io::IO, s::AbstractSolid) = scad(io, s, "")
 
 """
@@ -233,7 +256,7 @@ function scad(io::IO, v::AbstractVector)
 	print(io, "]")
 end
 
-# Mechanism for printing top-level objects <<<1
+# Mechanism for printing top-level objects ««1
 
 # FIXME: replace Main by caller module?
 # FIXME: add some blob to represent function arguments
@@ -310,8 +333,8 @@ expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
 expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 	Expr(:toplevel, expr_filter.(f, x.args)...)
 
-# Leaf solids<<<1
-# PrimitiveSolid<<<2
+# Primitive solids««1
+# Generic code««2
 """
     PrimitiveSolid{S,D,T,X}
 
@@ -340,6 +363,7 @@ end
 @inline Base.getproperty(s::PrimitiveSolid, name::Symbol) =
 	Base.getproperty(parameters(s), name)
 
+# Ortho, Square, Cube««2
 Ortho{S,D,T} = PrimitiveSolid{S,D,T,
 	@NamedTuple{size::Vec{D,T}, center::Bool}}
 @inline _infer_type(::Type{<:Ortho};size, center) = real_type(size...)
@@ -369,6 +393,7 @@ mass; otherwise it is the lower-front-left corner.
 """
 Cube = Ortho{:cube,3}
 
+# Ball, Circle, Sphere ««2
 Ball{S,D,T} = PrimitiveSolid{S,D,T, @NamedTuple{radius::T}}
 @inline _infer_type(::Type{<:Ball};radius) = real_type(radius)
 # groumpf, no dispatch on named arguments...
@@ -390,6 +415,7 @@ A sphere with radius `r`, centered at the origin.
 """
 Sphere = Ball{:sphere,3}
 
+# Cylinder ««2
 """
     Cylinder(h, r1, r2 [, center=false])
     Cylinder(h, (r1, r2) [, center=false])
@@ -407,6 +433,7 @@ Cylinder{T} = PrimitiveSolid{:cylinder,3,T,
 @inline (H::Type{<:Cylinder})(h, r::Union{AbstractVector, Tuple}; kwargs...) =
 	H(h, r...; kwargs...)
 
+# Polygon ««2
 """
     Polygon{T}
     Polygon([point1, point2, ...])
@@ -421,8 +448,14 @@ Polygon{T} = PrimitiveSolid{:polygon,2,T,
 # @inline (T::Type{<:Polygon})(points::AnyVec{2,<:Real}...) = T([points...])
 
 @inline points(p::Polygon) = p.points
+
+# Surface««2
 """
+    Surface{T,V}
     Surface([points...], [faces...])
+
+Encodes information about a surface. `T` is the coordinate type and `V`
+is the type used for storing faces.
 """
 Surface{T,V} = PrimitiveSolid{:polyhedron,3,T,
   @NamedTuple{points::Path{3,T}, faces::Vector{V}}}
@@ -440,7 +473,7 @@ end
 @inline (T::Type{<:Surface})(points, faces) = T(points=points, faces=faces)
 
 abstract type LeafSolid{D,T} <: AbstractSolid{D,T} end
-# Neutral solids<<<2
+# Neutral solids««2
 """
     NeutralSolid{D,T}
 
@@ -485,7 +518,7 @@ function hull end
 @define_neutral hull empty neutral
 @define_neutral hull full  absorb
 
-# Somewhat reduce type I/O clutter<<<1
+# Somewhat reduce type I/O clutter««1
 Base.show(io::IO, ::Type{_FIXED}) = print(io, "_FIXED")
 Base.show(io::IO, ::Type{Vec}) = print(io, "Vec")
 Base.show(io::IO, ::Type{Vec{D}}) where{D} = print(io, Vec,"{$D}")
@@ -501,7 +534,7 @@ for type in (:Square, :Cube, :Circle, :Sphere, :Cylinder, :Polygon)
 	end
 end
 
-#DerivedSolid<<<1
+#DerivedSolid««1
 # https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
 """
 		DerivedSolid{D,S}
@@ -601,8 +634,8 @@ Represents the difference `s1 ∖ (s2 ∪ ..)`.
 				y::AbstractVector{<:AbstractSolid}) =
 	DerivedSolid{foldr(max,dim.(x);init=3),:difference}(union(x...), y...)
 
-# General transforms<<<1
-# Curry<<<2
+# General transforms««1
+# Curry««2
 """
     Curry{S}
 
@@ -643,7 +676,7 @@ end
 @inline assoc(::Curry, ::Curry) = :right
 @inline compose(f::Curry, g::Curry) = Curry{:∘}(f.f ∘ g.f)
 
-# Transform type<<<2
+# Transform type««2
 """
     Transform{S,D,T,X}
 
@@ -685,7 +718,7 @@ function extract end
 @inline (T::Type{<:Transform})(f, ::typeof(extract)) = f
 @inline extract(c::Curry) = c.f(extract)
 
-# SetParameters<<<2
+# SetParameters««2
 SetParameters = Transform{:parameters}
 
 @inline set_parameters(s...; parameters...) =
@@ -699,8 +732,8 @@ function scad(io::IO, s::SetParameters, spaces::AbstractString = "")
 	scad(io, s.child, spaces*" ")
 	println(io, spaces, "} // SetParameters")
 end
-# Color<<<2
-Paint = Transform{:color}
+# Color««2
+Color = Transform{:color}
 
 """
     color(c::Colorant, s...)
@@ -708,18 +741,19 @@ Paint = Transform{:color}
     color(c::AbstractString, α::Real, s...)
     color(c) * s...
 
-Paints objects `s...` in the given color.
+Colors objects `s...` in the given color.
 """
-@inline color(c::Colors.Colorant, s...) = Paint(c, s...)
+@inline color(c::Colors.Colorant, s...) = Color((color=c,), s...)
 @inline color(c::AbstractString, s...) =
 	color(parse(Colors.Colorant, c), s...)
 @inline color(c::AbstractString, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colors.Colorant, c), a), s...)
 
-@inline scad_parameters(io::IO, c::Colors.Colorant) =
-	print(io, round.(Float64.([red(c), green(c), blue(c), alpha(c)]), digits=3))
+@inline scad(io::IO, c::Colors.Colorant) =
+	print(io, round.(Float64.([Colors.red(c), Colors.green(c),
+		Colors.blue(c), Colors.alpha(c)]), digits=3))
 
-# Linear extrusion<<<2
+# Linear extrusion««2
 LinearExtrude = Transform{:linear_extrude}
 """
     linear_extrude(h, s...)
@@ -734,7 +768,7 @@ Linear extrusion to height `h`.
 @inline linear_extrude(h, s...; kwargs...) =
 	linear_extrude(h, 1, s...; kwargs...)
 
-# Rotational extrusion<<<2
+# Rotational extrusion««2
 RotateExtrude = Transform{:rotate_extrude}
 @inline rotate_extrude(angle::Real, s...; center=false) =
 	RotateExtrude((angle=angle, center=center), s...)
@@ -752,9 +786,9 @@ Offset = Transform{:offset}
 @inline scad_parameters(io::IO, ::Offset, ::Val{:square}, param) =
 	scad_parameters(io, (delta=param.r, chamfer=true,))
 
-# Affine transforms<<<1
-# Affine type<<<2
-# type and constructors<<<3
+# Affine transforms««1
+# Affine type««2
+# type and constructors««3
 """
     Affine(a, b)
 		Affine(a)
@@ -778,7 +812,7 @@ end
 @inline apply(f::Affine, v) = f.a * v + f.b
 @inline apply(f::Affine, p::Path) = [apply(f, v) for v in p]
 
-# neutral elements: <<<3
+# neutral elements: ««3
 # this could in principle be defined for Val{T} where{T}, but we try
 # to pirate a minimum number of functions in Base.
 @inline Base.:*(::Val{true}, v) = v
@@ -786,7 +820,7 @@ end
 @inline Base.:+(v, ::Val{false}) = v
 @inline Base.:-(v, ::Val{false}) = v
 
-# I/O: <<<3
+# I/O: ««3
 # OpenSCAD only uses 4×4 matrices for transformations;
 # we pad the matrix to this size if needed:
 function scad_parameters(io::IO, f::Affine)
@@ -804,7 +838,7 @@ end
 @inline vec3(b::AbstractVector) = SVector{3}(get(b, i, 0) for i in 1:3)
 @inline vec3(::Val{b}) where{b} = SA[b, b, b]
 
-# Reflections<<<2
+# Reflections««2
 """
 		Reflection
 
@@ -836,7 +870,7 @@ function Matrix{T}(R::Reflection{D,T}) where{D,T}
 	I(D) - 2*a*a'
 end
 
-# AffineTransform<<<2
+# AffineTransform««2
 AffineTransform = Transform{:multmatrix}
 
 """
@@ -878,7 +912,7 @@ Represents the affine operation `x -> a*x + b`.
 	mult_matrix(f1.a*f2.a, f1.a*f2.b + f1.b)
 end
 
-# Translation, scaling, rotation, mirror<<<2
+# Translation, scaling, rotation, mirror««2
 # FIXME change this '1' to a compile-time constant?
 """
     translate(v, s...)
@@ -931,7 +965,7 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 @inline rotate(θ::Real, φ::Real, ψ::Real, s...; kwargs...) =
 	mult_matrix(rotation((θ,φ,ψ); kwargs...), s...)
 
-# Operators<<<2
+# Operators««2
 @inline +(v::AnyVec, x::AbstractSolid) = translate(v,x)
 @inline +(x::AbstractSolid, v::AnyVec) = translate(v,x)
 
@@ -948,8 +982,8 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 ⋃ = Base.union
 ⋂ = Base.intersect
 
-# Attachments<<<1
-# Anchor system<<<2
+# Attachments««1
+# Anchor system««2
 """
 		find_anchor(x::AbstractSolid, name)
 
@@ -994,7 +1028,7 @@ default_positions = (
 @inline _labeled_anchor_3to2(v::StaticVector{3}) =
 # for 2d objects, allow (:left..:right, :bot..:top) as anchor names:
 	(v[1] == 0 && v[2] == 0 && v[3] != 0) ? SA[v[1], v[3]] : SA[v[1], v[2]]
-# Define named anchors <<<2
+# Define named anchors ««2
 # first column is translation, second (if existing) rotation,
 # spin is angle in 2d
 struct AnchorData{D,T,R}
@@ -1067,7 +1101,7 @@ function labeled_anchor(x::NamedAnchors, label::Symbol)
 		return get(default_anchors, label, missing)
 	end
 end
-# Anchors for convex bodies <<<2
+# Anchors for convex bodies ««2
 """
 		find_anchor(x::Square, position::SVector{2})
 		find_anchor(x::Circle, position::SVector{2})
@@ -1126,7 +1160,7 @@ function find_anchor(x::Cylinder, pos::Vec{3,<:Real})
 	AffineMap(rotation_between(SA[0,0,1], n), p)
 end
 
-# Coordinates on circle & sphere <<<2
+# Coordinates on circle & sphere ««2
 """
 		find_anchor(x::Circle, angle::Real)
 Returns anchor at point `(-sin(angle), cos(angle))` (trig. orientation,
@@ -1154,7 +1188,7 @@ function find_anchor(x::Sphere{T}, angle::AnyVec{2,<:Real}) where{T}
 end
 
 
-# attach <<<2
+# attach ««2
 """
 		attach(parent, {:label => child}...)
 
@@ -1169,7 +1203,7 @@ function attach_at(parent::AbstractSolid{D}, label, child::AbstractSolid) where{
 	mult_matrix(m, child)
 end
 
-# anchor <<<2
+# anchor ««2
 """
 		half_turn(q::UnitQuaternion)
 
@@ -1205,7 +1239,7 @@ function anchor(x::AbstractSolid, label)
 	mult_matrix(AffineMap(a1, a1*-translation(m)), x)
 end
 
-# # Reduction of mult_matrix operations <<<1
+# # Reduction of mult_matrix operations ««1
 # @inline affine_reduce(m::AbstractAffineMap, x::LeafSolid) = mult_matrix(m, x)
 # @inline affine_reduce(u::LinearMap{<:Diagonal}, x::Square) =
 # 	Square([ u.linear.diag[i] * @inbounds x.size[i] for i in 1:2 ], x.center)
@@ -1226,9 +1260,9 @@ end
 # 	# TODO
 # end
 # affine_reduce(x::AbstractSolid) = affine_reduce(LinearMap(I), x)
-#————————————————————— Meshing —————————————————————————————— <<<1
-#>>>1
-# Accuracy and precision <<<1
+#————————————————————— Meshing —————————————————————————————— ««1
+#»»1
+# Accuracy and precision ««1
 # Accuracy is the absolute deviation allowed.
 # Default value is 2.0 (from OpenSCAD `$fs`), interpreted as 2mm.
 #
@@ -1287,17 +1321,17 @@ end
 @inline unit_n_gon(r, parameters) =
 	r*unit_n_gon(real_type(r), sides(r, parameters))
 
-# Clipper.jl interface: clip, offset, simplify<<<1
+# Clipper.jl interface: clip, offset, simplify««1
 # This is the only section in this file which contains code directly
 # related to `Clipper.jl`. The entry points to this section are the
 # functions `clip` and `offset` defined below.
-# Types<<<2
+# Types««2
 # default number of bits for Clipper types
 const _CLIPPER_BITS = FixedPointNumbers.nbitsfrac(_FIXED)
 # this must be a 64-bit type, even if _FIXED is modified:
 const _CLIPPER_FIXED = Fixed{Int64,_CLIPPER_BITS}
 # constants
-const _CLIPPER_ENUM = (#<<<
+const _CLIPPER_ENUM = (#««
 	clip=(
 		union       =Clipper.ClipTypeUnion,
 		intersection=Clipper.ClipTypeIntersection,
@@ -1320,7 +1354,7 @@ const _CLIPPER_ENUM = (#<<<
 		evenodd=Clipper.PolyFillTypeEvenOdd,
 		positive=Clipper.PolyFillTypePositive,
 	),
-)#>>>
+)#»»
 
 """
     to_clipper(OriginalType, ...)
@@ -1363,7 +1397,7 @@ Converts stuff (numbers, vectors, paths...) to and from `Clipper.jl` types.
 # vectors of paths...
 @inline from_clipper(T, polys::Vector{Vector{Clipper.IntPoint}}) =
 	[ from_clipper(T, p) for p in polys ]
-# Wrappers for Clipper calls<<<2
+# Wrappers for Clipper calls««2
 # We wrap all Clipper objects in a NamedTuple with the original type
 struct Marked{T,X}
 	data::X
@@ -1385,7 +1419,7 @@ end
 @inline execute(c::Marked{T,Clipper.ClipperOffset}, delta::Real) where{T} =
 	from_clipper(T, Clipper.execute(c.data, to_clipper_float(T, delta)))
 
-# Calls on Path values<<<2
+# Calls on Path values««2
 function clip(op::Symbol,
 		v1::AbstractVector{Path{2,T}},
 		v2::AbstractVector{Path{2,T}};
@@ -1423,8 +1457,8 @@ end
 	return from_clipper(T,
 		Clipper.simplify_polygons(to_clipper(T, p), _CLIPPER_ENUM.fill[fill]))
 end
-#Convex hull<<<1
-# 2d convex hull <<<2
+#Convex hull««1
+# 2d convex hull ««2
 
 """
     convex_hull([2d points])
@@ -1440,7 +1474,7 @@ function convex_hull(points::AbstractVector{<:Vec{2,T}}) where{T}
 	PH.removevredundancy!(poly).points.points
 end
 
-# this is the version using MiniQhull: #<<<
+# this is the version using MiniQhull: #««
 # convex_hull(points::AbstractVector{<:AnyVec(2)}) =
 #		# Delaunay triangulation:
 #		let T = MiniQhull.delaunay([p[i] for i in 1:2, p in points]),
@@ -1467,29 +1501,43 @@ end
 #		end
 #		# returns in retrograde ordering (OpenSCAD convention):
 #		points[R]
-# end#>>>
-# Triangulate face <<<2
-function triangulate_face_convex(face::Vector,
-		pts::AbstractVector{<:Vec{3,T}}, map::AbstractVector{Int}) where{T}
-	# project all points on two coordinates:
-	# by default, (x,y), unless plane is vertical (face[3] == 0),
-	proj = iszero(face[3]) ? ( iszero(face[2]) ? [2,3] : [1,3]) : [1,2]
-	N = length(pts)
-	pts1 = Matrix{T}(undef, N, 2)
-	for (j, x) in pairs(proj)
-		for (i, p) in pairs(pts)
-			pts1[i, j] = p[x]
-		end
-	end
-	Vec{3,Int}.(Triangle.basic_triangulation(pts1, map))
+# end#»»
+# Triangulate face ««2
+function face_normal(points)
+	@assert length(points) >= 3
+	return cross(points[2]-points[1], points[3]-points[1])
 end
-# 3d convex hull <<<2
+"""
+    triangulate_face(direction, points, map)
+
+Returns a triangulation of the face. `direction` is a normal vector
+and `map` is a labeling of points.
+"""
+function triangulate_face(
+		points::AbstractVector{<:AnyVec{3,<:Number}};
+		direction::AbstractVector = [],
+		map::AbstractVector{Int} = [1:length(points)...]
+		)
+	if direction == []
+		direction = face_normal(points)
+	end
+	# index of largest absolute value of coordinate for projection:
+	e = findmax(abs.(direction))[2]
+	proj = filter(i->i!=e, 1:3)
+	N = length(points)
+	points2d = Matrix{Float64}(undef, N, 2)
+	for (i, p) in pairs(points), (j, x) in pairs(proj)
+		points2d[i, j] = p[x]
+	end
+	return Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
+end
+# 3d convex hull ««2
 
 """
 		convex_hull(x::AbstractSolid{3}...)
 
 Returns the convex hull of the union of all the given solids, as a
-`Surface` structure.
+pair `(points, faces)`. `faces` is a list of triangles.
 """
 @inline convex_hull(x::AbstractSolid{3}) =
 	convex_hull(vcat([Vec{3}.(points(y)) for y in x]...))
@@ -1497,27 +1545,27 @@ Returns the convex hull of the union of all the given solids, as a
 function convex_hull(p::AbstractVector{<:Vec{3,T}}) where{T}
 	M = hcat(Vector.(p)...)
 	PH = Polyhedra
-	poly = Polyhedra.polyhedron(vrep(transpose(M)), polyhedra_lib(T))
-	R = removevredundancy!(poly)
+	poly = PH.polyhedron(PH.vrep(transpose(M)), polyhedra_lib(T))
+	R = PH.removevredundancy!(poly)
 	V = Vec{3,T}.(collect(PH.points(poly)))
 
 	triangles = Vec{3,Int}[]
-	for i in eachindex(halfspaces(poly)) # index of halfspace
-		pts = incidentpointindices(poly, i) # vector of indices of points
-		h = get(poly, i) # halfspace equation
-		for t in triangulate_face_convex(h.a,
-				[Vec{3,T}(get(poly, j)) for j in pts], [j.value for j in pts])
+	for i in PH.eachindex(PH.halfspaces(poly)) # index of halfspace
+		h = PH.get(poly, i)
+		pts = PH.incidentpointindices(poly, i) # vector of indices of points
+		for t in triangulate_face([Vec{3,T}(PH.get(poly, j)) for j in pts],
+					direction = h.a, map = [j.value for j in pts])
 			(a,b,c) = (V[j] for j in t)
 			k = det([b-a c-a h.a])
 			push!(triangles, (k > 0) ? t : SA[t[1], t[3], t[2]])
 		end
 	end
-	Surface(V, triangles)
+	return (points=V, faces=triangles)
 end
 
 
-# Minkowski sum<<<1
-# Convolution of polygons<<<2
+# Minkowski sum««1
+# Convolution of polygons««2
 # http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
 """
     circularcmp(v1, v2, v3, [Val(:offset)])
@@ -1544,23 +1592,23 @@ end
 
 function convolution(p::AnyPath{2}, q::AnyPath{2})
 	(np, nq) = (length(p), length(q))
-	ep = [p[(i%np)+1]-p[i] for i in 1:np] # edges of p
-	eq = [q[(i%nq)+1]-q[i] for i in 1:nq]
+	ep = [p[cyclindex(i, p)]-p[i] for i in eachindex(p)] # edges of p
+	eq = [q[cyclindex(i, q)]-q[i] for i in eachindex(q)]
 	j0 = 0
 	newpoly = similar(p, 0)
-	for ip in 1:np
-		for iq in 1:nq
-			iq0 = mod1(iq-1, nq)
+	for ip in eachindex(p)
+		for iq in eachindex(q)
+			iq0 = cyclindex(iq, q, -1)
 			if circularcmp(eq[iq0], ep[ip], eq[iq], Val(:offset))
 				push!(newpoly, p[ip]+q[iq])
-				push!(newpoly, p[mod1(ip+1,np)]+q[iq])
+				push!(newpoly, p[cyclindex(ip, p)]+q[iq])
 			end
 		end
 	end
 	newpoly
 end
 p⋆q = convolution(p, q)
-# Minkowski sum of polygons and their unions <<<2
+# Minkowski sum of polygons and their unions ««2
 function minkowski(p::AnyPath{2}, q::AnyPath{2})
 	r = convolution(p, q)
 	return simplify([r]; fill=:nonzero)
@@ -1571,9 +1619,9 @@ function minkowski(vp::Vector{<:AnyPath{2}}, vq::Vector{<:AnyPath{2}})
 	return simplify(vr; fill=:nonzero)
 end
 
-# 2d subsystem<<<1
-# PolyUnion<<<2
-# type and constructors from points<<<
+# 2d subsystem««1
+# PolyUnion««2
+# type and constructors from points««
 """
 		PolyUnion
 
@@ -1596,8 +1644,8 @@ end
 @inline _convert(U::Type{<:PolyUnion}, l, parameters) =
 	[ U(s, parameters) for s in l ]
 
-# >>>
-# I/O<<<
+# »»
+# I/O««
 function scad(io::IO, u::PolyUnion{S}, spaces::AbstractString) where{S}
 	print(io, spaces, "// union of $(length(u.poly)) polygon(s):\n")
 	length(u.poly) != 1 && print(io, spaces, "union() {\n")
@@ -1608,8 +1656,8 @@ function scad(io::IO, u::PolyUnion{S}, spaces::AbstractString) where{S}
 	end
 	length(u.poly) != 1 && print(io, spaces, "}\n")
 end
-#>>>
-# Conversion from leaf 2d types<<<2
+#»»
+# Conversion from leaf 2d types««2
 @inline PolyUnion(l::AbstractSolid{2}; kwargs...) =
 	PolyUnion{real_type(eltype(l))}(l, merge(_DEFAULT_PARAMETERS, kwargs.data))
 
@@ -1641,7 +1689,7 @@ function points(s::Square)
 	end
 end
 @inline points(c::Circle, parameters) = unit_n_gon(c.radius, parameters)
-# Reduction of CSG operations<<<2
+# Reduction of CSG operations««2
 @inline (clip(op, u::U...)::U) where{U<:PolyUnion} =
 	reduce((a,b)->U(clip(op, a.poly, b.poly)), u)
 
@@ -1676,7 +1724,7 @@ end
 # end
 
 
-# Offset and draw <<<2
+# Offset and draw ««2
 """
 		offset(P::Polygon, u::Real; options...)
 
@@ -1699,7 +1747,7 @@ end
 @inline offset(x::AbstractSolid{2}, args...; kwargs...) =
 	offset(PolyUnion(x), args...; kwargs...)
 
-# Draw <<<2
+# Draw ««2
 """
     draw(path, width; kwargs...)
 
@@ -1720,7 +1768,7 @@ function draw(path::Path{2,T}, width::Real;
 	return PolyUnion(ret)
 end
 
-# Convex hull<<<2
+# Convex hull««2
 # """
 # 		convex_hull(x::AbstractSolid{2}...)
 # 
@@ -1732,7 +1780,71 @@ end
 
 @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(points(u)))
 
-# # 3d conversion<<<1
+# 3d tools««1
+# 3d conversion««1
+# Ensuring triangulated surfaces««2
+"""
+    connected_components(points, faces)
+
+Returns a vector of pairs `(newpoints, newfaces)`
+corresponding to the connected components of the provided surface.
+"""
+function connected_components(points, faces)
+	# Build the incidence matrix from the list of faces
+	N = length(points)
+	incidence = spzeros(Bool,N, N)
+	for f in faces
+		for i in 1:length(f), j in 1:i-1
+			incidence[f[i],f[j]] = incidence[f[j],f[i]] = true
+		end
+	end
+	G = LightGraphs.SimpleGraph(incidence)
+	C = LightGraphs.connected_components(G)
+	# C is a vector of vector of indices
+	# newindex[oldindex] = [component, new index]
+	component = zeros(Int, N)
+	newindex = zeros(Int, N)
+	for (i, c) in pairs(C)
+		for (j, p) in pairs(c)
+			component[p] = i
+			newindex[p] = j
+		end
+	end
+	return [ (
+		# all points in component i
+		points[filter(p->component[p] == i, 1:N)],
+		[ [newindex[p] for p in f] for f in faces if component[f[1]] == i ]
+		) for i in eachindex(C) ]
+end
+"""
+    triangulate_surface(points, faces)
+
+Returns a triangulation of the faces (as a `Vector{NTuple{3,Int}}`).
+"""
+function triangulate_surface(points, faces)
+	triangles = Vec{3,Int}[]
+	for f in faces
+		# kill all 2-faces
+		length(f) <= 2 && continue
+		# triangulate
+		tri = triangulate_face(points[f]; map=f)
+		# kill all degenerate faces
+		push!(triangles, filter(t->norm(face_normal(points[t])) > 0, tri)...)
+	end
+	return (points=points, faces=triangles)
+end
+"""
+    simplify_surface(points, faces)
+
+Returns [(newpoints1, newfaces1), (newpoints2, newfaces2), ...]
+as a union of connected, triangulated surfaces.
+This function also removes all degenerate (collinear) faces.
+"""
+function simplify_surface(points, faces)
+	C = connected_components(points, faces)
+	return [ triangulate_surface(c...) for c in C ]
+end
+# Points of cubes, etc.««2
 # # function points(s::Cube, parameters::NamedTuple)
 # # 	if s.center
 # # 		(a,b,c) = one_half(s.size)
@@ -1754,15 +1866,15 @@ end
 # # 	return vcat([ [ p; h-z ] for p in p1], [[p; h+z ] for p in p2 ])
 # # end
 # 
-# Extrusion <<<1
-# Path extrusion <<<2
+# Extrusion ««1
+# Path extrusion ««2
 # poly_dist_type(::Type{Vec{2,T}}) where{T} = T
 # poly_dist_type(::Type{Clipper.IntPoint}) = Int
 distance2(x::Vec{2,T}, y::Vec{2,T}) where{T} = let z = x .- y
 	z[1]*z[1] + z[2]*z[2]
 end
 
-# triangulate_between: triangulate between two parallel paths<<<
+# triangulate_between: triangulate between two parallel paths««
 """
 		triangulate_between(poly1, poly2, start1, start2)
 
@@ -1785,7 +1897,7 @@ function triangulate_between(
 		poly1::AbstractVector{<:Path{D,T}},
 		poly2::AbstractVector{<:Path{D,T}},
 		start1::Int = 1, start2::Int = 1) where {D,T}
-	println("T=$T")
+# 	println("T=$T")
 	Big = typemax(T)
 # 	Distance = poly_dist_type(T); Big = typemax(Distance)
 	Triangle = SVector{3,Int}
@@ -1801,7 +1913,7 @@ function triangulate_between(
 	# so far we used exactly one point on each side:
 	status[1][1] = status[2][1] = 1
 
-	# we need a way to convert (poly, path, index) to integer index<<<
+	# we need a way to convert (poly, path, index) to integer index««
 	function first_indices(start::Int, l::Vector{Int})::Vector{Int}
 		f = zeros.(Int, length(l))
 		f[1] = start
@@ -1817,14 +1929,14 @@ function triangulate_between(
 								first_indices(start2, length.(poly2)))
 	newindex(poly::Int, path::Int, index::Int)::Int =
 		firstindex[poly][path] + index - 1
-#>>>
-	# computing diagonal distances to find the smallest one:<<<
+#»»
+	# computing diagonal distances to find the smallest one:««
 	distance(pt, path, i) =
 		i > length(path) ? Big : distance2(pt, path[i])
 
 	closest(pt, poly, status) =
-		findmin([distance(pt, poly[i], status[i]+1) for i in 1:length(poly)])
-#>>>
+		findmin([distance(pt, poly[i], status[i]+1) for i in eachindex(poly)])
+#»»
 
 	while true
 		d1, i1 = closest(headpoint[2], poly1, status[1])
@@ -1853,8 +1965,8 @@ function triangulate_between(
 		end
 	end
 	(triangles, (headidx[1], headidx[2]))
-end#>>>
-# path_extrude<<<
+end#»»
+# path_extrude««
 """
 		path_extrude(path, poly, options...)
 
@@ -1882,12 +1994,12 @@ function path_extrude(path::Path{2,T},
 		[ SA[pt[1], pt[2], poly[i][2]] for pt in [p...;] ]
 		for (i, p) in pairs(offset_path)
 	]...;]
-	println("returning new_points:")
+# 	println("returning new_points:")
 
 	# first index for each path
 	first_face = cumsum([1; # initial
 		map(p->sum(length.(p)), offset_path)])
-	println("first_face=$first_face")
+# 	println("first_face=$first_face")
 
 	triangles = map(1:N) do i
 		i1 = mod1(i+1, N)
@@ -1898,7 +2010,7 @@ function path_extrude(path::Path{2,T},
 	# this completes the set of triangles for the tube:
 	tube_triangles = vcat([ t[1] for t in triangles ]...)
 	last_face = [ t[2][1] for t in triangles ]
-	println("last_face=$last_face")
+# 	println("last_face=$last_face")
 	# here we decide if it is closed or open
 	# if open, triangulate the two facets
 	# if closed, join them together
@@ -1908,18 +2020,18 @@ function path_extrude(path::Path{2,T},
 			[ SA[first_face[i], last_face[i], first_face[j]],
 				SA[first_face[j], last_face[i], last_face[j]] ]
 		end...)
-		println("more_triangles=$more_triangles")
+# 		println("more_triangles=$more_triangles")
 		tube_triangles = [ tube_triangles; more_triangles ]
 	else
 	# TODO: triangulate the surface
 	# or, for now, close with two non-triangular facets...
 		more_triangles = [ reverse(first_face), last_face ]
-		println("more_triangles=$more_triangles")
+# 		println("more_triangles=$more_triangles")
 	end
 	Surface( new_points, tube_triangles )
-end#>>>
+end#»»
 
-# # Annotations <<<1
+# # Annotations ««1
 # abstract type AbstractAnnotation{D} end
 # 
 # struct DimensionArrow{D,T} <: AbstractAnnotation{D}
@@ -1965,7 +2077,7 @@ end#>>>
 # # this
 # 
 #
-# Exports <<<1
+# Exports ««1
 export dim
 export Square, Circle, Cube, Cylinder, Polygon
 export PolyUnion
@@ -1973,16 +2085,20 @@ export difference
 export ⋃, ⋂
 export offset, hull, minkowski, convex_hull
 
-end #<<<1 module
-# >>>1
+end #««1 module
+# »»1
 
-# macro use(m)#<<<
+# macro use(m)#««
 # 	N = filter(x->x != m, names(eval(m)))
 # 	Expr(:block, :(using .$m),
 # 		map(N) do x quote
 # 			$(esc(x))(args...) = eval($(esc(m))).$x(args...)
 # 		end
 # 	end...)
-# end#>>>
+# end#»»
+using StaticArrays, LinearAlgebra, FixedPointNumbers
+F = Fixed{Int64, 16}
 
-# vim: fdm=marker fmr=<<<,>>> noet ts=2:
+
+Nothing
+# vim: fdm=marker fmr=««,»» noet ts=2:
