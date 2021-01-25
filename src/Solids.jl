@@ -21,9 +21,10 @@ import Colors
 import Clipper
 import LightGraphs
 
-import Base: show, print, length, getindex, size
-import Base: union, intersect, setdiff, -
-import Base: *, +, -
+import Base: show, print, length, getindex, size, iterate, eltype
+import Base: union, intersect, setdiff
+import Base: *, +, -, ∈
+import Base: isempty
 
 #————————————————————— Ideal objects —————————————————————————————— ««1
 #»»1
@@ -194,7 +195,7 @@ Returns the *a priori* dimension of `x`, i.e. 2 if `x` is built purely
 out of planar objects, and 3 otherwise.
 """
 @inline dim(::AbstractSolid{D}) where{D} = D
-@inline Base.eltype(::Type{<:AbstractSolid{D,T}}) where{D,T} = T
+@inline eltype(::Type{<:AbstractSolid{D,T}}) where{D,T} = T
 
 @inline children(::AbstractSolid) = NeutralSolid{:empty,Bool}[]
 @inline parameters(::AbstractSolid) = NamedTuple()
@@ -381,7 +382,7 @@ A square (or a rectangle) with coordinate type `T`, parallel to the axes.
 If `center=true` is passed, then the origin is the center-of-mass;
 otherwise it is the lower-left corner.
 """
-Square = Ortho{:square,2}
+const Square = Ortho{:square,2}
 """
     Cube{T}
     Cube(size, [center=false])
@@ -391,10 +392,10 @@ A cube (or a rectangle parallelepiped) with coordinate type `T`, parallel
 to the axes. If `center=true` is passed, then the origin is the center of
 mass; otherwise it is the lower-front-left corner.
 """
-Cube = Ortho{:cube,3}
+const Cube = Ortho{:cube,3}
 
 # Ball, Circle, Sphere ««2
-Ball{S,D,T} = PrimitiveSolid{S,D,T, @NamedTuple{radius::T}}
+const Ball{S,D,T} = PrimitiveSolid{S,D,T, @NamedTuple{radius::T}}
 @inline _infer_type(::Type{<:Ball};radius) = real_type(radius)
 # groumpf, no dispatch on named arguments...
 # @inline (T::Type{<:Ball})(;diameter) = T(one_half(diameter))
@@ -406,14 +407,14 @@ Ball{S,D,T} = PrimitiveSolid{S,D,T, @NamedTuple{radius::T}}
 
 A circle with radius `r`, centered at the origin.
 """
-Circle = Ball{:circle,2}
+const Circle = Ball{:circle,2}
 """
     Sphere{T}
     Sphere(r)
 
 A sphere with radius `r`, centered at the origin.
 """
-Sphere = Ball{:sphere,3}
+const Sphere = Ball{:sphere,3}
 
 # Cylinder ««2
 """
@@ -521,11 +522,12 @@ function hull end
 # Somewhat reduce type I/O clutter««1
 Base.show(io::IO, ::Type{_FIXED}) = print(io, "_FIXED")
 Base.show(io::IO, ::Type{Vec}) = print(io, "Vec")
-Base.show(io::IO, ::Type{Vec{D}}) where{D} = print(io, Vec,"{$D}")
-Base.show(io::IO, ::Type{Vec{D,T}}) where{D,T<:Number} = print(io, Vec,"{$D,$T}")
-Base.show(io::IO, ::Type{Path}) = print(io, "Path")
-Base.show(io::IO, ::Type{Path{D}}) where{D} = print(io, Path,"{$D}")
-Base.show(io::IO, ::Type{Path{D,T}}) where{D,T<:Number} = print(io, Path,"{$D,$T}")
+# Base.show(io::IO, ::Type{Vec{3}}) = print(io, Vec,"{3}")
+# Base.show(io::IO, ::Type{Vec{3}}) = print(io, Vec,"{3}")
+# Base.show(io::IO, ::Type{Vec{D,T}}) where{D,T<:Number} = print(io, Vec,"{$D,$T}")
+# Base.show(io::IO, ::Type{Path}) = print(io, "Path")
+# Base.show(io::IO, ::Type{Path{D}}) where{D} = print(io, Path,"{$D}")
+# Base.show(io::IO, ::Type{Path{D,T}}) where{D,T<:Number} = print(io, Path,"{$D,$T}")
 for type in (:Square, :Cube, :Circle, :Sphere, :Cylinder, :Polygon)
 	@eval begin
 		Base.show(io::IO, ::Type{$type}) = print(io, $(String(type)))
@@ -1781,6 +1783,188 @@ end
 @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(points(u)))
 
 # 3d tools««1
+# Interval and bounding box««2
+struct ClosedInterval{T}
+	low::T
+	high::T
+	@inline ClosedInterval{T}(l,h) where{T} = new{T}(l, h)
+	@inline ClosedInterval(l,h) = new{promote_type(typeof(l),typeof(h))}(l, h)
+end
+@inline eltype(::ClosedInterval{T}) where{T} = T
+@inline isempty(a::ClosedInterval) = a.low > a.high
+@inline ∈(x, a::ClosedInterval) = a.low ≤ x ≤ a.high
+@inline intersect(a::ClosedInterval, b::ClosedInterval) =
+	ClosedInterval(max(a.low, b.low), min(a.high, b.high))
+@inline intersects(a::ClosedInterval, b::ClosedInterval) = !isempty(a ∩ b)
+
+@inline iterate(a::ClosedInterval) = (a.low, Val(:high))
+@inline iterate(a::ClosedInterval, ::Val{:high}) = (a.high, nothing)
+@inline iterate(a::ClosedInterval, ::Nothing) = nothing
+
+@inline show(io::IO, a::ClosedInterval) =
+	print(io, "[", a.low, ":", a.high, "]")
+
+struct BoundingBox{D,T}
+	proj::NTuple{D,ClosedInterval{T}}
+	BoundingBox(int::ClosedInterval...) =
+		new{length(int), promote_type(eltype.(int)...)}(int)
+end
+@inline dim(::BoundingBox{D}) where{D} = D
+@inline isempty(b::BoundingBox) = any(isempty, b.proj)
+@inline ∈(x::AnyVec, b::BoundingBox) = all(i->x[i] ∈ b.proj[i], 1:dim(b))
+@inline intersect(a::BoundingBox{D}, b::BoundingBox{D}) where{D} =
+	BoundingBox([intersect(a.proj[i], b.proj[i]) for i in 1:D]...)
+@inline intersects(a::BoundingBox{D}, b::BoundingBox{D}) where{D} =
+	all(i->intersects(a.proj[i], b.proj[i]), 1:D)
+bounding_box(points::Vec{D,<:Number}...) where{D} = BoundingBox([
+	ClosedInterval(extrema([p[i] for p in points])...) for i in 1:D]...)
+@inline show(io::IO, b::BoundingBox) = join(io, b.proj, "×")
+# # Simplex««2
+# """
+#     Simplex{N,D,T}
+# 
+# `(N-1)`-dimensional simplex embedded in `D`-dimensional space.
+# """
+# struct Simplex{N,D,T}
+# 	points::SVector{N,Vec{D,T}}
+# 	@inline Simplex(p...) where{D} =
+# 		Simplex{length(p)}(p...)
+# 	@inline Simplex{N}(p::Vec{D,<:Real}...) where{N,D} =
+# 		Simplex{N,D,promote_type(eltype.(p)...)}(p...)
+# 	@inline Simplex{N,D,T}(p...) where{N,D,T} =
+# 		new{N,D,T}(SVector{N,Vec{D,T}}(Vec{D,T}.(p)...))
+# end
+# Base.getindex(s::Simplex, i::Integer) = s.points[i]
+# Base.length(s::Simplex{N}) where{N} = N
+# const Segment = Simplex{2}
+# const Triangle= Simplex{3}
+# @inline bounding_box(p::Path) = 
+# @inline bounding_box(s::Simplex) = bounding_box(S.points...)
+# function show(io::IO, s::Simplex)
+# 	print(io, "Simplex(")
+# 	join(io, s.points, ", ")
+# 	print(io, ")")
+# end
+"""
+    Hyperplane
+
+Equation is a*x + b = 0.
+"""
+struct Hyperplane{D,T}
+	a::Transpose{T,SVector{D,T}}
+	b::T
+	@inline Hyperplane(a::SVector{D}, b) where{D} =
+		new{D,promote_type(eltype(a),typeof(b))}(transpose(a), b)
+end
+@inline (h::Hyperplane{D})(p::Vec{D}) where{D} = h.a*p + h.b
+"""
+    segment_inter((p1,p2), hyperplane)
+
+Assumes that h(p1) * h(p2) < 0.
+"""
+function segment_inter(segment::NTuple{2,Vec{D}}, h::Hyperplane{D}) where{D}
+	f = [h.a * p + h.b for p in segment]
+	# f(t) = f1 + t (f2-f1) = 0
+	# t = -f1/(f2-f1)
+	t = -f[1]/(f[2]-f[1])
+	return (f[2]*segment[1]-f[1]*segment[2])/(f[2]-f[1])
+end
+"""
+    simplex_inter((p1,...), hyperplane)
+
+Computes intersection of convex hull of points (p1,...) and hyperplane.
+Returns a set of points in the hyperplane.
+"""
+function simplex_inter(simplex::Path{D}, h::Hyperplane{D}) where{D}
+	v = [sign(h(p)) for p in simplex]
+	segments = [ (i, j) for i in eachindex(simplex), j in eachindex(simplex)
+		if v[i] > 0 && v[j] < 0 ]
+	i1 = [ segment_inter((simplex[s[1]], simplex[s[2]]), h) for s in segments ]
+	i2 = [ simplex[i] for i in eachindex(simplex) if v[i] == 0 ]
+	return [i1; i2]
+end
+# TODO: intersect and canonical project (remove max-normal coordinate)
+# intersect simplex (intersect all (n-1)simplexes)
+# preserve orientation
+# Triangle intersection««2
+#=
+1. cotriangulate = given two triangulations T1, T2,
+ - refinements T'1, T'2 of both triangulations
+ - a list S of intersecting segments (being borders of some triangles in
+	 T'1, T'2)
+	 as pairs [vertex1, vertex2]
+ - incidence relation between S and T'1, T'2
+	 segment-index => (start, end, triangle-indices)
+1.1 compute bounding box of all triangles
+1.2 bounding box incidence: compute sparse matrix of intersecting
+bounding boxes
+1.2.1 (todo: with octtree)
+1.3 for each triangle Ts ∈ T1:
+1.3.1 compute supporting plane for Ts and best projection
+1.3.2 for all bbox-intersecting Ti:
+1.3.2.1 represent Ts ∩ Ti as a {0,1,2,3}-simplex in this plane;
+1.3.2.2 (ignore if 0 or 1-simplex)
+1.3.3 constrained-triangulate from all 2-simplexes and edges of
+  3-simplexes
+1.3.4 push all (3d lifted) triangles to new triangulation T'1
+1.3.5 push all edges to segments (with endpoints + link to T'1)
+1.4 same swapping T1 and T2
+1.5 clean the list for segments:
+1.5.1 remove duplicates
+1.5.2 reorder triangles
+
+
+2. triangle_inter: source triangle Ts, incident triangles Ti,
+compute all the intersections Ts ∩ Ti as segments inside
+(a 2d projection of) Ts (with linkage info + orientation).
+
+
+2.1j. plane projection: a 2d plane projection on which the triangle Ts
+projects bijectively and orientation-preserving
+i.e. |z| > x,y => (z>0 ⇒ (x,y); z<0 ⇒ (y,x)) for example.
+plane projection = 2 indices in {0,3} (6 possibilities).
+
+Intersection in 2 steps:
+ - detect bounding box intersection
+ - intersection with supporting plane: simplex{3,3} → other simplex
+	 ({N,2} for N=0,1,2).
+ - intersection of simplex and supporting triangle:
+
+=#
+"""
+    intersecting_bboxes(triangulation1, triangulation2)
+
+Returns the (sparse) matrix of all triangles `(t1, t2)`
+with intersecting bounding boxes.
+"""
+function intersecting_bboxes(points1, tri1, points2, tri2)
+	return (Bool[!isempty(intersect(
+			bounding_box(points1[t1]...),
+			bounding_box(points2[t2]...)))
+		for t1 in tri1, t2 in tri2])
+end
+
+"""
+    supporting_plane(p1, p2, p3)
+"""
+function supporting_plane(p1::Vec{3}, p2::Vec{3}, p3::Vec{3})
+	c = cross(p2-p1, p3-p1)
+	b = dot(c, p1)
+	return Hyperplane(c, -b)
+end
+
+"""
+    triangle_intersections(t::Triangle, u1::Triangle, u2, u3, ...)
+"""
+function triangle_intersections(t::Triangle{3}, u::Triangle{3}...)
+	h = supporting_plane(t)
+	m = findmax(abs.(h.a))[2]
+	# FIXME: check if we need orientation-preserving here
+	proj = [mod1(m+1, 3), mod1(m+2, 3)] # indices for 2d projection
+	for t2 in u
+	end
+end
+
 # 3d conversion««1
 # Ensuring triangulated surfaces««2
 """
@@ -2100,5 +2284,5 @@ using StaticArrays, LinearAlgebra, FixedPointNumbers
 F = Fixed{Int64, 16}
 
 
-Nothing
+nothing
 # vim: fdm=marker fmr=««,»» noet ts=2:
