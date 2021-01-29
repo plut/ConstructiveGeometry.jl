@@ -13,7 +13,7 @@ import Polyhedra
 import GLPK
 # hide the Triangle name so that we may yet use it for a type:
 module Triangulate
-	import Triangle: basic_triangulation
+	import Triangle: basic_triangulation, constrained_triangulation
 end; import .Triangulate
 # using MiniQhull
 import Rotations
@@ -1459,6 +1459,26 @@ end
 	return from_clipper(T,
 		Clipper.simplify_polygons(to_clipper(T, p), _CLIPPER_ENUM.fill[fill]))
 end
+"""
+    orientation(p::Path{2})
+
+Returns `true` iff p is a direct loop (i.e. if area >= 0).
+"""
+@inline function orientation(p::Path{2,T}) where{T}
+	return Clipper.orientation(to_clipper(T, p))
+end
+"""
+    pointinpolygon(pt::Vec{2}, p::Path{2})
+
+Returns 1 if point is in the interior, -1 on boundary, and 0 outside the
+given polygon.
+
+Polygon is assumed not self-intersecting.
+"""
+@inline function point_in_polygon(point::Vec{2,T}, path::Path{2,T}) where{T}
+	return Clipper.pointinpolygon(to_clipper(T, point), to_clipper(T, path))
+end
+
 #Convex hull««1
 # 2d convex hull ««2
 
@@ -1510,28 +1530,92 @@ function face_normal(points)
 	return cross(points[2]-points[1], points[3]-points[1])
 end
 """
-    triangulate_face(direction, points, map)
+    best_projection(points, direction)
 
-Returns a triangulation of the face. `direction` is a normal vector
-and `map` is a labeling of points.
+Given a set of 3d points (assumed affine-coplanar)
+and optionally a normal vector (otherwise one is computed),
+returns (as a pair of Int) two indices in {1,2,3} giving the best 2d
+projection.
 """
-function triangulate_face(
-		points::AbstractVector{<:AnyVec{3,<:Number}};
-		direction::AbstractVector = [],
-		map::AbstractVector{Int} = [1:length(points)...]
-		)
+function best_projection_idx(points, direction)
 	if direction == []
 		direction = face_normal(points)
 	end
 	# index of largest absolute value of coordinate for projection:
 	e = findmax(abs.(direction))[2]
-	proj = filter(i->i!=e, 1:3)
+	return filter(i->i!=e, 1:3)
+end
+"""
+    best_project_2d(points, direction)
+
+Given a set of 3d points (assumed affine-coplanar)
+and optionally a normal vector (otherwise one is computed),
+returns a faithful 2d projection (as a matrix N×2) of these points.
+"""
+function best_project_2d(points, direction)
+	proj = best_projection_idx(points, direction)
 	N = length(points)
 	points2d = Matrix{Float64}(undef, N, 2)
 	for (i, p) in pairs(points), (j, x) in pairs(proj)
 		points2d[i, j] = p[x]
 	end
+	return points2d
+end
+"""
+    triangulate_face(points, direction, map)
+
+Returns a triangulation of the face (assumed convex).
+Optional keyword arguments:
+ - `direction` is a normal vector (used for projecting to 2d).
+ - `map` is a labeling of points (default is identity map).
+
+The triangulation is returned as a vector of StaticVector{3,Int},
+containing the labels of three points of each triangle.
+"""
+function triangulate_face(
+		points::AbstractVector{<:AnyVec{3,<:Number}};
+		direction::AbstractVector = [],
+		map::AbstractVector{<:Integer} = [1:length(points)...]
+		)
+	points2d = best_project_2d(points, direction)
 	return Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
+end
+"""
+    triangulate_face(points, edges, direction, map)
+
+Returns a triangulation of the face with given edges.
+Edges are provided as a vector of pairs `(id1, id2)`,
+where `id` is the identity (as defined by `map`) of the joined vertices.
+"""
+function triangulate_face(
+		points::AbstractVector{<:AnyVec{3,<:Number}},
+		edges::AbstractVector{<:AnyVec{2,<:Integer}};
+		direction::AbstractVector = [],
+		map::AbstractVector{<:Integer} = [1:length(points)...]
+	)
+	points2d = best_project_2d(points, direction)
+	edges_mat = vcat(transpose.(edges)) # as a N×2 matrix
+	ct = Vec{3,Int}.(Triangulate.constrained_triangulation(points2d,
+		map, edges_mat))
+	# FIXME
+	return 
+end
+"""
+    triangulate_loop(points::Matrix{<:Number})
+
+Given a closed loop of points of the form `[x1 y1; x2 y2; ...]`,
+returns a Delaunay triangulation of the *inside* of the loop only.
+(Constrained triangulation and all triangles lying outside the loop are
+removed. Triangles are oriented in the same direction as the loop.)
+
+Triangulation is returned as a vector of [i1, i2, i3] = integer indices
+in the list of points.
+"""
+function triangulate_loop(points::Matrix{<:Number})
+	N = length(points)
+	ct = Triangulate.constrained_triangulation(points,
+		collect(1:N), # trivial map on points
+		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
 end
 # 3d convex hull ««2
 
