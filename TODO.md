@@ -11,6 +11,8 @@
  - choose a correct value for `Clipper` precision
  * check `convex_hull` works
 # Basic types
+ - clarify `Path`: maybe add `points` iterator and `matrix` abstract
+	 conversion.
  - add a LineNode reference to constructors
    (i.e. first thing in call stack outside module).
  - add something for fake-3d objects (embedded in a subspace):

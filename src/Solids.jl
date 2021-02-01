@@ -21,7 +21,7 @@ import Colors
 import Clipper
 import LightGraphs
 
-import Base: show, print, length, getindex, size, iterate, eltype
+import Base: show, print, length, getindex, size, iterate, eltype, convert
 import Base: union, intersect, setdiff
 import Base: *, +, -, ∈
 import Base: isempty
@@ -44,7 +44,8 @@ The default type used for computing coordinates (i.e. the type to which
 integers are converted). Defaults to a `Fixed` type (fixed-precision
 real), but this module should work just as well with floats.
 """
-const _REAL = _FIXED
+# const _REAL = _FIXED
+const _REAL = Float64
 """
     real_type(T)
 
@@ -164,10 +165,6 @@ const ° = 1.
 @inline radians(x::AnyAngle) = radians(Angle(x))
 @inline degrees(x::Angle) = x
 @inline degrees(x::AnyAngle) = degrees(Angle(x))
-
-# Library parameters««2
-@inline polyhedra_lib(T::Type{<:Real}) =
-	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
 
 # AbstractSolid ««1
 # Some reasons not to use `GeometryBasics.jl`:
@@ -1475,10 +1472,268 @@ given polygon.
 
 Polygon is assumed not self-intersecting.
 """
-@inline function point_in_polygon(point::Vec{2,T}, path::Path{2,T}) where{T}
+@inline function point_in_polygon(point::AnyVec{2,T},
+	path::AnyPath{2,T}) where{T}
 	return Clipper.pointinpolygon(to_clipper(T, point), to_clipper(T, path))
 end
+# Polyhedra interface««1
+@inline polyhedra_lib(T::Type{<:Real}) =
+	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
 
+# converts path to matrix with points as rows:
+@inline poly_vrep(points::AnyPath) = vcat(transpose.(Vector.(points))...)
+"""
+    vpoly(points...)
+
+Returns a `Polyhedra.polyhedron` in vrep from a list of points.
+"""
+@inline function vpoly(points::AnyPath{D,T}; lib=true) where{D,T}
+	PH = Polyhedra
+	if lib
+		return PH.polyhedron(PH.vrep(poly_vrep(points)), polyhedra_lib(T))
+	else
+		return PH.polyhedron(PH.vrep(poly_vrep(points)))
+	end
+end
+
+# HRepElement is the supertype of HalfSpace and HyperPlane
+@inline direction(h::Polyhedra.HRepElement) = h.a
+@inline (h::Polyhedra.HRepElement)(v::AbstractVector) = h.a ⋅ v - h.β
+@inline convert(T::Type{<:Polyhedra.HRepElement}, h::Polyhedra.HRepElement) =
+	T(h.a, h.β)
+
+# we need a couple of functions in the particular case of simplexes.
+# `Polyhedra.jl` is a bit slow for these simple cases, so we write them
+# here:
+
+"""
+    inter(path, hyperplane::Polyhedra.HyperPlane)
+
+    intersection of simplex and hyperplane
+"""
+function inter(path::AnyPath, hyperplane::Polyhedra.HyperPlane)
+	n = length(path)
+	s = [hyperplane(p) for p in path]
+	newpath = similar(path, n); c = 0
+	for i in 1:n
+		if s[i] == 0
+			newpath[c+= 1] = path[i]
+		end
+		for j in 1:i-1
+			if s[i] * s[j] < 0
+				newpath[c+= 1] = (s[j]*path[i]-s[i]*path[j])/(s[j]-s[i])
+			end
+		end
+	end
+	return newpath[1:c]
+end
+"""
+    inter(path, halfplane)
+
+Computes intersection of a (planar) convex closed loop and the half-plane [h≥0].
+The intersection is returned as a vector of points.
+"""
+function inter(path::AnyPath, halfplane::Polyhedra.HalfSpace)
+	s = [halfplane(p) for p in path]
+	boundary = convert(Polyhedra.HyperPlane, halfplane)
+	n = length(path)
+	# we know that we add at most 1 new point (cutting a corner).
+	newpath = similar(path, n+1); c = 0
+	for i in eachindex(path)
+		j = mod1(i+1, n)
+		(si, sj) = (s[i], s[j])
+		if si >= 0   newpath[c+=1] = path[i]; end
+		if si*sj < 0
+		# whiskers would generate two new points; we remove the second one
+			newpoint = inter(path[[i,j]], boundary)[1]
+			if (c==0|| newpath[c] != newpoint) newpath[c+=1] = newpoint; end
+		end
+	end
+	return newpath[1:c]
+end
+@inline inter(path::AnyPath, h::Polyhedra.HRepElement,
+		t::Polyhedra.HRepElement...) =
+	inter(inter(path, h), t...)
+
+"""
+    halfplane(p1=>p2, p3)
+
+Returns the half-plane through (p1, p2) such that h(p3) > 0.
+"""
+function halfplane(p12::Pair{<:AnyVec{2}}, p3::AnyVec{2})
+	(x1, y1) = p12[1]
+	(x2, y2) = p12[2]
+	a = SA[y1-y2, x2-x1]
+	b = y1*x2 - x1*y2
+	s = sign(a ⋅ p3 - b)
+	return Polyhedra.HalfSpace(s*a, s*b)
+end
+
+"""
+    hrep(pt1, pt2, pt3)
+
+Returns the triple of half-planes delimiting the interior of the given
+triangle.
+"""
+function hrep(p1::AnyVec{2}, p2::AnyVec{2}, p3::AnyVec{2})
+	return (halfplane(p1=>p2, p3),
+	        halfplane(p2=>p3, p1),
+	        halfplane(p3=>p1, p2))
+end
+
+# Triangulations««1
+# 2d triangulation««2
+"""
+    triangulate_loop(path::Path{2})
+
+Given a closed loop of points,
+returns a Delaunay triangulation of the *inside* of the loop only.
+(Constrained triangulation and all triangles lying outside the loop are
+removed. Triangles are oriented in the same direction as the loop.)
+
+The triangulation is returned as a vector of [i1, i2, i3] = integer indices
+in the list of points.
+"""
+function triangulate_loop(points::Matrix{Float64})
+	N = size(points, 1)
+	return Triangulate.constrained_triangulation(
+		points,
+		collect(1:N), # identity map on points
+		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
+end
+@inline triangulate_loop(points::AnyPath{2}) =
+	triangulate_loop(Matrix{Float64}(vcat(transpose.(points)...)))
+# 	N = length(points)
+# 	m = Matrix{Float64}(vcat(transpose.(points)...))
+# 
+# 	ct = Triangulate.constrained_triangulation(
+# 		m,
+# 		collect(1:N), # trivial map on points
+# 		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
+# 	# returns triangles of the same orientation as the loop:
+# 	# outer triangles are removed by Triangle library
+# 	# each triangle is either inner or outer
+# 	# this is determined e.g. by its barycenter
+# # 	return filter(t->point_in_polygon(sum(points[t])/3, points) > 0, ct)
+# 	return ct
+# end
+
+# 3d -> 2d projections««2
+function face_normal(points)
+	@assert length(points) >= 3
+	return cross(points[2]-points[1], points[3]-points[1])
+end
+"""
+    best_projection(points; direction)
+
+Given a set of 3d points (assumed affine-coplanar)
+and optionally a normal vector (otherwise one is computed),
+returns (as a pair of Int) two indices in {1,2,3} giving the best 2d
+projection.
+"""
+function best_projection_idx(points; direction = [])
+	if direction == []
+		direction = face_normal(points)
+	end
+	# index of largest absolute value of coordinate for projection:
+	# if direction[e] >= 0: return [e+1, e+2]
+	e = findmax(abs.(direction))[2]
+	if direction[e] > 0
+		return [2,3,1,2][[e,e+1]]
+	else
+		return [2,3,1,2][[e+1,e]]
+	end
+# 	return filter(i->i!=e, 1:3)
+end
+"""
+    best_projection(hyperplane)
+
+Returns a (named) tuple `(coordinates, linear, origin)` where
+ - `coordinates` is the set of coordinates to keep for projection,
+ - `linear`*x+`origin` is an affine section.
+"""
+function best_projection(hyperplane::Polyhedra.HyperPlane)
+	# remove largest absolute-value coordinate of normal vector
+	v = direction(hyperplane)
+	e = findmax(abs.(v))[2]
+	f = inv(convert(real_type(eltype(v)), v[e]))
+	if v[e] > 0
+		# e=1: proj=(2,3) sect=[-b/a -c/a;1 0;0 1]
+		# e=2: proj=(3,1) sect=[0 1;-a/b -c/b;1 0]
+		# e=3: proj=(1,2) sect=[1 0;0 1;-a/c -b/c]
+		coords = [2,3,1,2][[e,e+1]]
+	else
+		# e=1: proj=(3,2) sect=[-c/a -b/a;0 1;1 0]
+		# e=2: proj=(1,3) sect=[1 0;-a/b -c/b;0 1]
+		# e=3: proj=(2,1) sect=[0 1;1 0;-b/c -a/c]
+		coords = [2,3,1,2][[e+1,e]]
+	end
+  # e.g. ax + by + cz = d, b is largest
+	# (x,z) -> (x,y,z) such that ax+by+cz=d, or y=(-a/b)x + (-c/b)z + (d/b)
+	# matrix: [1 0;-a/b -c/b;0 1], constant [0 d/b 0]
+	m = SMatrix{3,2}((i == e) ? -f*v[coords[j]] : (i == coords[j])
+		for i=1:3, j=1:2)
+	c = SVector{3}((i == e) ? hyperplane.β*f : 0 for i in 1:3)
+	return (coordinates=coords, linear=m, origin=c)
+end
+"""
+    best_project_2d(points, direction)
+
+Given a set of 3d points (assumed affine-coplanar)
+and optionally a normal vector (otherwise one is computed),
+returns a faithful 2d projection (as a matrix N×2) of these points.
+"""
+function best_project_2d(points; direction = [])
+	proj = best_projection_idx(points; direction)
+	N = length(points)
+	points2d = Matrix{Float64}(undef, N, 2)
+	for (i, p) in pairs(points), (j, x) in pairs(proj)
+		points2d[i, j] = p[x]
+	end
+	return points2d
+end
+# 3d face triangulation««2
+"""
+    triangulate_face_convex(points; direction, map)
+
+Returns a triangulation of the face (assumed convex; points in any order)
+Optional keyword arguments:
+ - `direction` is a normal vector (used for projecting to 2d).
+ - `map` is a labeling of points (default is identity map).
+
+The triangulation is returned as a vector of StaticVector{3,Int},
+containing the labels of three points of each triangle.
+"""
+function triangulate_face_convex(
+		points::AbstractVector{<:AnyVec{3,<:Number}}
+		;
+		direction::AbstractVector = [],
+		map::AbstractVector{<:Integer} = [1:length(points)...]
+		)
+	points2d = best_project_2d(points, direction)
+	return Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
+end
+"""
+    triangulate_face(points; direction, map)
+
+Returns a triangulation of the face (with points ordered along the face
+in direct order).
+"""
+function triangulate_face(
+		points::AbstractVector{<:AnyVec{3,<:Number}}
+		;
+		direction::AbstractVector = [],
+		map::AbstractVector{<:Integer} = [1:length(points)...]
+	)
+	points2d = best_project_2d(points; direction)
+	# build edges matrix as a N×2 matrix:
+	N = length(points)
+	edges = vcat(([map[i] map[mod1(i+1,N)]] for i in 1:N)...)
+	ct = Vec{3,Int}.(Triangulate.constrained_triangulation(points2d,
+		map, edges))
+	# FIXME
+	return ct
+end
 #Convex hull««1
 # 2d convex hull ««2
 
@@ -1488,12 +1743,11 @@ end
 Returns the convex hull (as a vector of 2d points).
 """
 function convex_hull(points::AbstractVector{<:Vec{2,T}}) where{T}
-	M = hcat(Vector.(points)...)
 # M is a matrix with the points as *columns*, hence the transpose
 # below:
 	PH = Polyhedra
-	poly = PH.polyhedron(PH.vrep(transpose(M)), polyhedra_lib(T))
-	PH.removevredundancy!(poly).points.points
+	poly = vpoly(points)
+	return PH.removevredundancy!(poly).points.points
 end
 
 # this is the version using MiniQhull: #««
@@ -1524,99 +1778,6 @@ end
 #		# returns in retrograde ordering (OpenSCAD convention):
 #		points[R]
 # end#»»
-# Triangulate face ««2
-function face_normal(points)
-	@assert length(points) >= 3
-	return cross(points[2]-points[1], points[3]-points[1])
-end
-"""
-    best_projection(points, direction)
-
-Given a set of 3d points (assumed affine-coplanar)
-and optionally a normal vector (otherwise one is computed),
-returns (as a pair of Int) two indices in {1,2,3} giving the best 2d
-projection.
-"""
-function best_projection_idx(points, direction)
-	if direction == []
-		direction = face_normal(points)
-	end
-	# index of largest absolute value of coordinate for projection:
-	e = findmax(abs.(direction))[2]
-	return filter(i->i!=e, 1:3)
-end
-"""
-    best_project_2d(points, direction)
-
-Given a set of 3d points (assumed affine-coplanar)
-and optionally a normal vector (otherwise one is computed),
-returns a faithful 2d projection (as a matrix N×2) of these points.
-"""
-function best_project_2d(points, direction)
-	proj = best_projection_idx(points, direction)
-	N = length(points)
-	points2d = Matrix{Float64}(undef, N, 2)
-	for (i, p) in pairs(points), (j, x) in pairs(proj)
-		points2d[i, j] = p[x]
-	end
-	return points2d
-end
-"""
-    triangulate_face(points, direction, map)
-
-Returns a triangulation of the face (assumed convex).
-Optional keyword arguments:
- - `direction` is a normal vector (used for projecting to 2d).
- - `map` is a labeling of points (default is identity map).
-
-The triangulation is returned as a vector of StaticVector{3,Int},
-containing the labels of three points of each triangle.
-"""
-function triangulate_face(
-		points::AbstractVector{<:AnyVec{3,<:Number}};
-		direction::AbstractVector = [],
-		map::AbstractVector{<:Integer} = [1:length(points)...]
-		)
-	points2d = best_project_2d(points, direction)
-	return Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
-end
-"""
-    triangulate_face(points, edges, direction, map)
-
-Returns a triangulation of the face with given edges.
-Edges are provided as a vector of pairs `(id1, id2)`,
-where `id` is the identity (as defined by `map`) of the joined vertices.
-"""
-function triangulate_face(
-		points::AbstractVector{<:AnyVec{3,<:Number}},
-		edges::AbstractVector{<:AnyVec{2,<:Integer}};
-		direction::AbstractVector = [],
-		map::AbstractVector{<:Integer} = [1:length(points)...]
-	)
-	points2d = best_project_2d(points, direction)
-	edges_mat = vcat(transpose.(edges)) # as a N×2 matrix
-	ct = Vec{3,Int}.(Triangulate.constrained_triangulation(points2d,
-		map, edges_mat))
-	# FIXME
-	return 
-end
-"""
-    triangulate_loop(points::Matrix{<:Number})
-
-Given a closed loop of points of the form `[x1 y1; x2 y2; ...]`,
-returns a Delaunay triangulation of the *inside* of the loop only.
-(Constrained triangulation and all triangles lying outside the loop are
-removed. Triangles are oriented in the same direction as the loop.)
-
-Triangulation is returned as a vector of [i1, i2, i3] = integer indices
-in the list of points.
-"""
-function triangulate_loop(points::Matrix{<:Number})
-	N = length(points)
-	ct = Triangulate.constrained_triangulation(points,
-		collect(1:N), # trivial map on points
-		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
-end
 # 3d convex hull ««2
 
 """
@@ -1639,7 +1800,7 @@ function convex_hull(p::AbstractVector{<:Vec{3,T}}) where{T}
 	for i in PH.eachindex(PH.halfspaces(poly)) # index of halfspace
 		h = PH.get(poly, i)
 		pts = PH.incidentpointindices(poly, i) # vector of indices of points
-		for t in triangulate_face([Vec{3,T}(PH.get(poly, j)) for j in pts],
+		for t in triangulate_face_convex([Vec{3,T}(PH.get(poly, j)) for j in pts],
 					direction = h.a, map = [j.value for j in pts])
 			(a,b,c) = (V[j] for j in t)
 			k = det([b-a c-a h.a])
@@ -1704,6 +1865,8 @@ function minkowski(vp::Vector{<:AnyPath{2}}, vq::Vector{<:AnyPath{2}})
 	global X = vr
 	return simplify(vr; fill=:nonzero)
 end
+
+# TODO: 3d Minkowski««2
 
 # 2d subsystem««1
 # PolyUnion««2
@@ -1810,7 +1973,7 @@ end
 # end
 
 
-# Offset and draw ««2
+# Offset ««2
 """
 		offset(P::Polygon, u::Real; options...)
 
@@ -1890,17 +2053,20 @@ end
 
 struct BoundingBox{D,T}
 	proj::NTuple{D,ClosedInterval{T}}
+	BoundingBox{D,T}(int::ClosedInterval...) where{D,T} = new{D,T}(int)
+	BoundingBox{D}(int::ClosedInterval{T}...) where{D,T} = new{D,T}(int)
 	BoundingBox(int::ClosedInterval...) =
 		new{length(int), promote_type(eltype.(int)...)}(int)
 end
 @inline dim(::BoundingBox{D}) where{D} = D
 @inline isempty(b::BoundingBox) = any(isempty, b.proj)
 @inline ∈(x::AnyVec, b::BoundingBox) = all(i->x[i] ∈ b.proj[i], 1:dim(b))
+@inline iterate(b::BoundingBox, args...) = iterate(b.proj, args...)
 @inline intersect(a::BoundingBox{D}, b::BoundingBox{D}) where{D} =
 	BoundingBox([intersect(a.proj[i], b.proj[i]) for i in 1:D]...)
 @inline intersects(a::BoundingBox{D}, b::BoundingBox{D}) where{D} =
 	all(i->intersects(a.proj[i], b.proj[i]), 1:D)
-bounding_box(points::Vec{D,<:Number}...) where{D} = BoundingBox([
+bounding_box(points::AnyVec{D,<:Number}...) where{D} = BoundingBox{D}([
 	ClosedInterval(extrema([p[i] for p in points])...) for i in 1:D]...)
 @inline show(io::IO, b::BoundingBox) = join(io, b.proj, "×")
 # # Simplex««2
@@ -1929,44 +2095,45 @@ bounding_box(points::Vec{D,<:Number}...) where{D} = BoundingBox([
 # 	join(io, s.points, ", ")
 # 	print(io, ")")
 # end
-"""
-    Hyperplane
-
-Equation is a*x + b = 0.
-"""
-struct Hyperplane{D,T}
-	a::Transpose{T,SVector{D,T}}
-	b::T
-	@inline Hyperplane(a::SVector{D}, b) where{D} =
-		new{D,promote_type(eltype(a),typeof(b))}(transpose(a), b)
-end
-@inline (h::Hyperplane{D})(p::Vec{D}) where{D} = h.a*p + h.b
-"""
-    segment_inter((p1,p2), hyperplane)
-
-Assumes that h(p1) * h(p2) < 0.
-"""
-function segment_inter(segment::NTuple{2,Vec{D}}, h::Hyperplane{D}) where{D}
-	f = [h.a * p + h.b for p in segment]
-	# f(t) = f1 + t (f2-f1) = 0
-	# t = -f1/(f2-f1)
-	t = -f[1]/(f[2]-f[1])
-	return (f[2]*segment[1]-f[1]*segment[2])/(f[2]-f[1])
-end
-"""
-    simplex_inter((p1,...), hyperplane)
-
-Computes intersection of convex hull of points (p1,...) and hyperplane.
-Returns a set of points in the hyperplane.
-"""
-function simplex_inter(simplex::Path{D}, h::Hyperplane{D}) where{D}
-	v = [sign(h(p)) for p in simplex]
-	segments = [ (i, j) for i in eachindex(simplex), j in eachindex(simplex)
-		if v[i] > 0 && v[j] < 0 ]
-	i1 = [ segment_inter((simplex[s[1]], simplex[s[2]]), h) for s in segments ]
-	i2 = [ simplex[i] for i in eachindex(simplex) if v[i] == 0 ]
-	return [i1; i2]
-end
+# Hyperplane and intersection««2
+# """
+#     Hyperplane
+# 
+# Equation is a*x + b = 0.
+# """
+# struct Hyperplane{D,T}
+# 	a::Transpose{T,SVector{D,T}}
+# 	b::T
+# 	@inline Hyperplane(a::SVector{D}, b) where{D} =
+# 		new{D,promote_type(eltype(a),typeof(b))}(transpose(a), b)
+# end
+# @inline (h::Hyperplane{D})(p::Vec{D}) where{D} = h.a*p + h.b
+# """
+#     inter(p1=>p2, hyperplane)
+# 
+# Assumes that h(p1) * h(p2) < 0. Returns
+# """
+# function inter(segment::Pair{<:AnyVec}, h::Polyhedra.Hyperplane)
+# 	f = [h(p) for p in segment]
+# 	# f(t) = f1 + t (f2-f1) = 0
+# 	# t = -f1/(f2-f1)
+# 	t = -f[1]/(f[2]-f[1])
+# 	return (f[2]*segment[1]-f[1]*segment[2])/(f[2]-f[1])
+# end
+# """
+#     simplex_inter(simplex, hyperplane)
+# 
+# Computes intersection of convex hull of points (p1,...) and hyperplane.
+# Returns a set of points in the hyperplane.
+# """
+# function simplex_inter(simplex::Path{D}, h::Hyperplane{D}) where{D}
+# 	v = [sign(h(p)) for p in simplex]
+# 	segments = [ (i, j) for i in eachindex(simplex), j in eachindex(simplex)
+# 		if v[i] > 0 && v[j] < 0 ]
+# 	i1 = [ segment_inter(simplex[s[1]] => simplex[s[2]], h) for s in segments ]
+# 	i2 = [ simplex[i] for i in eachindex(simplex) if v[i] == 0 ]
+# 	return [i1; i2]
+# end
 # TODO: intersect and canonical project (remove max-normal coordinate)
 # intersect simplex (intersect all (n-1)simplexes)
 # preserve orientation
@@ -2016,9 +2183,10 @@ Intersection in 2 steps:
 
 =#
 """
-    intersecting_bboxes(triangulation1, triangulation2)
+    intersecting_bboxes(pts1, faces1, pts2, faces2)
 
-Returns the (sparse) matrix of all triangles `(t1, t2)`
+Given two triangulated surfaces (pts1, faces1) etc.,
+returns the (sparse) matrix of all triangles `(t1, t2)`
 with intersecting bounding boxes.
 """
 function intersecting_bboxes(points1, tri1, points2, tri2)
@@ -2030,24 +2198,140 @@ end
 
 """
     supporting_plane(p1, p2, p3)
+
+Returns an equation (`a*x = b`) of the supporting plane, with `a`
+pointing *outwards*.
 """
 function supporting_plane(p1::Vec{3}, p2::Vec{3}, p3::Vec{3})
 	c = cross(p2-p1, p3-p1)
 	b = dot(c, p1)
-	return Hyperplane(c, -b)
+	return Polyhedra.HyperPlane(c, b)
 end
 
 """
-    triangle_intersections(t::Triangle, u1::Triangle, u2, u3, ...)
+    triangle_intersections(triangle, pts, faces)
+
+Computes all intersections of (triangular) faces of (points,faces)
+with the given triangle.
+ - `triangle`: given as a triple of Vec{3}.
+
+Returns a dissection of the given `triangle` compatible with `(points,
+faces)`, as a pair (points, edges). The first three points are always
+the three vertices of the original `triangle`.
 """
-function triangle_intersections(t::Triangle{3}, u::Triangle{3}...)
-	h = supporting_plane(t)
-	m = findmax(abs.(h.a))[2]
-	# FIXME: check if we need orientation-preserving here
-	proj = [mod1(m+1, 3), mod1(m+2, 3)] # indices for 2d projection
-	for t2 in u
+function triangle_intersections(triangle::AnyPath{3}, points, faces)
+	println("*** intersecting triangle:$triangle")
+	hyperplane = supporting_plane(triangle...)
+	println(hyperplane)
+	# proj is a set of indices, e.g. [1,2]:
+	(proj, linear, origin) = best_projection(hyperplane)
+	println("proj=$proj linear=$linear origin=$origin")
+# 	proj = best_projection_idx(triangle; direction=direction(hyperplane))
+	# 2d projection of triangle according to `proj`:
+	tri2v = [p[proj] for p in triangle]
+	tri2h = hrep(tri2v...)
+	println("tri2v=$tri2v\ntri2h=$tri2h")
+	# points and edges for the contrained triangulation
+	newpoints0 = Dict(v=>k for (k,v) in pairs(tri2v))
+	newedges = [1 2;2 3;3 1]
+	for f in faces
+		# compute coordinates of incident triangle (as a triple of points):
+		incident = points[f]
+		println("  incident=$(Vector.(incident))")
+		inc_plane = inter(incident, hyperplane)
+		println("  inc_plane=$(inc_plane)")
+		inc2v = [p[proj] for p in inc_plane] # vrep
+		println("  inc2v=$(inc2v)")
+		int2v = inter(inc2v, tri2h...)
+		println("  inter: $(int2v)")
+		# int2v = intersection of the two triangles (in 2d coordinates)
+		# if this intersection is empty or a point, we drop it;
+		if length(int2v) <= 1 continue; end
+		# otherwise we append all those edges to the constraints of the
+		# triangulation:
+		for v in int2v
+			if !haskey(newpoints0, v) newpoints0[v] = length(newpoints0)+1 ;
+			println(" * add $(length(newpoints0)): $v")
+			end
+		end
+		for i in eachindex(int2v)
+			j = mod1(i+1, length(int2v))
+			newedges = [newedges; newpoints0[int2v[i]] newpoints0[int2v[j]]]
+			println(" - add edge $((i,j)) => $(newedges[size(newedges,1),:])")
+		end
 	end
+	# convert the Dict of newpoints to a Matrix (with points in rows)
+	n = length(newpoints0)
+	newpoints = Matrix{eltype(tri2v[1])}(undef, n, 2)
+	for (k,v) in pairs(newpoints0) newpoints[v,:] = k; end
+	# compute triangulation
+	println("newpoints=$newpoints\n")
+	println("newedges=$newedges\n")
+	newtri = Triangulate.constrained_triangulation(newpoints,
+		collect(1:n), newedges)
+	# points are in rows...
+	newpoints3 = newpoints * transpose(linear)
+	println("\e[31mnewpoints3=$newpoints3")
+	println("linear=$linear; origin=$origin; hyperplane=$hyperplane;
+	proj=$proj")
+	return (points=[newpoints3[i,:]+origin for i in 1:size(newpoints3,1)],
+		faces=newtri)
 end
+function cotriangulate1((points1, faces1), (points2, faces2))
+	newpoints = points1
+	newfaces = SVector{3,Int}[]
+	for f in faces1
+		triangle = points1[f]
+		(pts, tri) = triangle_intersections(triangle, points2, faces2)
+		println("\e[32m### merging triangulation for triangle $triangle\e[m")
+		# merge triangulation: points
+		renum = Vector{Int}(undef, length(pts))
+		np = length(newpoints)
+		for i in 1:length(pts)
+			k = findfirst(isequal(pts[i]), newpoints)
+			if k == nothing
+				renum[i] = (np+= 1)
+			else
+				renum[i] = k
+			end
+		end
+		println("\e[32mpoints=$(Vector.(pts))\nrenum=$renum\ntri=$tri\n\e[m")
+		np0 = length(newpoints)
+		resize!(newpoints, np)
+		for i in 1:length(pts)
+			if renum[i] > np0 newpoints[renum[i]] = pts[i]; end
+		end
+		# merge triangulation: faces
+		nf = length(newfaces)
+		resize!(newfaces, nf+length(tri))
+		for (j, f) in pairs(tri)
+			# relabel points in this face:
+			println("\e[32m  faces<- $(renum[f])\e[m")
+			newfaces[nf+j] = renum[f]
+		end
+	end
+	return (points=newpoints, faces=newfaces)
+end
+
+"""
+    cotriangulate((points1, faces1), (points2, faces2))
+
+Returns compatible refinements of both triangulations,
+i.e. any intersecting triangles are actually matching.
+"""
+function cotriangulate((points1, faces1), (points2, faces2))
+end
+# """
+#     triangle_intersections(t::Triangle, u1::Triangle, u2, u3, ...)
+# """
+# function triangle_intersections(t::Triangle{3}, u::Triangle{3}...)
+# 	h = supporting_plane(t)
+# 	m = findmax(abs.(h.a))[2]
+# 	# FIXME: check if we need orientation-preserving here
+# 	proj = [mod1(m+1, 3), mod1(m+2, 3)] # indices for 2d projection
+# 	for t2 in u
+# 	end
+# end
 
 # 3d conversion««1
 # Ensuring triangulated surfaces««2
