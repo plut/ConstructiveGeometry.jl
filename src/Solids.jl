@@ -1724,7 +1724,7 @@ evaluates to a true value. Points are renamed.
 """
 function select_faces(test::Function, s::AbstractSimplicial)
 	renum = fill(0, eachindex(points(s)))
-	println("before renum: $s")
+# 	println("before renum: $s")
 	newfaces = Int[]
 	newpoints = similar(points(s))
 	n = 0
@@ -1734,19 +1734,19 @@ function select_faces(test::Function, s::AbstractSimplicial)
 			if renum[p] == 0
 				renum[p] = (n+= 1)
 				newpoints[n] = points(s)[p]
-				println("renumbering $p=$(points(s)[p]) to $(renum[p])")
+# 				println("renumbering $p=$(points(s)[p]) to $(renum[p])")
 			end
 		end
 		push!(newfaces, i)
 	end
 	resize!(newpoints, n)
-	println("faces kept = $newfaces")
-	println("points renumbered = $renum")
-	println("newpoints = $newpoints")
-	for f in newfaces
-		println("renum face $f $(faces(s)[f]) => $(renum[faces(s)[f]])")
-	end
-	println([renum[faces(s)[f]] for f in newfaces])
+# 	println("faces kept = $newfaces")
+# 	println("points renumbered = $renum")
+# 	println("newpoints = $newpoints")
+# 	for f in newfaces
+# 		println("renum face $f $(faces(s)[f]) => $(renum[faces(s)[f]])")
+# 	end
+# 	println([renum[faces(s)[f]] for f in newfaces])
 	return (typeof(s))(
 		newpoints,
 		renum[faces(s)[f]] for f in newfaces)
@@ -2517,8 +2517,8 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 	# Note that this does not remove duplicate faces; this is on purpose
 	# (the inside of a duplicate face is automatically ∩):
 	s3 = merge(s1a, s2a)
-	println(s3)
-	scad(s3, "/tmp/s3.scad", scale=60, offset=[0,-150,0])
+# 	println(s3)
+# 	scad(s3, "/tmp/s3.scad", scale=60, offset=[0,-150,0])
 # 	# match points««
 # 	# FIXME: `cotriangulate` could return information that speeds up the
 # 	# “matching” part.
@@ -2541,10 +2541,10 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 	# 0 = to be removed; 1=union; 2=inter; 3=both
 	mark = fill(-1, length(faces(s3)))
 	@inline setmark!(c, k) = begin
-		if faces(s3)[c] == [3,11,14]
-			println("\e[31;1m ########## ICI:\e[m")
-		end
-		println("  marking face($c)$(faces(s3)[c]) = $k")
+# 		if faces(s3)[c] == [3,11,14]
+# 			println("\e[31;1m ########## ICI:\e[m")
+# 		end
+# 		println("  marking face($c)$(faces(s3)[c]) = $k")
 		if mark[c] == -1  mark[c] = k; end
 	end
 
@@ -2565,7 +2565,7 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 		face_vec2 = begin # 2d projection of face_vec3 (preserving orientation)
 			dir3 = points(s3)[e[2]]-points(s3)[e[1]]
 			k = findmax(abs.(dir3))[2]
-			println("projecting by vector $dir3, eliminating coord $k")
+# 			println("projecting by vector $dir3, eliminating coord $k")
 			proj = dir3[k] > 0 ? SA[plus1mod3[k], plus2mod3[k]] :
 			                     SA[plus2mod3[k], plus1mod3[k]]
 			dir2 = dir3[proj]
@@ -2584,32 +2584,23 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 		end
 		reorder = sort(eachindex(flist); by=i->rat_param[i])
 
-		println("\e[1medge $e:\e[m")
-		for i in eachindex(flist)
-			f = abs(flist[i])
-			println("  face $(flist[i]) = $(faces(s3)[f])")
-			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
-		end
-		println("  rat_param=$rat_param")
-		println("  reorder=$reorder to $(flist[reorder])")
+# 		println("\e[1medge $e:\e[m")
+# 		for i in eachindex(flist)
+# 			f = abs(flist[i])
+# 			println("  face $(flist[i]) = $(faces(s3)[f])")
+# 			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
+# 		end
+# 		println("  rat_param=$rat_param")
+# 		println("  reorder=$reorder to $(flist[reorder])")
 
 		for (i, r1) in pairs(reorder)
 			r2 = reorder[mod1(i+1, length(reorder))] # next face
 			(f1, f2) = flist[[r1, r2]] # two consecutive face numbers
 			if f1 > 0 && f2 > 0
-				if rat_param[r1] == rat_param[r2]
-					setmark!(f1, 3); setmark!(f2, 0)
-				else
-					println("couple ($f1, $f2) sets $f1<-2, $f2<-1")
-					setmark!(f1, 2); setmark!(f2, 1)
-				end
+				setmark!(f1, 2); setmark!(f2, 1)
 			end
 			if f1 < 0 && f2 < 0
-				if rat_param[r1] == rat_param[r2]
-					setmark!(-f1, 3); setmark!(-f2, 0)
-				else
-					setmark!(-f1, 1); setmark!(-f2, 2)
-				end
+				setmark!(-f1, 1); setmark!(-f2, 2)
 			end
 		end
 	end
@@ -2631,24 +2622,28 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 	inc_f = adjacency_faces(s3)
 	println("  done x")
 
-	_label = Dict(-1=>"?", 0=>"none", 1=>"∪", 2=>"∩", 3=>"both")
-	for (i, f) in pairs(faces(s3))
-		println("$i: $f => $(_label[mark[i]])")
-	end
+# 	_label = Dict(-1=>"?", 0=>"none", 1=>"∪", 2=>"∩", 3=>"both")
+# 	for (i, f) in pairs(faces(s3))
+# 		println("$i: $f => $(_label[mark[i]])")
+# 	end
 
 	while(propagate!(mark, inc_f) > 0); end
 
 	# TODO: use ray-shooting to find isolated connected components.
 
-	for (i, f) in pairs(faces(s3))
-		println("$i: $f => $(_label[mark[i]])")
-	end
+# 	for (i, f) in pairs(faces(s3))
+# 		println("$i: $f => $(_label[mark[i]])")
+# 	end
 	return (triangulation = s3, mark = mark)
 end
 
 function inter(s1::Triangulation, s2::Triangulation)
 	iu = inter_union(s1, s2)
-	return select_faces(i->iu.mark[i] ∈ [1,3], iu.triangulation)
+	return select_faces(i->iu.mark[i] == 2, iu.triangulation)
+end
+function union(s1::Triangulation, s2::Triangulation)
+	iu = inter_union(s1, s2)
+	return select_faces(i->iu.mark[i] == 1, iu.triangulation)
 end
 
 # Points of cubes, etc.««2

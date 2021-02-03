@@ -1,10 +1,16 @@
 # Immediate work
+ * intersection and union: ray-shooting (it is possible even within the
+	 merged structure)
+   - force-remove opposite faces (neither ∪ nor ∩)
+	 - check if it works for complement
  * use `import` for modules used only a few times once (`Color`, all geometry)
    to avoid polluting the namespace
- + test suite
+ * test suite
  - a common name for meshing objects (either `Mesh` or `elements` ?)
+   => **realize**
  - Minkowski difference
  - what to do for polygons with holes?
+   - look in `Makie`
  - replace minkowski with circle by an offset
  + finish grouping all Clipper stuff in one section
  - fix `Offset` for polygon unions
@@ -29,11 +35,15 @@
    *no*, feature request written
  - abstract directions (`up`, `left`) etc., interpreted differently
    depending on the dimension.
+ - complete the list of exports
 # 2d vs 3d
  - Objects should really have *two* dimensions: intrinsic and embedding.
  E.g. a `square(1)` has dimensions `(2,2)`, while its translation by
  `[0,0,1]` has dimensions `(2,3)` and an embedding given by the
  corresponding matrix.
+ - before deciding what *“should”* be done, write a set of examples of
+	 how it should work (for various operations, e.g. linear maps,
+	 Minkowski, hull) and then decide how to best implement this behavior
  - CSG operations may be performed either
    * on objects of the same dimension, same embedding
    * `hull`: use embedding to push all objects to same space if possible
