@@ -1583,7 +1583,7 @@ function hrep(p1::AnyVec{2}, p2::AnyVec{2}, p3::AnyVec{2})
 	        halfplane(p3=>p1, p2))
 end
 
-# Triangulations««1
+# Generic triangulations««1
 # AbstractSimplicial««2
 """
     AbstractSimplicial
@@ -1609,14 +1609,14 @@ function Base.show(io::IO, s::AbstractSimplicial)
 end
 
 """
-    incidence_points(s::AbstractSimplicial)
+    adjacency_points(s::AbstractSimplicial)
 
-Returns the incidence matrix on points of s, indexed by entries of
+Returns the adjacency matrix on points of s, indexed by entries of
 `points(s)`.
 """
-@inline incidence_points(s::AbstractSimplicial) =
-	incidence_points(points(s), faces(s))
-function incidence_points(points, faces)
+@inline adjacency_points(s::AbstractSimplicial) =
+	adjacency_points(points(s), faces(s))
+function adjacency_points(points, faces)
 	n = length(points)
 	m = spzeros(Bool,n, n)
 	for f in faces
@@ -1634,24 +1634,45 @@ Returns the incidence structure vertices -> faces, as a list of lists:
 l[point index] = [set of faces containing this point].
 """
 function incidence_vf(s::AbstractSimplicial)
-	m = fill(Int[], length(points(s)))
+	m = [ Int[] for p in points(s)]
 	for (i, f) in pairs(faces(s)), p in f
 		push!(m[p], i)
 	end
 	return m
 end
 """
-    incidence_faces(s::AbstractSimplicial)
+    adjacency_faces(s::AbstractSimplicial)
 
 Returns the incidence matrix for faces.
 """
-function incidence_faces(s::AbstractSimplicial)
+function adjacency_faces(s::AbstractSimplicial)
 	vf = incidence_vf(s)
 	m = fill(Int[], length(faces(s)))
-	for (i, f) in faces(s)
-		for p in f, adj in vf[p]
-			if adj ∉ m[i] push!(m[i], adj); end
+	for (i, f) in pairs(faces(s)), p in f, j in vf[p]
+		# here j is vertex-adjacent to f
+		# we filter for edge-adjacency:
+		if j ≠ i && length(faces(s)[j] ∩ f) ≥ 2 && j ∉ m[i]
+# 			println("  yes, $i $f and $j $(faces(s)[j]) are adjacent")
+			push!(m[i], j)
 		end
+	end
+	return m
+end
+"""
+    incidence_ef(s::AbstractSimplicial)
+
+Returns the incidence function for (edges -> faces),
+as a Dict: Incidence([v1,v2]) = [f1,f2,...],
+where v1 ≤ v2, and the sign of f_i indicates the orientation of the face.
+**This works only because arrays are 1-indexed**.
+"""
+function incidence_ef(s::AbstractSimplicial)
+	m = Dict{typeof(SA[0,0]), Vector{Int}}()
+	for (i, f) in pairs(faces(s)), u in 1:3
+		e = [f[u], f[plus1mod3[u]]]
+		(b, c) = edge_can(e)
+		if !haskey(m, c) m[c] = []; end
+		push!(m[c], b*i)
 	end
 	return m
 end
@@ -1689,10 +1710,46 @@ function merge(s1::AbstractSimplicial, s2::AbstractSimplicial, same = isequal)
 	newfaces = similar(faces(s1), f1+f2)
 	newfaces[1:f1] = faces(s1)
 	for (i, f) in pairs(faces(s2))
-		newfaces[f1+i] = renum[f] # array indexed by array trick
+		newfaces[f1+i] = face_can(renum[f]) # array indexed by array trick
 	end
 
-	return (typeof(s1))(newpoints, newfaces)
+	return (typeof(s1))(newpoints, sort(newfaces))
+end
+
+"""
+    select_faces(f, s::AbstractSimplicial)
+
+Returns the subcomplex containing only the faces `i` for which `f(i)`
+evaluates to a true value. Points are renamed.
+"""
+function select_faces(test::Function, s::AbstractSimplicial)
+	renum = fill(0, eachindex(points(s)))
+	println("before renum: $s")
+	newfaces = Int[]
+	newpoints = similar(points(s))
+	n = 0
+	for (i,f) in pairs(faces(s))
+		if !test(i)  continue; end
+		for p in f
+			if renum[p] == 0
+				renum[p] = (n+= 1)
+				newpoints[n] = points(s)[p]
+				println("renumbering $p=$(points(s)[p]) to $(renum[p])")
+			end
+		end
+		push!(newfaces, i)
+	end
+	resize!(newpoints, n)
+	println("faces kept = $newfaces")
+	println("points renumbered = $renum")
+	println("newpoints = $newpoints")
+	for f in newfaces
+		println("renum face $f $(faces(s)[f]) => $(renum[faces(s)[f]])")
+	end
+	println([renum[faces(s)[f]] for f in newfaces])
+	return (typeof(s))(
+		newpoints,
+		renum[faces(s)[f]] for f in newfaces)
 end
 
 """
@@ -1707,7 +1764,7 @@ Returns a vector of objects (same type as `s`), each one of which is a
 function connected_components(points, faces)
 	# Build the incidence matrix from the list of faces
 	N = length(points)
-	G = LightGraphs.SimpleGraph(incidence_points(points, faces))
+	G = LightGraphs.SimpleGraph(adjacency_points(points, faces))
 	C = LightGraphs.connected_components(G)
 	# C is a vector of vector of indices
 	# newindex[oldindex] = [component, new index]
@@ -2258,7 +2315,7 @@ end
 # 
 # @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(points(u)))
 # 
-# 3d tools««1
+# Operations on 3d triangulations««1
 # Interval and bounding box««2
 struct ClosedInterval{T}
 	low::T
@@ -2298,74 +2355,6 @@ end
 bounding_box(points::AnyVec{D,<:Number}...) where{D} = BoundingBox{D}([
 	ClosedInterval(extrema([p[i] for p in points])...) for i in 1:D]...)
 @inline show(io::IO, b::BoundingBox) = join(io, b.proj, "×")
-# # Simplex««2
-# """
-#     Simplex{N,D,T}
-# 
-# `(N-1)`-dimensional simplex embedded in `D`-dimensional space.
-# """
-# struct Simplex{N,D,T}
-# 	points::SVector{N,Vec{D,T}}
-# 	@inline Simplex(p...) where{D} =
-# 		Simplex{length(p)}(p...)
-# 	@inline Simplex{N}(p::Vec{D,<:Real}...) where{N,D} =
-# 		Simplex{N,D,promote_type(eltype.(p)...)}(p...)
-# 	@inline Simplex{N,D,T}(p...) where{N,D,T} =
-# 		new{N,D,T}(SVector{N,Vec{D,T}}(Vec{D,T}.(p)...))
-# end
-# Base.getindex(s::Simplex, i::Integer) = s.points[i]
-# Base.length(s::Simplex{N}) where{N} = N
-# const Segment = Simplex{2}
-# const Triangle= Simplex{3}
-# @inline bounding_box(p::Path) = 
-# @inline bounding_box(s::Simplex) = bounding_box(S.points...)
-# function show(io::IO, s::Simplex)
-# 	print(io, "Simplex(")
-# 	join(io, s.points, ", ")
-# 	print(io, ")")
-# end
-# Hyperplane and intersection««2
-# """
-#     Hyperplane
-# 
-# Equation is a*x + b = 0.
-# """
-# struct Hyperplane{D,T}
-# 	a::Transpose{T,SVector{D,T}}
-# 	b::T
-# 	@inline Hyperplane(a::SVector{D}, b) where{D} =
-# 		new{D,promote_type(eltype(a),typeof(b))}(transpose(a), b)
-# end
-# @inline (h::Hyperplane{D})(p::Vec{D}) where{D} = h.a*p + h.b
-# """
-#     inter(p1=>p2, hyperplane)
-# 
-# Assumes that h(p1) * h(p2) < 0. Returns
-# """
-# function inter(segment::Pair{<:AnyVec}, h::Polyhedra.Hyperplane)
-# 	f = [h(p) for p in segment]
-# 	# f(t) = f1 + t (f2-f1) = 0
-# 	# t = -f1/(f2-f1)
-# 	t = -f[1]/(f[2]-f[1])
-# 	return (f[2]*segment[1]-f[1]*segment[2])/(f[2]-f[1])
-# end
-# """
-#     simplex_inter(simplex, hyperplane)
-# 
-# Computes intersection of convex hull of points (p1,...) and hyperplane.
-# Returns a set of points in the hyperplane.
-# """
-# function simplex_inter(simplex::Path{D}, h::Hyperplane{D}) where{D}
-# 	v = [sign(h(p)) for p in simplex]
-# 	segments = [ (i, j) for i in eachindex(simplex), j in eachindex(simplex)
-# 		if v[i] > 0 && v[j] < 0 ]
-# 	i1 = [ segment_inter(simplex[s[1]] => simplex[s[2]], h) for s in segments ]
-# 	i2 = [ simplex[i] for i in eachindex(simplex) if v[i] == 0 ]
-# 	return [i1; i2]
-# end
-# TODO: intersect and canonical project (remove max-normal coordinate)
-# intersect simplex (intersect all (n-1)simplexes)
-# preserve orientation
 # Triangle intersection««2
 """
     intersecting_bboxes(s1, s2)
@@ -2398,52 +2387,7 @@ function supporting_plane(p1::Vec{3}, p2::Vec{3}, p3::Vec{3})
 	b = dot(c, p1)
 	return Polyhedra.HyperPlane(c, b)
 end
-#=
-1. inter_union = given two triangulations T1, T2,
- - refinements T'1, T'2 of both triangulations
- - a list S of intersecting segments (being borders of some triangles in
-	 T'1, T'2)
-	 as pairs [vertex1, vertex2]
- - incidence relation between S and T'1, T'2
-	 segment-index => (start, end, triangle-indices)
-1.1*compute bounding box of all triangles
-1.2*bounding box incidence: compute sparse matrix of intersecting
-bounding boxes
-1.2.1 (todo: with octtree)
-1.3 for each triangle Ts ∈ T1:
-1.3.1*compute supporting plane for Ts and best projection
-1.3.2*for all bbox-intersecting Ti:
-1.3.2.1*represent Ts ∩ Ti as a {0,1,2,3}-simplex in this plane;
-1.3.2.2*(ignore if 0 or 1-simplex)
-1.3.3*constrained-triangulate from all 2-simplexes and edges of
-  3-simplexes
-1.3.4*push all (3d lifted) triangles to new triangulation T'1
-1.3.5 push all edges to segments (with endpoints + link to T'1)
-1.4 same swapping T1 and T2
-1.5 clean the list for segments:
-1.5.1 remove duplicates
-1.5.2 reorder triangles
 
-
-2. triangle_inter: source triangle Ts, incident triangles Ti,
-compute all the intersections Ts ∩ Ti as segments inside
-(a 2d projection of) Ts (with linkage info + orientation).
-
-
-2.1j. plane projection: a 2d plane projection on which the triangle Ts
-projects bijectively and orientation-preserving
-i.e. |z| > x,y => (z>0 ⇒ (x,y); z<0 ⇒ (y,x)) for example.
-plane projection = 2 indices in {0,3} (6 possibilities).
-
-Intersection in 2 steps:
- - detect bounding box intersection
- - intersection with supporting plane: simplex{3,3} → other simplex
-	 ({N,2} for N=0,1,2).
- - intersection of simplex and supporting triangle:
-
-=#
-#= goal: being able to map newedge -> newtriangles
-=#
 """
     triangle_intersections(triangle, s::Triangulation)
 
@@ -2504,8 +2448,8 @@ function triangle_intersections(triangle::AnyPath{3}, s::Triangulation)
 	# compute triangulation
 # 	println("newpoints=$newpoints\n")
 # 	println("newedges=$newedges\n")
-	newtri = Triangulate.constrained_triangulation(newpoints,
-		collect(1:n), newedges)
+	newtri = face_can.(Triangulate.constrained_triangulation(newpoints,
+		collect(1:n), newedges))
 	# points are in rows, hence the transpose:
 	newpoints3 = newpoints * transpose(linear)
 # 	println("\e[31mnewpoints3=$newpoints3")
@@ -2515,6 +2459,7 @@ function triangle_intersections(triangle::AnyPath{3}, s::Triangulation)
 		points=[newpoints3[i,:]+origin for i in 1:size(newpoints3,1)],
 		faces=newtri)
 end
+# Merging triangulations««2
 """
     cotriangulate(s1::Triangulation, s2::Triangulation)
 
@@ -2548,6 +2493,17 @@ is `-1` if the edge was reversed.
 """
 @inline edge_can(e) =(sign(e[2]-e[1]), SA[minimum(e), maximum(e)])
 """
+    face_can
+
+Puts a face in canonical form, by a cyclic permutation putting the
+smallest index first.
+"""
+function face_can(f)
+	n = length(f)
+	m = findmin(f)[2]
+	return [f[mod1(i-1+m, n)] for i ∈ eachindex(f)]
+end
+"""
     inter_union(s1::Triangulation, s2::Triangulation)
 
 """
@@ -2555,157 +2511,111 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 	# dissect both triangulations
 	s1a = cotriangulate(s1, s2)
 	s2a = cotriangulate(s2, s1)
-	println(s1a)
-	println(s2a)
-	# match points««
-	# FIXME: `cotriangulate` could return information that speeds up the
-	# “matching” part.
-	# FIXME: this is quadratic, it could be made quasi-linear with a tree
-	# We use Vectors for storing the correspondence between points:
-	# this has linear storage, not exceeding that of the input structure.
-	pt2 = zeros(Int, length(points(s1a)))
-	pt1 = zeros(Int, length(points(s2a)))
-	for (i1, p1) in pairs(points(s1a)), (i2, p2) in pairs(points(s2a))
-		if p1 == p2
-			pt2[i1] = i2; pt1[i2] = i1
-		end
-	end
-	#»»
-	for (i,j) in pairs(pt2)
-		j > 0 && println("pts: $i ↔ $j = $(points(s1a)[i]) $(points(s2a)[j])")
-	end
-	# match edges ««
-	# face: which face contains this edge (sign gives orientation)
-	# vec:  vector pointing to third point of this face
-	T = @NamedTuple{face::Int, vec::typeof(points(s1)[1])}
-	# edges1[e] is the set of faces of `s1a` containing edge e
-	edges1 = Dict{SVector{2,Int}, Vector{T}}()
-	for (i, f) in pairs(faces(s1a)), u in 1:3
-		e1 = [f[u], f[plus1mod3[u]]]
-		e2 = pt2[e1] # corresponding edge (if it exists) in s2a
-		if e2[1] != 0 && e2[2] != 0
-			(b1, c1) = edge_can(e1)
-			# we use the sign to store the orientation:
-			# (this works only in a 1-indexed array...)
-			if !haskey(edges1, c1) edges1[c1] = []; end
-			println("push edge: face=$(b1*i), u=$u, c1=$c1, f=$f")
-			push!(edges1[c1], (
-				face=b1*i,
-				vec=points(s1a)[f[plus2mod3[u]]] - points(s1a)[c1[2]]
-			))
-		end
-	end
-	# now we search for faces of `s2a` corresponding to edges1:
-	edges = Dict{SVector{2,Int},Vector{Vector{T}}}()
-	for (i, f) in pairs(faces(s2a)), u in 1:3
-		e2 = [f[u], f[plus1mod3[u]]]
-		e1 = pt1[e2] # corresponding edge
-		(b1, c1) = edge_can(e1)
-		if !haskey(edges1, c1) continue; end
-		if !haskey(edges, c1)
-			edges[c1] = [edges1[c1], []]
-		end
-		# now we know that this edge is present in both triangulations
-		(b2, c2) = edge_can(e2)
-		push!(edges[c1][2], (
-			face=b2*i,
-			vec=points(s2a)[f[plus2mod3[u]]] - points(s2a)[c2[2]]
-		))
-	end
-	#»»
-# 	for ((p1, p2), (d1, d2)) in pairs(edges)
-# 		println((p1,p2), "=>\t", Tuple.(d1), "\t", Tuple.(d2))
-# 	end
-	# classify around each edge««
-	# mark[1][i] holds the type of i-th triangle of `s1a`, coded in the
-	# following way: 1=inter; 2=union; 3=both; -1=unknown
-	mark = [fill(-1, length(faces(s1a))),
-	        fill(-1, length(faces(s2a)))]
-	for ((p1, p2), (d1, d2)) in pairs(edges)
-		# (p1, p2): end points of this edge
-		# d1: data for s1a (as a Vector of NamedTuples (:face, :vec))
-
-		# the vector onto which we project:
-		dir3 = points(s1a)[p2] - points(s1a)[p1]
-
-		e = findmax(abs.(dir3))[2]
-		proj = SA[plus1mod3[e], plus2mod3[e]]
-		dir2 = dir3[proj]
-		dir2scaled = dir2/norm2(dir3)
-		# projection of v is v - (v · dir) dir/norm (look ma, no √)
-		# we keep only the 2 best coordinates:
-		@inline project(v) = 3*(v[proj] - (v ⋅ dir3)*dir2scaled)
-
-		# projected vectors (2-dimensional):
-		vec2 = vcat([ project(x.vec) for x in d1 ],
-		            [ project(x.vec) for x in d2 ])
-		# we reindex parent, orientation, and face number in the same way:
-		@inline classif(parent, x) =
-			(orientation=sign(x.face), parent=parent, face=abs(x.face))
-		vclassif = vcat([ classif(1,x) for x in d1 ],
-		                [ classif(2,x) for x in d2 ])
-		println("\e[34mfor edge = $((p1,p2)): dir3=$dir3\e[m")
-# 		println(" e=$e, dir2=$dir2, dir2scaled=$dir2scaled")
-# 		println(" xyz ↦ $(project([1,0,0])) $(project([0,1,0])) $(project([0,0,1]))")
-# 		println([x.vec for x in d1])
-# 		println([x.vec for x in d2])
-		println("vec2=",Vector.(vec2))
-		println("type = ", [i.orientation*i.parent for i in vclassif])
-# 		@inline orient(i,j) = Int(sign(cross(vec2[i], vec2[j])))
-# 		@inline upper_half(i) = let s = orient(1,i)
-# 			return (s > 0) || (s == 0 && vec2[1] ⋅ vec2[i] > 0)
+	# since ∪ and ∩ are commutative, we don't need to know the origin of
+	# the faces, and merging the two triangulations at this stage will make
+	# indexing much simpler (e.g. no need to renumber vertices, etc.).
+	# Note that this does not remove duplicate faces; this is on purpose
+	# (the inside of a duplicate face is automatically ∩):
+	s3 = merge(s1a, s2a)
+	println(s3)
+	scad(s3, "/tmp/s3.scad", scale=60, offset=[0,-150,0])
+# 	# match points««
+# 	# FIXME: `cotriangulate` could return information that speeds up the
+# 	# “matching” part.
+# 	# FIXME: this is quadratic, it could be made quasi-linear with a tree
+# 	# We use Vectors for storing the correspondence between points:
+# 	# this has linear storage, not exceeding that of the input structure.
+# 	pt2 = zeros(Int, length(points(s1a)))
+# 	pt1 = zeros(Int, length(points(s2a)))
+# 	for (i1, p1) in pairs(points(s1a)), (i2, p2) in pairs(points(s2a))
+# 		if p1 == p2
+# 			pt2[i1] = i2; pt1[i2] = i1
 # 		end
-# 		reorder = vcat(
-# 			sort(filter(upper_half, eachindex(vec2)), lt=(i,j)->orient(i,j)>0),
-# 			sort(filter(i->!upper_half(i), eachindex(vec2)),
-# 				lt=(i,j)->orient(i,j)>0))
-		# conversion to rational parameter of circle (for ordering):
-		# x=(u⋅v), y=[u,v], k=‖u‖, then t=y/(x+k)
+# 	end
+# 	#»»
+# 	for (i,j) in pairs(pt2)
+# 		j > 0 && println("pts: $i ↔ $j = $(points(s1a)[i]) $(points(s2a)[j])")
+# 	end
+	inc_ef = incidence_ef(s3)
+	# mark[f] holds the type of face f, coded as: -1=unknown;
+	# 0 = to be removed; 1=union; 2=inter; 3=both
+	mark = fill(-1, length(faces(s3)))
+	@inline setmark!(c, k) = begin
+		if faces(s3)[c] == [3,11,14]
+			println("\e[31;1m ########## ICI:\e[m")
+		end
+		println("  marking face($c)$(faces(s3)[c]) = $k")
+		if mark[c] == -1  mark[c] = k; end
+	end
+
+  # mark faces around each edge««
+	for (e, flist) in pairs(inc_ef)
+		# e is a pair of indices in points(s3),
+		# flist a vector of faces touching this edge
+		# we look only for edges where the two surfaces intersect:
+		if length(flist) ≤ 2; continue; end
+
+		face_vec3 = begin # 3d vectors representing all adjacent faces
+			face_pt3 = [sum(faces(s3)[abs(f)]) - sum(e) for f in flist]
+			pt = points(s3)
+		[ pt[i] - pt[e[2]] for i in face_pt3 ]
+		end
+		# we project these faces on the plane perpendicular to edge e;
+		# the eye is at position e[2] looking towards e[1].
+		face_vec2 = begin # 2d projection of face_vec3 (preserving orientation)
+			dir3 = points(s3)[e[2]]-points(s3)[e[1]]
+			k = findmax(abs.(dir3))[2]
+			println("projecting by vector $dir3, eliminating coord $k")
+			proj = dir3[k] > 0 ? SA[plus1mod3[k], plus2mod3[k]] :
+			                     SA[plus2mod3[k], plus1mod3[k]]
+			dir2 = dir3[proj]
+			dir2scaled = dir2/norm2(dir3)
+		[ v[proj] - (v ⋅ dir3)*dir2scaled for v in face_vec3 ]
+		end
+		# conversion to rational parameter of circle (for sorting): t = y/(x+1)
 		# since some types (Fixed) cannot hold a ∞ value, we clamp it to
 		# some arbitrary constant B, by composing on [0,∞] by homography
 		# t ↦ Bt/(t+B) (and on [0,∞] by the opposite).
-		@inline xy2rat(x,y,k, B=1024) = (y == 0) ? (x > 0 ? zero(x) : oftype(x,B)) :
-			(y*B)/(B*(x+k) + abs(y))
-		rat_param = let u = vec2[1], u₁ = norm(u); @inline function(i)
-			xy2rat(u⋅vec2[i], cross(u,vec2[i]), u₁)
-		  end end
-		reorder = sort(eachindex(vec2); by= rat_param)
-# 		println("\e[33m$(sort(eachindex(vec2);by=rat_param))\e[m")
-# 		println("reorder: $reorder => types=$([vclassif[i].orientation*vclassif[i].parent for i in reorder])")
+		rat_param = begin
+			@inline xy2rat(x,y, B=1024) =
+				(y == 0) ? (x > 0 ? zero(x) : oftype(x,B)) :
+				(y*B)/(B*(x+1) + abs(y))
+		[ xy2rat(v...) for v in face_vec2 ]
+		end
+		reorder = sort(eachindex(flist); by=i->rat_param[i])
+
+		println("\e[1medge $e:\e[m")
+		for i in eachindex(flist)
+			f = abs(flist[i])
+			println("  face $(flist[i]) = $(faces(s3)[f])")
+			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
+		end
+		println("  rat_param=$rat_param")
+		println("  reorder=$reorder to $(flist[reorder])")
+
 		for (i, r1) in pairs(reorder)
-			r2 = reorder[mod1(i+1, length(reorder))]
-			println("examining pairs ($r1, $r2): $(vec2[r1]) $(vec2[r2])")
-			c1 = vclassif[r1]
-			c2 = vclassif[r2]
-			# if collinear vectors:
-			if cross(vec2[r1], vec2[r2]) == 0
-				if c1.orientation == c2.orientation
-					mark[c1.parent][c1.face] = 3
-					mark[c2.parent][c2.face] = 3
+			r2 = reorder[mod1(i+1, length(reorder))] # next face
+			(f1, f2) = flist[[r1, r2]] # two consecutive face numbers
+			if f1 > 0 && f2 > 0
+				if rat_param[r1] == rat_param[r2]
+					setmark!(f1, 3); setmark!(f2, 0)
+				else
+					println("couple ($f1, $f2) sets $f1<-2, $f2<-1")
+					setmark!(f1, 2); setmark!(f2, 1)
 				end
 			end
-# 			println("  examining pair $((r1, r2))")
-			if c1.orientation == c2.orientation
-# 				println("   good pair")
-				if c1.orientation > 0
-					mark[c1.parent][c1.face] = 2
-					mark[c2.parent][c2.face] = 1
+			if f1 < 0 && f2 < 0
+				if rat_param[r1] == rat_param[r2]
+					setmark!(-f1, 3); setmark!(-f2, 0)
 				else
-					mark[c1.parent][c1.face] = 1
-					mark[c2.parent][c2.face] = 2
+					setmark!(-f1, 1); setmark!(-f2, 2)
 				end
 			end
 		end
 	end
 	#»»
-	_label = Dict(-1=>"?", 0=>"none", 1=>"∪", 2=>"∩", 3=>"both")
-	for (i, f) in pairs(faces(s1a))
-		println("$i: $f => $(_label[mark[1][i]])")
-	end
-
-	if1 = incidence_faces(s1a)
-	if2 = incidence_faces(s2a)
-	# propagate information««
+	# propagate marks on adjacent faces (where mark is not already
+	# defined).
 	function propagate!(data, mat)
 		c = 0
 		for (f, adj) in pairs(mat), g in adj
@@ -2716,27 +2626,30 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 		end
 		return c
 	end
-	while(propagate!(mark[1], if1) > 0) end
-	while(propagate!(mark[2], if2) > 0) end
-	#»»
-	for (i, f) in pairs(faces(s1a))
-		println("$i: $f => $(_label[mark[1][i]])")
+
+	println("computing adjacency")
+	inc_f = adjacency_faces(s3)
+	println("  done x")
+
+	_label = Dict(-1=>"?", 0=>"none", 1=>"∪", 2=>"∩", 3=>"both")
+	for (i, f) in pairs(faces(s3))
+		println("$i: $f => $(_label[mark[i]])")
 	end
-	# TODO: ray-shooting to find isolated connected components««1
-	#»»1
+
+	while(propagate!(mark, inc_f) > 0); end
+
+	# TODO: use ray-shooting to find isolated connected components.
+
+	for (i, f) in pairs(faces(s3))
+		println("$i: $f => $(_label[mark[i]])")
+	end
+	return (triangulation = s3, mark = mark)
 end
 
-# """
-#     triangle_intersections(t::Triangle, u1::Triangle, u2, u3, ...)
-# """
-# function triangle_intersections(t::Triangle{3}, u::Triangle{3}...)
-# 	h = supporting_plane(t)
-# 	m = findmax(abs.(h.a))[2]
-# 	# FIXME: check if we need orientation-preserving here
-# 	proj = [mod1(m+1, 3), mod1(m+2, 3)] # indices for 2d projection
-# 	for t2 in u
-# 	end
-# end
+function inter(s1::Triangulation, s2::Triangulation)
+	iu = inter_union(s1, s2)
+	return select_faces(i->iu.mark[i] ∈ [1,3], iu.triangulation)
+end
 
 # Points of cubes, etc.««2
 # # function points(s::Cube, parameters::NamedTuple)
@@ -2979,6 +2892,31 @@ end
 # export ⋃, ⋂
 # export offset, hull, minkowski, convex_hull
 # 
+# »»1
+function scad(s::Solids.AbstractSimplicial, io::IO = stdout; scale=50,
+		offset=[0.,0.,0.])
+	println(io, "translate($offset) {")
+	for (i, p) in pairs(Solids.points(s))
+		println(io, "color(\"black\") translate($scale*$p) text(\"$i\");")
+	end
+	println(io, "color(\"cyan\", .5) polyhedron([")
+	b = false
+	for p in Solids.points(s)
+		println(io, b ? "," : ""); b = true
+		print(io, " $scale*",Vector{Float64}(p))
+	end
+	println(io, "],[")
+	b = false
+	for f in Solids.faces(s)
+		println(io, b ? "," : ""); b = true
+		println(io, " ", Vector{Int}(f) .- 1)
+	end
+	println(io, "]); }")
+end
+function scad(s::Solids.AbstractSimplicial, f::AbstractString="/tmp/a.scad";
+		kwargs...)
+	open(f, "w") do io scad(s, io; kwargs...) end
+end
 end #««1 module
 # »»1
 
