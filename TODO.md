@@ -12,7 +12,7 @@
  * check `convex_hull` works
 # Basic types
  - clarify `Path`: maybe add `points` iterator and `matrix` abstract
-	 conversion.
+	 conversion. Or make `Path` an actual struct type and add accessors.
  - add a LineNode reference to constructors
    (i.e. first thing in call stack outside module).
  - add something for fake-3d objects (embedded in a subspace):
@@ -107,8 +107,7 @@
  * make this a proper package
  - distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
-[https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
- - interface with CGAL for computing CSG in 3d
+ * [https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
  - add some visualization (`Makie`?)
  - export to SVG/STL/PLY
    - `MeshIO`
