@@ -22,9 +22,8 @@ import Clipper
 import LightGraphs
 
 import Base: show, print, length, getindex, size, iterate, eltype, convert
-import Base: union, intersect, setdiff
+import Base: union, intersect, setdiff, copy, isempty
 import Base: *, +, -, ∈
-import Base: isempty
 
 #————————————————————— Ideal objects —————————————————————————————— ««1
 #»»1
@@ -1628,53 +1627,42 @@ function adjacency_points(points, faces)
 end
 
 """
-    incidence_vf(s::AbstractSimplicial)
+    incidence(s::AbstractSimplicial)
 
-Returns the incidence structure vertices -> faces, as a list of lists:
-l[point index] = [set of faces containing this point].
+Returns an incidence and ajacency structure for the simplicial complex s.
+This returns a named tuple with fields:
+ - `points`: adjacency for points;
+ - `faces`: adjacency for faces;
+ - `edge_faces`: incidence edge -> face;
+ - `point_faces`: incidence point -> face;
+
+TODO: add bool options to compute only a part of this. And allow passing
+precomputed incidence structures to functions who need them.
 """
-function incidence_vf(s::AbstractSimplicial)
-	m = [ Int[] for p in points(s)]
+function incidence(s::AbstractSimplicial)
+  inc_pf = [Int[] for p in points(s)]
 	for (i, f) in pairs(faces(s)), p in f
-		push!(m[p], i)
-	end
-	return m
-end
-"""
-    adjacency_faces(s::AbstractSimplicial)
-
-Returns the incidence matrix for faces.
-"""
-function adjacency_faces(s::AbstractSimplicial)
-	vf = incidence_vf(s)
-	m = fill(Int[], length(faces(s)))
-	for (i, f) in pairs(faces(s)), p in f, j in vf[p]
-		# here j is vertex-adjacent to f
-		# we filter for edge-adjacency:
-		if j ≠ i && length(faces(s)[j] ∩ f) ≥ 2 && j ∉ m[i]
-# 			println("  yes, $i $f and $j $(faces(s)[j]) are adjacent")
-			push!(m[i], j)
-		end
-	end
-	return m
-end
-"""
-    incidence_ef(s::AbstractSimplicial)
-
-Returns the incidence function for (edges -> faces),
-as a Dict: Incidence([v1,v2]) = [f1,f2,...],
-where v1 ≤ v2, and the sign of f_i indicates the orientation of the face.
-**This works only because arrays are 1-indexed**.
-"""
-function incidence_ef(s::AbstractSimplicial)
-	m = Dict{typeof(SA[0,0]), Vector{Int}}()
+		push!(inc_pf[p], i)
+  end
+	inc_ef = Dict{typeof(SA[0,0]), Vector{Int}}()
 	for (i, f) in pairs(faces(s)), u in 1:3
 		e = [f[u], f[plus1mod3[u]]]
 		(b, c) = edge_can(e)
-		if !haskey(m, c) m[c] = []; end
-		push!(m[c], b*i)
+		if !haskey(inc_ef, c) inc_ef[c] = []; end
+		push!(inc_ef[c], b*i)
 	end
-	return m
+	inc_ff = [Int[] for f in faces(s)]
+	for a in values(inc_ef), i in eachindex(a), j in 1:i-1
+		(f, g) = abs(a[i]), abs(a[j])
+		push!(inc_ff[f], g)
+		push!(inc_ff[g], f)
+	end
+
+	return (
+		point_faces = inc_pf,
+		edge_faces = inc_ef,
+		faces = inc_ff,
+	)
 end
 
 @inline copy(s::AbstractSimplicial) = (typeof(s))(points(s), faces(s))
@@ -1710,7 +1698,7 @@ function merge(s1::AbstractSimplicial, s2::AbstractSimplicial, same = isequal)
 	newfaces = similar(faces(s1), f1+f2)
 	newfaces[1:f1] = faces(s1)
 	for (i, f) in pairs(faces(s2))
-		newfaces[f1+i] = face_can(renum[f]) # array indexed by array trick
+		newfaces[f1+i] = renum[f] # array indexed by array trick
 	end
 
 	return (typeof(s1))(newpoints, sort(newfaces))
@@ -2020,6 +2008,49 @@ function Triangulations(points, faces)
 	C = connected_components(points, faces)
 	return [ triangulate_surface(c...) for c in C ]
 end
+# manifoldness test««2
+"""
+    ismanifold(s::AbstractSimplicial)
+
+Returns `(value, text)`, where `value` is a Bool indicating whether this
+is a manifold surface, and `text` explains, if this is not manifold,
+where the problem lies.
+"""
+function ismanifold(s::AbstractSimplicial)
+	# TODO: check that triangles do not intersect
+	inc = incidence(s)
+	for (e, f) in pairs(inc.edge_faces)
+		if length(f) != 2
+			return (value=false, text="edge $e adjacent to $(length(f)) faces: $f")
+		end
+	end
+	for (p, flist) in pairs(inc.point_faces)
+		adj = [ flist ∩ inc.faces[f] for f in flist ]
+		for (i, a) in pairs(adj)
+			if length(a) != 2
+				return (value=false,
+					text="vertex $p: face $(flist[i]) adjacent to $(length(a))
+					other faces ($a)")
+			end
+		end
+		# check connectedness
+		m = falses(length(flist)); old_m = copy(m); m[1] = true
+		rev = Dict{Int,Int}()
+		for (u,v) in pairs(flist) rev[v] = u; end
+		while m ≠ old_m
+			copy!(old_m, m)
+			for i in vcat(adj[m]...)
+				m[rev[i]] = true
+			end
+		end
+		if(!all(m))
+			return (value=false, text="faces around vertex $p do not form a connected graph")
+		end
+		# follow cycle
+	end
+	return (value=true, text="is manifold")
+end
+
 #Convex hull««1
 # 2d convex hull ««2
 
@@ -2315,7 +2346,7 @@ end
 # 
 # @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(points(u)))
 # 
-# Operations on 3d triangulations««1
+# 3d union and intersection««1
 # Interval and bounding box««2
 struct ClosedInterval{T}
 	low::T
@@ -2448,8 +2479,8 @@ function triangle_intersections(triangle::AnyPath{3}, s::Triangulation)
 	# compute triangulation
 # 	println("newpoints=$newpoints\n")
 # 	println("newedges=$newedges\n")
-	newtri = face_can.(Triangulate.constrained_triangulation(newpoints,
-		collect(1:n), newedges))
+	newtri = Triangulate.constrained_triangulation(newpoints,
+		collect(1:n), newedges)
 	# points are in rows, hence the transpose:
 	newpoints3 = newpoints * transpose(linear)
 # 	println("\e[31mnewpoints3=$newpoints3")
@@ -2479,12 +2510,6 @@ function cotriangulate(s1::Triangulation, s2::Triangulation)
 	return s3
 end
 
-struct EdgeMatch
-	points1::SVector{2,Int}
-	points2::SVector{2,Int}
-	faces1::Vector{Int}
-	faces2::Vector{Int}
-end
 """
     edge_can
 
@@ -2492,17 +2517,6 @@ Puts an edge in canonical form. Returns `(sign, canonical)`, where sign
 is `-1` if the edge was reversed.
 """
 @inline edge_can(e) =(sign(e[2]-e[1]), SA[minimum(e), maximum(e)])
-"""
-    face_can
-
-Puts a face in canonical form, by a cyclic permutation putting the
-smallest index first.
-"""
-function face_can(f)
-	n = length(f)
-	m = findmin(f)[2]
-	return [f[mod1(i-1+m, n)] for i ∈ eachindex(f)]
-end
 """
     inter_union(s1::Triangulation, s2::Triangulation)
 
@@ -2517,26 +2531,7 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 	# Note that this does not remove duplicate faces; this is on purpose
 	# (the inside of a duplicate face is automatically ∩):
 	s3 = merge(s1a, s2a)
-# 	println(s3)
-# 	scad(s3, "/tmp/s3.scad", scale=60, offset=[0,-150,0])
-# 	# match points««
-# 	# FIXME: `cotriangulate` could return information that speeds up the
-# 	# “matching” part.
-# 	# FIXME: this is quadratic, it could be made quasi-linear with a tree
-# 	# We use Vectors for storing the correspondence between points:
-# 	# this has linear storage, not exceeding that of the input structure.
-# 	pt2 = zeros(Int, length(points(s1a)))
-# 	pt1 = zeros(Int, length(points(s2a)))
-# 	for (i1, p1) in pairs(points(s1a)), (i2, p2) in pairs(points(s2a))
-# 		if p1 == p2
-# 			pt2[i1] = i2; pt1[i2] = i1
-# 		end
-# 	end
-# 	#»»
-# 	for (i,j) in pairs(pt2)
-# 		j > 0 && println("pts: $i ↔ $j = $(points(s1a)[i]) $(points(s2a)[j])")
-# 	end
-	inc_ef = incidence_ef(s3)
+	inc_data = incidence(s3)
 	# mark[f] holds the type of face f, coded as: -1=unknown;
 	# 0 = to be removed; 1=union; 2=inter; 3=both
 	mark = fill(-1, length(faces(s3)))
@@ -2549,7 +2544,7 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 	end
 
   # mark faces around each edge««
-	for (e, flist) in pairs(inc_ef)
+	for (e, flist) in pairs(inc_data.edge_faces)
 		# e is a pair of indices in points(s3),
 		# flist a vector of faces touching this edge
 		# we look only for edges where the two surfaces intersect:
@@ -2618,18 +2613,12 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 		return c
 	end
 
-	println("computing adjacency")
-	inc_f = adjacency_faces(s3)
-	println("  done x")
-
 # 	_label = Dict(-1=>"?", 0=>"none", 1=>"∪", 2=>"∩", 3=>"both")
 # 	for (i, f) in pairs(faces(s3))
 # 		println("$i: $f => $(_label[mark[i]])")
 # 	end
 
-	while(propagate!(mark, inc_f) > 0); end
-
-	# TODO: use ray-shooting to find isolated connected components.
+	while(propagate!(mark, inc_data.faces) > 0); end
 
 # 	for (i, f) in pairs(faces(s3))
 # 		println("$i: $f => $(_label[mark[i]])")
@@ -2645,7 +2634,6 @@ function union(s1::Triangulation, s2::Triangulation)
 	iu = inter_union(s1, s2)
 	return select_faces(i->iu.mark[i] == 1, iu.triangulation)
 end
-
 # Points of cubes, etc.««2
 # # function points(s::Cube, parameters::NamedTuple)
 # # 	if s.center
@@ -2892,7 +2880,7 @@ function scad(s::Solids.AbstractSimplicial, io::IO = stdout; scale=50,
 		offset=[0.,0.,0.])
 	println(io, "translate($offset) {")
 	for (i, p) in pairs(Solids.points(s))
-		println(io, "color(\"black\") translate($scale*$p) text(\"$i\");")
+		println(io, "color(\"black\") translate($scale*$p) linear_extrude(1) text(\"$i\");")
 	end
 	println(io, "color(\"cyan\", .5) polyhedron([")
 	b = false
@@ -2908,10 +2896,8 @@ function scad(s::Solids.AbstractSimplicial, io::IO = stdout; scale=50,
 	end
 	println(io, "]); }")
 end
-function scad(s::Solids.AbstractSimplicial, f::AbstractString="/tmp/a.scad";
-		kwargs...)
+@inline scad(s::Solids.AbstractSimplicial, f::AbstractString; kwargs...) =
 	open(f, "w") do io scad(s, io; kwargs...) end
-end
 end #««1 module
 # »»1
 

@@ -3,7 +3,7 @@
 	 merged structure)
    - force-remove opposite faces (neither ∪ nor ∩)
 	 - check if it works for complement
- * use `import` for modules used only a few times once (`Color`, all geometry)
+ + use `import` for modules used only a few times once (`Color`, all geometry)
    to avoid polluting the namespace
  * test suite
  - a common name for meshing objects (either `Mesh` or `elements` ?)
