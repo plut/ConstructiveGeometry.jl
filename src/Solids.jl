@@ -255,268 +255,268 @@ function scad(io::IO, v::AbstractVector)
 	print(io, "]")
 end
 
-# # Mechanism for printing top-level objects ««1
-# 
-# # FIXME: replace Main by caller module?
-# # FIXME: add some blob to represent function arguments
-# """
-# 		Solids.include(file::AbstractString, f::Function)
-# 
-# Reads given `file` and returns the union of all top-level `Solids` objects
-# (except the results of assignments) found in the file.
-# 
-# ```
-# #### Example: contents of file `example.jl`
-# C=Solids.Cube(1)
-# S=Solids.Square(1)
-# Solids.Circle(3)
-# S
-# 
-# julia> Solids.include("example.jl")
-# union() {
-#  circle(radius=3.0);
-#  square(size=[1.0, 1.0], center=false);
-# }
-# ```
-# 
-# """
-# function include(file::AbstractString)
-# 	global toplevel_objs = AbstractSolid[]
-# 	Base.include(x->expr_filter(obj_filter, x), Main, file)
-# 	return union(toplevel_objs...)
-# end
-# # # TODO: somehow attach a comment indicating the origin of these objects
-# # # last_linenumber holds the last LineNumberNode value encountered before
-# # # printing this object; we use this to insert relevant comments in the
-# # # output SCAD file:
-# # global last_linenumber = ""
-# # scad(io::IO = stdout) = function(x)
-# # 	if x isa AbstractSolid
-# # 		print(io, "//", last_linenumber, "\n")
-# # 		scad(io, x, "")
-# # 	end
-# # end
-# # @inline scad(x::Any) = x
-# # scad(x::AbstractSolid) = (scad(stdout, x, ""); x)
-# """
-#     obj_filter(x)
-# 
-# Appends `x` to the global list of returned objects if `x` is a
-# `AbstractSolid`.
-# """
-# @inline obj_filter(x) = x
-# @inline obj_filter(x::AbstractSolid) =
-# 	(global toplevel_objs; push!(toplevel_objs, x); return x)
-# 
-# """
-# 		expr_filter(E)
-# 
-# Read top-level expression `E` and decides if a Solids object is returned.
-# 
-# The function `expr_filter` transforms top-level expressions by wrapping
-# each non-assignment expression inside a call to function `obj_filter`,
-# which can then dispatch on the type of the expression.
-# """
-# # Numeric values, LineNumber expressions etc. will never be useful to us:
-# expr_filter(f::Function, e::Any) = e
-# # expr_filter(e::LineNumberNode) = (global last_linenumber = e)
-# # A Symbol might be an AbstractSolid variable name, so we add it:
-# expr_filter(f::Function, e::Symbol) = :($f($e))
-# 
-# # we add any top-level expressions, except assignments:
-# expr_filter(f::Function, e::Expr) = expr_filter(f, Val(e.head), e)
-# expr_filter(f::Function, ::Val, e::Expr) = :($f($e))
-# expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
-# 
-# # if several expressions are semicolon-chained, we pass this down
-# expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
-# 	Expr(:toplevel, expr_filter.(f, x.args)...)
-# 
-# # Primitive solids««1
-# # Generic code««2
-# """
-#     PrimitiveSolid{S,D,T,X}
-# 
-# A type used to factorize code for the various primitive solids.
-# `D` and `T` are as usual the dimension and coordinate type.
-# `S` is a symbol indicating the type of solid (`:square`, etc.);
-# `X` is a NamedTuple type holding the parameters for this solid
-# (e.g. `@NamedTuple{radius::T}` for a sphere).
-# 
-# From the info in `X` we can derive a default constructor
-# (using keyword arguments matching the `NamedTuple`) and a
-# `show` method.
-# """
-# struct PrimitiveSolid{S,D,T,X} <: AbstractSolid{D,T}
-# 	parameters::X
-# 	@inline PrimitiveSolid{S,D,T,X}(;kwargs...) where{S,D,T,X} =
-# 		new{S,D,T,X}(kwargs.data)
-# end
-# @inline (H::Type{<:PrimitiveSolid{S,D,T}})(;kwargs...) where{S,D,T} =
-# 	H{typeof(kwargs.data)}(kwargs.data)
-# @inline (H::Type{<:PrimitiveSolid{S,D}})(;kwargs...) where{S,D} =
-# 	H{_infer_type(H;kwargs...)}(;kwargs...)
-# 
-# @inline scad_name(::PrimitiveSolid{S}) where{S} = S
-# @inline parameters(s::PrimitiveSolid) = getfield(s, :parameters)
-# @inline Base.getproperty(s::PrimitiveSolid, name::Symbol) =
-# 	Base.getproperty(parameters(s), name)
-# 
-# # Ortho, Square, Cube««2
-# Ortho{S,D,T} = PrimitiveSolid{S,D,T,
-# 	@NamedTuple{size::Vec{D,T}, center::Bool}}
-# @inline _infer_type(::Type{<:Ortho};size, center) = real_type(size...)
-# @inline (H::Type{<:Ortho{S,D}})(v::AbstractVector;center=false) where{S,D}=
-# 	H(size=Vec{D}(v), center=center)
-# @inline (H::Type{<:Ortho{S,D}})(v::Real;kwargs...) where{S,D} =
-# 	H(SVector{D}(v for i in 1:D); kwargs...)
-# 
-# """
-#     Square{T}
-#     Square(size, [center=false])
-#     Square([size1, size2], [center=false])
-# 
-# A square (or a rectangle) with coordinate type `T`, parallel to the axes.
-# If `center=true` is passed, then the origin is the center-of-mass;
-# otherwise it is the lower-left corner.
-# """
-# const Square = Ortho{:square,2}
-# """
-#     Cube{T}
-#     Cube(size, [center=false])
-#     Cube([size1, size2, size3], [center=false])
-# 
-# A cube (or a rectangle parallelepiped) with coordinate type `T`, parallel
-# to the axes. If `center=true` is passed, then the origin is the center of
-# mass; otherwise it is the lower-front-left corner.
-# """
-# const Cube = Ortho{:cube,3}
-# 
-# # Ball, Circle, Sphere ««2
-# const Ball{S,D,T} = PrimitiveSolid{S,D,T, @NamedTuple{radius::T}}
-# @inline _infer_type(::Type{<:Ball};radius) = real_type(radius)
-# # groumpf, no dispatch on named arguments...
-# # @inline (T::Type{<:Ball})(;diameter) = T(one_half(diameter))
-# @inline (H::Type{<:Ball})(r) = H(radius=r)
-# 
-# """
-#     Circle{T}
-#     Circle(r)
-# 
-# A circle with radius `r`, centered at the origin.
-# """
-# const Circle = Ball{:circle,2}
-# """
-#     Sphere{T}
-#     Sphere(r)
-# 
-# A sphere with radius `r`, centered at the origin.
-# """
-# const Sphere = Ball{:sphere,3}
-# 
-# # Cylinder ««2
-# """
-#     Cylinder(h, r1, r2 [, center=false])
-#     Cylinder(h, (r1, r2) [, center=false])
-#     Cylinder(h, r [, center=false])
-# 
-# **Warning:** `Cylinder(h,r)` is interpreted as `Cylinder(h,r,r)`,
-# not `(h,r,0)` as in OpenSCAD.
-# """
-# Cylinder{T} = PrimitiveSolid{:cylinder,3,T,
-# 	@NamedTuple{r1::T,r2::T,h::T,center::Bool}}
-# @inline _infer_type(::Type{<:Cylinder}; h,r1,r2,center) = real_type(h, r1, r2)
-# @inline (H::Type{<:Cylinder})(h, r1,r2; center=false) =
-# 	H(r1=r1, r2=r2, h=h, center=center)
-# @inline (H::Type{<:Cylinder})(h, r; kwargs...) = H(h, r, r; kwargs...)
-# @inline (H::Type{<:Cylinder})(h, r::Union{AbstractVector, Tuple}; kwargs...) =
-# 	H(h, r...; kwargs...)
-# 
-# # Polygon ««2
-# """
-#     Polygon{T}
-#     Polygon([point1, point2, ...])
-#     Polygon(point1, point2, ...)
-# 
-# A simple, closed polygon enclosed by the given vertices.
-# """
-# Polygon{T} = PrimitiveSolid{:polygon,2,T,
-# 	@NamedTuple{points::Path{2,T}}}
-# @inline _infer_type(::Type{<:Polygon}; points) = real_type(eltype.(points)...)
-# @inline (T::Type{<:Polygon})(points::AnyPath{2}) = T(points=points)
-# # @inline (T::Type{<:Polygon})(points::AnyVec{2,<:Real}...) = T([points...])
-# 
-# @inline points(p::Polygon) = p.points
-# 
-# # Surface««2
-# """
-#     Surface{T,V}
-#     Surface([points...], [faces...])
-# 
-# Encodes information about a surface. `T` is the coordinate type and `V`
-# is the type used for storing faces.
-# """
-# Surface{T,V} = PrimitiveSolid{:polyhedron,3,T,
-#   @NamedTuple{points::Path{3,T}, faces::Vector{V}}}
-# @inline _infer_type(::Type{<:Surface}; points, faces) =
-# 	real_type(eltype.(points)...)
-# # OpenSCAD is zero-indexed
-# @inline function scad_param_value(io::IO,
-# 		::Val{:polyhedron}, ::Val{:faces}, faces)
-# 	print(io, "[")
-# 	join(io, [f .- 1 for f in faces], ",")
-# 	print(io, "]")
-# end
-# @inline (::Type{Surface{T}})(;points, faces) where{T} =
-# 	Surface{T,eltype(faces)}(points=points, faces=faces)
-# @inline (T::Type{<:Surface})(points, faces) = T(points=points, faces=faces)
-# 
-# abstract type LeafSolid{D,T} <: AbstractSolid{D,T} end
-# # Neutral solids««2
-# """
-#     NeutralSolid{D,T}
-# 
-# A convenience type representing either an empty or full solid.
-# This exists mostly to provide a neutral element
-# for `union()` and `intersect()` operators, hence the name.
-# In those cases, it is impossible to know in advance
-# the dimension of the returned solid;
-# hence, as an exception to the general rule,
-# the `D` type parameter is either the symbol `:empty` or `:full`.
-# Since neutral objects are removed at compile-time
-# from corresponding CSG operations,
-# this should have no influence on the dimension of a top-level object.
-# 
-# The `T` type parameter is always `Bool`.
-# """
-# struct NeutralSolid{D,T} <: LeafSolid{D,T} end
-# @inline scad_name(::NeutralSolid{D}) where{D} = D
-# # @inline parameters(::IO, ::NeutralSolid) = nothing
-# 
-# macro define_neutral(op, what, result)
-# 	W = QuoteNode(what)
-# 	F=:(Solids.$op)
-# 	quote
-# 	@inline $F(neutral::AbstractSolid, absorb::NeutralSolid{$W}) = $result
-# 	@inline $F(absorb::NeutralSolid{$W}, neutral::AbstractSolid) = $result
-# 	@inline $F(x::NeutralSolid{$W}, ::NeutralSolid{$W}) = x
+# Mechanism for printing top-level objects ««1
+
+# FIXME: replace Main by caller module?
+# FIXME: add some blob to represent function arguments
+"""
+		Solids.include(file::AbstractString, f::Function)
+
+Reads given `file` and returns the union of all top-level `Solids` objects
+(except the results of assignments) found in the file.
+
+```
+#### Example: contents of file `example.jl`
+C=Solids.Cube(1)
+S=Solids.Square(1)
+Solids.Circle(3)
+S
+
+julia> Solids.include("example.jl")
+union() {
+ circle(radius=3.0);
+ square(size=[1.0, 1.0], center=false);
+}
+```
+
+"""
+function include(file::AbstractString)
+	global toplevel_objs = AbstractSolid[]
+	Base.include(x->expr_filter(obj_filter, x), Main, file)
+	return union(toplevel_objs...)
+end
+# # TODO: somehow attach a comment indicating the origin of these objects
+# # last_linenumber holds the last LineNumberNode value encountered before
+# # printing this object; we use this to insert relevant comments in the
+# # output SCAD file:
+# global last_linenumber = ""
+# scad(io::IO = stdout) = function(x)
+# 	if x isa AbstractSolid
+# 		print(io, "//", last_linenumber, "\n")
+# 		scad(io, x, "")
 # 	end
 # end
-# @inline union() = NeutralSolid{:empty,Bool}()
-# @inline intersect() = NeutralSolid{:full,Bool}()
-# 
-# # these are necessary for the following macros:
-# function minkowski end
-# function hull end
-# @define_neutral union empty neutral
-# @define_neutral union full  absorb
-# @define_neutral intersect empty absorb
-# @define_neutral intersect full  neutral
-# @define_neutral minkowski empty absorb
-# @define_neutral minkowski full  absorb
-# @define_neutral hull empty neutral
-# @define_neutral hull full  absorb
-# 
+# @inline scad(x::Any) = x
+# scad(x::AbstractSolid) = (scad(stdout, x, ""); x)
+"""
+    obj_filter(x)
+
+Appends `x` to the global list of returned objects if `x` is a
+`AbstractSolid`.
+"""
+@inline obj_filter(x) = x
+@inline obj_filter(x::AbstractSolid) =
+	(global toplevel_objs; push!(toplevel_objs, x); return x)
+
+"""
+		expr_filter(E)
+
+Read top-level expression `E` and decides if a Solids object is returned.
+
+The function `expr_filter` transforms top-level expressions by wrapping
+each non-assignment expression inside a call to function `obj_filter`,
+which can then dispatch on the type of the expression.
+"""
+# Numeric values, LineNumber expressions etc. will never be useful to us:
+expr_filter(f::Function, e::Any) = e
+# expr_filter(e::LineNumberNode) = (global last_linenumber = e)
+# A Symbol might be an AbstractSolid variable name, so we add it:
+expr_filter(f::Function, e::Symbol) = :($f($e))
+
+# we add any top-level expressions, except assignments:
+expr_filter(f::Function, e::Expr) = expr_filter(f, Val(e.head), e)
+expr_filter(f::Function, ::Val, e::Expr) = :($f($e))
+expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
+
+# if several expressions are semicolon-chained, we pass this down
+expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
+	Expr(:toplevel, expr_filter.(f, x.args)...)
+
+# Primitive solids««1
+# Generic code««2
+"""
+    PrimitiveSolid{S,D,T,X}
+
+A type used to factorize code for the various primitive solids.
+`D` and `T` are as usual the dimension and coordinate type.
+`S` is a symbol indicating the type of solid (`:square`, etc.);
+`X` is a NamedTuple type holding the parameters for this solid
+(e.g. `@NamedTuple{radius::T}` for a sphere).
+
+From the info in `X` we can derive a default constructor
+(using keyword arguments matching the `NamedTuple`) and a
+`show` method.
+"""
+struct PrimitiveSolid{S,D,T,X} <: AbstractSolid{D,T}
+	parameters::X
+	@inline PrimitiveSolid{S,D,T,X}(;kwargs...) where{S,D,T,X} =
+		new{S,D,T,X}(kwargs.data)
+end
+@inline (H::Type{<:PrimitiveSolid{S,D,T}})(;kwargs...) where{S,D,T} =
+	H{typeof(kwargs.data)}(kwargs.data)
+@inline (H::Type{<:PrimitiveSolid{S,D}})(;kwargs...) where{S,D} =
+	H{_infer_type(H;kwargs...)}(;kwargs...)
+
+@inline scad_name(::PrimitiveSolid{S}) where{S} = S
+@inline parameters(s::PrimitiveSolid) = getfield(s, :parameters)
+@inline Base.getproperty(s::PrimitiveSolid, name::Symbol) =
+	Base.getproperty(parameters(s), name)
+
+# Ortho, Square, Cube««2
+Ortho{S,D,T} = PrimitiveSolid{S,D,T,
+	@NamedTuple{size::Vec{D,T}, center::Bool}}
+@inline _infer_type(::Type{<:Ortho};size, center) = real_type(size...)
+@inline (H::Type{<:Ortho{S,D}})(v::AbstractVector;center=false) where{S,D}=
+	H(size=Vec{D}(v), center=center)
+@inline (H::Type{<:Ortho{S,D}})(v::Real;kwargs...) where{S,D} =
+	H(SVector{D}(v for i in 1:D); kwargs...)
+
+"""
+    Square{T}
+    Square(size, [center=false])
+    Square([size1, size2], [center=false])
+
+A square (or a rectangle) with coordinate type `T`, parallel to the axes.
+If `center=true` is passed, then the origin is the center-of-mass;
+otherwise it is the lower-left corner.
+"""
+const Square = Ortho{:square,2}
+"""
+    Cube{T}
+    Cube(size, [center=false])
+    Cube([size1, size2, size3], [center=false])
+
+A cube (or a rectangle parallelepiped) with coordinate type `T`, parallel
+to the axes. If `center=true` is passed, then the origin is the center of
+mass; otherwise it is the lower-front-left corner.
+"""
+const Cube = Ortho{:cube,3}
+
+# Ball, Circle, Sphere ««2
+const Ball{S,D,T} = PrimitiveSolid{S,D,T, @NamedTuple{radius::T}}
+@inline _infer_type(::Type{<:Ball};radius) = real_type(radius)
+# groumpf, no dispatch on named arguments...
+# @inline (T::Type{<:Ball})(;diameter) = T(one_half(diameter))
+@inline (H::Type{<:Ball})(r) = H(radius=r)
+
+"""
+    Circle{T}
+    Circle(r)
+
+A circle with radius `r`, centered at the origin.
+"""
+const Circle = Ball{:circle,2}
+"""
+    Sphere{T}
+    Sphere(r)
+
+A sphere with radius `r`, centered at the origin.
+"""
+const Sphere = Ball{:sphere,3}
+
+# Cylinder ««2
+"""
+    Cylinder(h, r1, r2 [, center=false])
+    Cylinder(h, (r1, r2) [, center=false])
+    Cylinder(h, r [, center=false])
+
+**Warning:** `Cylinder(h,r)` is interpreted as `Cylinder(h,r,r)`,
+not `(h,r,0)` as in OpenSCAD.
+"""
+Cylinder{T} = PrimitiveSolid{:cylinder,3,T,
+	@NamedTuple{r1::T,r2::T,h::T,center::Bool}}
+@inline _infer_type(::Type{<:Cylinder}; h,r1,r2,center) = real_type(h, r1, r2)
+@inline (H::Type{<:Cylinder})(h, r1,r2; center=false) =
+	H(r1=r1, r2=r2, h=h, center=center)
+@inline (H::Type{<:Cylinder})(h, r; kwargs...) = H(h, r, r; kwargs...)
+@inline (H::Type{<:Cylinder})(h, r::Union{AbstractVector, Tuple}; kwargs...) =
+	H(h, r...; kwargs...)
+
+# Polygon ««2
+"""
+    Polygon{T}
+    Polygon([point1, point2, ...])
+    Polygon(point1, point2, ...)
+
+A simple, closed polygon enclosed by the given vertices.
+"""
+Polygon{T} = PrimitiveSolid{:polygon,2,T,
+	@NamedTuple{points::Path{2,T}}}
+@inline _infer_type(::Type{<:Polygon}; points) = real_type(eltype.(points)...)
+@inline (T::Type{<:Polygon})(points::AnyPath{2}) = T(points=points)
+# @inline (T::Type{<:Polygon})(points::AnyVec{2,<:Real}...) = T([points...])
+
+@inline points(p::Polygon) = p.points
+
+# Surface««2
+"""
+    Surface{T,V}
+    Surface([points...], [faces...])
+
+Encodes information about a surface. `T` is the coordinate type and `V`
+is the type used for storing faces.
+"""
+Surface{T,V} = PrimitiveSolid{:polyhedron,3,T,
+  @NamedTuple{points::Path{3,T}, faces::Vector{V}}}
+@inline _infer_type(::Type{<:Surface}; points, faces) =
+	real_type(eltype.(points)...)
+# OpenSCAD is zero-indexed
+@inline function scad_param_value(io::IO,
+		::Val{:polyhedron}, ::Val{:faces}, faces)
+	print(io, "[")
+	join(io, [f .- 1 for f in faces], ",")
+	print(io, "]")
+end
+@inline (::Type{Surface{T}})(;points, faces) where{T} =
+	Surface{T,eltype(faces)}(points=points, faces=faces)
+@inline (T::Type{<:Surface})(points, faces) = T(points=points, faces=faces)
+
+abstract type LeafSolid{D,T} <: AbstractSolid{D,T} end
+# Neutral solids««2
+"""
+    NeutralSolid{D,T}
+
+A convenience type representing either an empty or full solid.
+This exists mostly to provide a neutral element
+for `union()` and `intersect()` operators, hence the name.
+In those cases, it is impossible to know in advance
+the dimension of the returned solid;
+hence, as an exception to the general rule,
+the `D` type parameter is either the symbol `:empty` or `:full`.
+Since neutral objects are removed at compile-time
+from corresponding CSG operations,
+this should have no influence on the dimension of a top-level object.
+
+The `T` type parameter is always `Bool`.
+"""
+struct NeutralSolid{D,T} <: LeafSolid{D,T} end
+@inline scad_name(::NeutralSolid{D}) where{D} = D
+# @inline parameters(::IO, ::NeutralSolid) = nothing
+
+macro define_neutral(op, what, result)
+	W = QuoteNode(what)
+	F=:(Solids.$op)
+	quote
+	@inline $F(neutral::AbstractSolid, absorb::NeutralSolid{$W}) = $result
+	@inline $F(absorb::NeutralSolid{$W}, neutral::AbstractSolid) = $result
+	@inline $F(x::NeutralSolid{$W}, ::NeutralSolid{$W}) = x
+	end
+end
+@inline union() = NeutralSolid{:empty,Bool}()
+@inline intersect() = NeutralSolid{:full,Bool}()
+
+# these are necessary for the following macros:
+function minkowski end
+function hull end
+@define_neutral union empty neutral
+@define_neutral union full  absorb
+@define_neutral intersect empty absorb
+@define_neutral intersect full  neutral
+@define_neutral minkowski empty absorb
+@define_neutral minkowski full  absorb
+@define_neutral hull empty neutral
+@define_neutral hull full  absorb
+
 # # Somewhat reduce type I/O clutter««1
 # Base.show(io::IO, ::Type{_FIXED}) = print(io, "_FIXED")
 # Base.show(io::IO, ::Type{Vec}) = print(io, "Vec")
@@ -534,454 +534,454 @@ end
 # 	end
 # end
 # 
-# #DerivedSolid««1
-# # https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
-# """
-# 		DerivedSolid{D,S}
-# 
-# A type representing CSG operations on solids. `D` is the dimension and
-# `S` is a symbol representing the operation (union, intersection etc.)
-# """
-# struct DerivedSolid{D,S,T} <: AbstractSolid{D,T}
-# 	children::Vector{<:AbstractSolid}
-# 	DerivedSolid{D,S,T}(v::AbstractVector{<:AbstractSolid}) where{D,S,T} =
-# 		new{D,S,T}(v)
-# 	DerivedSolid{D,S}(v::AbstractVector{<:AbstractSolid}) where{D,S} =
-# 		new{D,S,promote_type(eltype.(typeof.(v))...)}(v)
-# end
-# @inline DerivedSolid{D,S,T}(v::AbstractSolid...) where{D,S,T} =
-# 	DerivedSolid{D,S,T}([v...])
-# # the previous method does *not* match the zero-length case:
-# @inline DerivedSolid{D,S,T}() where{D,S,T} =
-# 	DerivedSolid{D,S,T}(AbstractSolid[])
-# @inline children(s::DerivedSolid) = s.children
-# @inline scad_name(::DerivedSolid{D, S}) where{D,S} = S
-# @inline scad_name(::DerivedSolid{D, :intersection}) where{D} = :intersection
-# 
-# # make operators associative; see definition of + in operators.jl
-# for op in (:union, :intersect, :minkowski, :hull)
-# 	Q=QuoteNode(op)
-# 	# union, intersection, minkowski are trivial on single objects:
-# 	op != :hull &&  @eval ($op)(a::AbstractSolid) = a
-# 	@eval begin
-# 	# all of these are associative:
-# 	# we leave out the binary case, which will be defined on a case-by-case
-# 	# basis depending on the operators (see below).
-# #		($op)(a::AbstractSolid, b::AbstractSolid) =
-# #			DerivedSolid{$Q}([unroll(a, Val($Q)); unroll(b, Val($Q))])
-# 	($op)(a::AbstractSolid, b::AbstractSolid, c::AbstractSolid, x...) =
-# 		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
-# 	end
-# end
-# """
-#     union(s::AbstractSolid...)
-#     s1 ∪ s2
-# 
-# Represents the union of given solids.
-# """
-# @inline union(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
-# 	DerivedSolid{max(D1,D2), :union}(unroll2(a1, a2, Val(:union)))
-# """
-#     intersect(s::AbstractSolid...)
-#     s1 ∩ s2
-# 
-# Represents the intersection of given solids.
-# """
-# @inline intersect(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
-# 	DerivedSolid{min(D1,D2), :intersection}(unroll2(a1, a2, Val(:intersection)))
-# """
-#     minkowski(s::AbstractSolid...)
-# 
-# Represents the Minkowski sum of given solids.
-# """
-# @inline minkowski(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
-# 	DerivedSolid{max(D1,D2), :minkowski}(unroll2(a1, a2, Val(:minkowski)))
-# """
-#     hull(s::AbstractSolid...)
-# 
-# Represents the convex hull of given solids.
-# """
-# @inline hull(s::AbstractSolid...) =
-# 	DerivedSolid{maximum(dim.(s)), :hull}(
-# 		[unroll(t, Val.((:hull, :union))...) for t in s])
-# # @inline hull(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
-# # 	DerivedSolid{max(D1,D2), :hull}(unroll2(a1, a2, Val.((:hull, :union))...))
-# 
-# """
-# 		unroll(x::AbstractSolid, Val(sym1), Val(sym2)...)
-# 
-# Returns either `[x]` or, if `x` is a `DerivedSolid` matching one of the
-# symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
-# """
-# @inline unroll(s::AbstractSolid, ::Val, tail...) = unroll(s, tail...)
-# @inline unroll(s::AbstractSolid) = s
-# @inline unroll(s::DerivedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
-# 	children(s)
-# @inline unroll2(s::AbstractSolid, t::AbstractSolid, tail...) =
-# 	[unroll(s, tail...); unroll(t, tail...)]
-# 
-# # minus operator is binary:
-# """
-#     Solids.difference(s1, s2, ...)
-# 
-# Represents the difference `s1 ∖ (s2 ∪ ..)`.
-# """
-# @inline difference(x::AbstractSolid{D1}, y::AbstractSolid...) where{D1} =
-# 	DerivedSolid{D1, :difference}(
-# 		[unroll(x, Val(:difference)); unroll.(y, Val(:union))...])
-# # added interface: difference([x...], [y...])
-# @inline difference(x::AbstractVector{<:AbstractSolid},
-# 				y::AbstractVector{<:AbstractSolid}) =
-# 	DerivedSolid{foldr(max,dim.(x);init=3),:difference}(union(x...), y...)
-# 
-# # General transforms««1
-# # Curry««2
-# """
-#     Curry{S}
-# 
-# A structure representing partially-evaluated functions.
-# This allows chaining transformations by overloading the multiplication
-# operator: each factor in such a 'product', except the last one,
-# is a `Curry` object.
-# 
-# `S` is a datum indicating the type of transformation performed by the
-# function. It is used to compose functions when possible.
-# 
-# # Examples
-# ```jldoctest
-# julia> add(a)=Curry(x->x+a)
-# julia> add(1)*add(2)*4
-# 7
-# ```
-# """
-# struct Curry{S}
-#   f # either a Function or a Type...
-# end
-# # poor man's associative functor...
-# 
-# # fall-back case:
-# @inline Base.:*(f::Curry) = f
-# # binary rules:
-# @inline Base.:*(f::Curry, g::Curry) = compose(f, g)
-# @inline Base.:*(f::Curry, x) = f.f(x)
-# # ternary rule for associativity: we use the `assoc` type trait to
-# # decide whether to associate left or right.
-# @inline Base.:*(f::Curry, g::Curry, args...) =
-# 	_comp(Val(assoc(f,g)), f, g, args...)
-# @inline _comp(::Val{:left} , f, g, args...) = *(compose(f, g), args...)
-# @inline _comp(::Val{:right}, f, g, args...) = *(f, *(g, args...))
-# 
-# # default values for the traits: transforms are right-associative and
-# # composition is trivial.
-# @inline assoc(::Curry, ::Curry) = :right
-# @inline compose(f::Curry, g::Curry) = Curry{:∘}(f.f ∘ g.f)
-# 
-# # Transform type««2
-# """
-#     Transform{S,D,T,X}
-# 
-# Represents a solid of dimension `D` obtained via a transformation with
-# name `S` (a symbol).
-# 
-# This type defines functions allowing to chain transforms; these are used by
-# `multmatrix`, `color` etc. operations (see below).
-# 
-# The minimal job left to concrete types (see e.g. `AffineTransform` as an
-# example) is to define a type and a constructor:
-#     Frobnicate = Transform{:frobnicate}
-# 		frobnicate(x::real, s...) = Frobnicate((x=x,), s...)
-# """
-# struct Transform{S,D,T,X} <: AbstractSolid{D,T}
-# 	child::AbstractSolid{D,T}
-# 	data::X
-# 	Transform{S}(data::X, child::AbstractSolid{D,T}) where{S,X,D,T} =
-# 		new{S,D,T,X}(child, data)
-# end
-# # default values for I/O:
-# # (parameters in `data` are assumed to be stored in a NamedTuple).
-# @inline children(f::Transform) = [f.child]
-# @inline scad_name(f::Transform{S}) where{S} = S
-# @inline parameters(f::Transform) = f.data
-# @inline (T::Type{Transform{S}})(f, s::AbstractSolid...) where{S} =
-# 	T(f, union(s...))
-# @inline (T::Type{Transform{S}})(f, s::Vector{<:AbstractSolid}) where{S} =
-# 	T(f, s...)
-# @inline (T::Type{Transform{S}})(f) where{S} = Curry{S}((s...)->T(f, s...))
-# # We can extract the `f` value from the above in the following way:
-# """
-#     extract(c::Curry)
-# 
-# Given a `Curry` object with function `s -> Transform{...}(f, s)`,
-# recovers the parameter `f`.
-# """
-# function extract end
-# @inline (T::Type{<:Transform})(f, ::typeof(extract)) = f
-# @inline extract(c::Curry) = c.f(extract)
-# 
-# # SetParameters««2
-# SetParameters = Transform{:parameters}
-# 
-# @inline set_parameters(s...; parameters...) =
-# 	SetParameters(parameters.data, s...)
-# 
-# function scad(io::IO, s::SetParameters, spaces::AbstractString = "")
-# 	println(io, spaces, "{ // SetParameters")
-# 	for (i,j) in pairs(s.data)
-# 		println(io, spaces, "// ", i, "=", j, ";")
-# 	end
-# 	scad(io, s.child, spaces*" ")
-# 	println(io, spaces, "} // SetParameters")
-# end
-# # Color««2
-# Color = Transform{:color}
-# 
-# """
-#     color(c::Colorant, s...)
-#     color(c::AbstractString, s...)
-#     color(c::AbstractString, α::Real, s...)
-#     color(c) * s...
-# 
-# Colors objects `s...` in the given color.
-# """
-# @inline color(c::Colors.Colorant, s...) = Color((color=c,), s...)
-# @inline color(c::AbstractString, s...) =
-# 	color(parse(Colors.Colorant, c), s...)
-# @inline color(c::AbstractString, a::Real, s...) =
-# 	color(Colors.coloralpha(parse(Colors.Colorant, c), a), s...)
-# 
-# @inline scad(io::IO, c::Colors.Colorant) =
-# 	print(io, round.(Float64.([Colors.red(c), Colors.green(c),
-# 		Colors.blue(c), Colors.alpha(c)]), digits=3))
-# 
-# # Linear extrusion««2
-# LinearExtrude = Transform{:linear_extrude}
-# """
-#     linear_extrude(h, s...)
-#     linear_extrude(h) * s...
-# 
-# Linear extrusion to height `h`.
-# """
-# @inline linear_extrude(h, scale::AbstractVector, s...; center=false)=
-# 	LinearExtrude((height=h, scale=scale, center=center,), s...)
-# @inline linear_extrude(h, scale::Real, s...; kwargs...) =
-# 	linear_extrude(h, SA[scale, scale], s...; kwargs...)
-# @inline linear_extrude(h, s...; kwargs...) =
-# 	linear_extrude(h, 1, s...; kwargs...)
-# 
-# # Rotational extrusion««2
-# RotateExtrude = Transform{:rotate_extrude}
-# @inline rotate_extrude(angle::Real, s...; center=false) =
-# 	RotateExtrude((angle=angle, center=center), s...)
-# @inline rotate_extrude(s...) = rotate_extrude(360, s...)
-# # Offset
-# Offset = Transform{:offset}
-# @inline offset(r::Real, s...; join=:round, miter_limit=2.) =
-# 	Offset((r=r, join=join, miter_limit=miter_limit), s...)
-# @inline scad_parameters(io::IO, s::Offset) =
-# 	scad_parameters(io, s, Val(parameters(s).join), parameters(s))
-# @inline scad_parameters(io::IO, ::Offset, ::Val{:round}, param) =
-# 	scad_parameters(io, (r=param.r,))
-# @inline scad_parameters(io::IO, ::Offset, ::Val{:miter}, param) =
-# 	scad_parameters(io, (delta=param.r, chamfer=false,))
-# @inline scad_parameters(io::IO, ::Offset, ::Val{:square}, param) =
-# 	scad_parameters(io, (delta=param.r, chamfer=true,))
-# 
-# # Affine transforms««1
-# # Affine type««2
-# # type and constructors««3
-# """
-#     Affine(a, b)
-# 		Affine(a)
-# 		Affine(a, center=c)
-# 
-# A structure representing an affine transformation `x -> a*x + b`.
-# This is purposely kept as generic as possible.
-# 
-# As a special case, `a == Val(true)` corresponds to translations,
-# while `b == Val(false)` corresponds to linear maps. (The `+` and `*`
-# operators are overloaded correspondingly).
-# """
-# struct Affine{A,B}
-# 	a::A
-# 	b::B
-# end
-# # default constructors: Affine{A,B}(::A,::B), Affine(::A,::B)
-# # @inline Affine(a; center) = Affine(a, a*center - center)
-# @inline Affine(a;center=Val(false)) = Affine(a, Val(false))
-# 
-# @inline apply(f::Affine, v) = f.a * v + f.b
-# @inline apply(f::Affine, p::Path) = [apply(f, v) for v in p]
-# 
-# # neutral elements: ««3
-# # this could in principle be defined for Val{T} where{T}, but we try
-# # to pirate a minimum number of functions in Base.
-# @inline Base.:*(::Val{true}, v) = v
-# @inline Base.:*(a, v::Val{false}) = v
-# @inline Base.:+(v, ::Val{false}) = v
-# @inline Base.:-(v, ::Val{false}) = v
-# 
-# # I/O: ««3
-# # OpenSCAD only uses 4×4 matrices for transformations;
-# # we pad the matrix to this size if needed:
-# function scad_parameters(io::IO, f::Affine)
-# 	m = [ mat33(f.a) vec3(f.b); 0 0 0 1 ]
-# 	print(io, "[")
-# 	join(io, map(i->Float64.(view(m,i,:)),1:size(m,1)),",")
-# 	print(io, "]")
-# end
-# 
-# @inline mat33(a::AbstractMatrix) = [ get(a, (i,j), i==j) for i=1:3, j=1:3 ]
-# @inline mat33(a::Diagonal) = Diagonal(vec3(diag(a)))
-# @inline mat33(a::Real) = SDiagonal(a,a,a)
-# @inline mat33(::Val{b}) where{b} = mat33(b)
-# 
-# @inline vec3(b::AbstractVector) = SVector{3}(get(b, i, 0) for i in 1:3)
-# @inline vec3(::Val{b}) where{b} = SA[b, b, b]
-# 
-# # Reflections««2
-# """
-# 		Reflection
-# 
-# A type containing compressed information for an orthogonal reflection
-# matrix. Inspired by the `Diagonal` type.
-# """
-# struct Reflection{D,T,V<:AbstractVector{T}} <: StaticMatrix{D,D,T}
-# 	axis::V
-# 	@inline Reflection{D,T,V}(v::V) where {D,T,V<:AnyVec{D,T}} =
-# 		new{D,T,V}(v)
-# end
-# # we use only static vectors in Reflections:
-# @inline Reflection(v::AbstractVector) = Reflection(SVector{length(v)}(v))
-# # FIXME: add some method where we know that v is normed already
-# @inline Reflection(v::Vec{D}) where{D} = let u = v/norm(v)
-# 	Reflection{D,typeof(u[1]),typeof(u)}(u)
-# end
-# # Mat{3}(R::Reflection{2}) = Reflection([R.axis;SA[0]])
-# 
-# @inline size(R::Reflection{D}) where{D} = (D,D)
-# @inline getindex(R::Reflection{D}, i::Int) where{D} =
-# 	getindex(R, fld1(i,D), mod1(i,D))
-# @inline getindex(R::Reflection, i::Int, j::Int) = let a = R.axis
-# 	(i == j) - 2*a[i]*a[j]
-# end
-# function Matrix{T}(R::Reflection{D,T}) where{D,T}
-# 	# R(x) = x - 2<x, axis>/‖axis‖² · axis
-# 	a = R.axis
-# 	I(D) - 2*a*a'
-# end
-# 
-# # AffineTransform««2
-# AffineTransform = Transform{:multmatrix}
-# 
-# """
-#     mult_matrix(a, [center=c], solid...)
-#     mult_matrix(a, b, solid...)
-#     mult_matrix(a, b) * solid
-# 
-# Represents the affine operation `x -> a*x + b`.
-# 
-# # Extended help
-# !!! note "Types of `mult_matrix` parameters"
-# 
-#     The precise type of parameters `a` and `b` is not specified.
-#     Usually, `a` will be a matrix and `b` a vector, but this is left open
-#     on purpose; for instance, `a` can be a scalar (for a scaling)
-#     and `b` can be `Val(false)` for a linear operation. Any types so that
-#     `a * Vector + b` is defined will be accepted.
-# 
-#     Conversion to a matrix will be done when converting to OpenSCAD
-#     format.
-# 
-# !!! note "Matrix multiplication"
-# 
-#     Chained `mult_matrix` operations will be combined into a single
-#     operation when possible. This saves time: multiple 
-#     (3 × n) matrix multiplications are replaced by
-#     (3 × 3) multiplications, followed by a single (3 × n).
-# """
-# @inline mult_matrix(a, s...; kwargs...) =
-# 	AffineTransform(Affine(a; kwargs...), s...)
-# @inline mult_matrix(a, b::Union{AbstractVector,Val{false}}, s...) =
-# 	AffineTransform(Affine(a, b), s...)
-# 
-# # these two functions are now enough to pre-compose all affine transforms
-# # *before* applying them to objects:
-# @inline assoc(::Curry{:multmatrix}, ::Curry{:multmatrix}) = :left
-# @inline function compose(c1::Curry{:multmatrix}, c2::Curry{:multmatrix})
-# 	(f1, f2) = (extract(c1), extract(c2))
-# 	mult_matrix(f1.a*f2.a, f1.a*f2.b + f1.b)
-# end
-# 
-# # Translation, scaling, rotation, mirror««2
-# # FIXME change this '1' to a compile-time constant?
-# """
-#     translate(v, s...)
-#     translate(v) * s
-# 
-# Translates solids `s...` by vector `v`.
-# """
-# @inline translate(v::AnyVec, s...) = mult_matrix(1, v, s...)
-# """
-#     scale(a, s...; center=0)
-#     scale(a; center=0) * s
-# Scales solids `s` by factor `a`. If `center` is given then this will be
-# the invariant point.
-# 
-# `a` may also be a vector, in which case coordinates will be multiplied by
-# the associated diagonal matrix.
-# """
-# @inline scale(a::Real, s...; kwargs...) = mult_matrix(a, s...; kwargs...)
-# @inline scale(a::AnyVec, s...; kwargs...) =
-# 	mult_matrix(Diagonal(a), s...; kwargs...)
-# """
-#     mirror(v, s...; center=0)
-#     mirror(v; center=0) * s
-# 
-# Reflection with axis given by the hyperplane normal to `v`.
-# If `center` is given, then the affine hyperplane through this point will
-# be used.
-# """
-# @inline mirror(v::AnyVec, s...; kwargs...) =
-# 	mult_matrix(Reflection(v), s...; kwargs...)
-# 
-# @inline rotation(θ::AnyAngle; axis=SA[0,0,1], kwargs...) =
-# 	real_type(θ,axis...).(Rotations.AngleAxis(radians(θ), axis...))
-# @inline rotation(θ::AnyList{<:AnyAngle}; kwargs...) =
-# 	real_type(θ,axis...).(Rotations.RotZYX(radians.(θ); kwargs...))
-# 
-# """
-#     rotate(θ, {center=center}, {solid...})
-#     rotate(θ, axis=axis, {center=center}, {solid...})
-# 
-# Rotation around the Z-axis (in trigonometric direction, i.e.
-# counter-clockwise).
-# """
-# @inline rotate(θ, s...; kwargs...) = mult_matrix(rotation(θ; kwargs...), s...)
-# """
-#     rotate((θ,φ,ψ), {center=center}, {solid...})
-# 
-# Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
-# """
-# @inline rotate(θ::Real, φ::Real, ψ::Real, s...; kwargs...) =
-# 	mult_matrix(rotation((θ,φ,ψ); kwargs...), s...)
-# 
-# # Operators««2
-# @inline +(v::AnyVec, x::AbstractSolid) = translate(v,x)
-# @inline +(x::AbstractSolid, v::AnyVec) = translate(v,x)
-# 
-# # this purposely does not define a method for -(x::AbstractSolid).
-# @inline Base.:-(x::AbstractSolid, y::AbstractSolid, tail...) =
-# 	difference(x, [y, tail...])
-# @inline Base.:-(x::AbstractSolid{D}) where{D} = difference(intersect(), x)
-# @inline Base.:-(x::AbstractVector{<:AbstractSolid},
-#                 y::AbstractVector{<:AbstractSolid}) = difference(x, y)
-# 
-# # @inline *(f::AbstractAffineMap, x::AbstractSolid) = mult_matrix(f, x)
-# @inline *(s::Union{Real,AnyVec{3}}, x::AbstractSolid) = scale(s,x)
-# 
-# ⋃ = Base.union
-# ⋂ = Base.intersect
-# 
+#DerivedSolid««1
+# https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
+"""
+		DerivedSolid{D,S}
+
+A type representing CSG operations on solids. `D` is the dimension and
+`S` is a symbol representing the operation (union, intersection etc.)
+"""
+struct DerivedSolid{D,S,T} <: AbstractSolid{D,T}
+	children::Vector{<:AbstractSolid}
+	DerivedSolid{D,S,T}(v::AbstractVector{<:AbstractSolid}) where{D,S,T} =
+		new{D,S,T}(v)
+	DerivedSolid{D,S}(v::AbstractVector{<:AbstractSolid}) where{D,S} =
+		new{D,S,promote_type(eltype.(typeof.(v))...)}(v)
+end
+@inline DerivedSolid{D,S,T}(v::AbstractSolid...) where{D,S,T} =
+	DerivedSolid{D,S,T}([v...])
+# the previous method does *not* match the zero-length case:
+@inline DerivedSolid{D,S,T}() where{D,S,T} =
+	DerivedSolid{D,S,T}(AbstractSolid[])
+@inline children(s::DerivedSolid) = s.children
+@inline scad_name(::DerivedSolid{D, S}) where{D,S} = S
+@inline scad_name(::DerivedSolid{D, :intersection}) where{D} = :intersection
+
+# make operators associative; see definition of + in operators.jl
+for op in (:union, :intersect, :minkowski, :hull)
+	Q=QuoteNode(op)
+	# union, intersection, minkowski are trivial on single objects:
+	op != :hull &&  @eval ($op)(a::AbstractSolid) = a
+	@eval begin
+	# all of these are associative:
+	# we leave out the binary case, which will be defined on a case-by-case
+	# basis depending on the operators (see below).
+#		($op)(a::AbstractSolid, b::AbstractSolid) =
+#			DerivedSolid{$Q}([unroll(a, Val($Q)); unroll(b, Val($Q))])
+	($op)(a::AbstractSolid, b::AbstractSolid, c::AbstractSolid, x...) =
+		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
+	end
+end
+"""
+    union(s::AbstractSolid...)
+    s1 ∪ s2
+
+Represents the union of given solids.
+"""
+@inline union(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
+	DerivedSolid{max(D1,D2), :union}(unroll2(a1, a2, Val(:union)))
+"""
+    intersect(s::AbstractSolid...)
+    s1 ∩ s2
+
+Represents the intersection of given solids.
+"""
+@inline intersect(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
+	DerivedSolid{min(D1,D2), :intersection}(unroll2(a1, a2, Val(:intersection)))
+"""
+    minkowski(s::AbstractSolid...)
+
+Represents the Minkowski sum of given solids.
+"""
+@inline minkowski(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
+	DerivedSolid{max(D1,D2), :minkowski}(unroll2(a1, a2, Val(:minkowski)))
+"""
+    hull(s::AbstractSolid...)
+
+Represents the convex hull of given solids.
+"""
+@inline hull(s::AbstractSolid...) =
+	DerivedSolid{maximum(dim.(s)), :hull}(
+		[unroll(t, Val.((:hull, :union))...) for t in s])
+# @inline hull(a1::AbstractSolid{D1}, a2::AbstractSolid{D2}) where{D1, D2} =
+# 	DerivedSolid{max(D1,D2), :hull}(unroll2(a1, a2, Val.((:hull, :union))...))
+
+"""
+		unroll(x::AbstractSolid, Val(sym1), Val(sym2)...)
+
+Returns either `[x]` or, if `x` is a `DerivedSolid` matching one of the
+symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
+"""
+@inline unroll(s::AbstractSolid, ::Val, tail...) = unroll(s, tail...)
+@inline unroll(s::AbstractSolid) = s
+@inline unroll(s::DerivedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
+	children(s)
+@inline unroll2(s::AbstractSolid, t::AbstractSolid, tail...) =
+	[unroll(s, tail...); unroll(t, tail...)]
+
+# minus operator is binary:
+"""
+    Solids.difference(s1, s2, ...)
+
+Represents the difference `s1 ∖ (s2 ∪ ..)`.
+"""
+@inline difference(x::AbstractSolid{D1}, y::AbstractSolid...) where{D1} =
+	DerivedSolid{D1, :difference}(
+		[unroll(x, Val(:difference)); unroll.(y, Val(:union))...])
+# added interface: difference([x...], [y...])
+@inline difference(x::AbstractVector{<:AbstractSolid},
+				y::AbstractVector{<:AbstractSolid}) =
+	DerivedSolid{foldr(max,dim.(x);init=3),:difference}(union(x...), y...)
+
+# General transforms««1
+# Curry««2
+"""
+    Curry{S}
+
+A structure representing partially-evaluated functions.
+This allows chaining transformations by overloading the multiplication
+operator: each factor in such a 'product', except the last one,
+is a `Curry` object.
+
+`S` is a datum indicating the type of transformation performed by the
+function. It is used to compose functions when possible.
+
+# Examples
+```jldoctest
+julia> add(a)=Curry(x->x+a)
+julia> add(1)*add(2)*4
+7
+```
+"""
+struct Curry{S}
+  f # either a Function or a Type...
+end
+# poor man's associative functor...
+
+# fall-back case:
+@inline Base.:*(f::Curry) = f
+# binary rules:
+@inline Base.:*(f::Curry, g::Curry) = compose(f, g)
+@inline Base.:*(f::Curry, x) = f.f(x)
+# ternary rule for associativity: we use the `assoc` type trait to
+# decide whether to associate left or right.
+@inline Base.:*(f::Curry, g::Curry, args...) =
+	_comp(Val(assoc(f,g)), f, g, args...)
+@inline _comp(::Val{:left} , f, g, args...) = *(compose(f, g), args...)
+@inline _comp(::Val{:right}, f, g, args...) = *(f, *(g, args...))
+
+# default values for the traits: transforms are right-associative and
+# composition is trivial.
+@inline assoc(::Curry, ::Curry) = :right
+@inline compose(f::Curry, g::Curry) = Curry{:∘}(f.f ∘ g.f)
+
+# Transform type««2
+"""
+    Transform{S,D,T,X}
+
+Represents a solid of dimension `D` obtained via a transformation with
+name `S` (a symbol).
+
+This type defines functions allowing to chain transforms; these are used by
+`multmatrix`, `color` etc. operations (see below).
+
+The minimal job left to concrete types (see e.g. `AffineTransform` as an
+example) is to define a type and a constructor:
+    Frobnicate = Transform{:frobnicate}
+		frobnicate(x::real, s...) = Frobnicate((x=x,), s...)
+"""
+struct Transform{S,D,T,X} <: AbstractSolid{D,T}
+	child::AbstractSolid{D,T}
+	data::X
+	Transform{S}(data::X, child::AbstractSolid{D,T}) where{S,X,D,T} =
+		new{S,D,T,X}(child, data)
+end
+# default values for I/O:
+# (parameters in `data` are assumed to be stored in a NamedTuple).
+@inline children(f::Transform) = [f.child]
+@inline scad_name(f::Transform{S}) where{S} = S
+@inline parameters(f::Transform) = f.data
+@inline (T::Type{Transform{S}})(f, s::AbstractSolid...) where{S} =
+	T(f, union(s...))
+@inline (T::Type{Transform{S}})(f, s::Vector{<:AbstractSolid}) where{S} =
+	T(f, s...)
+@inline (T::Type{Transform{S}})(f) where{S} = Curry{S}((s...)->T(f, s...))
+# We can extract the `f` value from the above in the following way:
+"""
+    extract(c::Curry)
+
+Given a `Curry` object with function `s -> Transform{...}(f, s)`,
+recovers the parameter `f`.
+"""
+function extract end
+@inline (T::Type{<:Transform})(f, ::typeof(extract)) = f
+@inline extract(c::Curry) = c.f(extract)
+
+# SetParameters««2
+SetParameters = Transform{:parameters}
+
+@inline set_parameters(s...; parameters...) =
+	SetParameters(parameters.data, s...)
+
+function scad(io::IO, s::SetParameters, spaces::AbstractString = "")
+	println(io, spaces, "{ // SetParameters")
+	for (i,j) in pairs(s.data)
+		println(io, spaces, "// ", i, "=", j, ";")
+	end
+	scad(io, s.child, spaces*" ")
+	println(io, spaces, "} // SetParameters")
+end
+# Color««2
+Color = Transform{:color}
+
+"""
+    color(c::Colorant, s...)
+    color(c::AbstractString, s...)
+    color(c::AbstractString, α::Real, s...)
+    color(c) * s...
+
+Colors objects `s...` in the given color.
+"""
+@inline color(c::Colors.Colorant, s...) = Color((color=c,), s...)
+@inline color(c::AbstractString, s...) =
+	color(parse(Colors.Colorant, c), s...)
+@inline color(c::AbstractString, a::Real, s...) =
+	color(Colors.coloralpha(parse(Colors.Colorant, c), a), s...)
+
+@inline scad(io::IO, c::Colors.Colorant) =
+	print(io, round.(Float64.([Colors.red(c), Colors.green(c),
+		Colors.blue(c), Colors.alpha(c)]), digits=3))
+
+# Linear extrusion««2
+LinearExtrude = Transform{:linear_extrude}
+"""
+    linear_extrude(h, s...)
+    linear_extrude(h) * s...
+
+Linear extrusion to height `h`.
+"""
+@inline linear_extrude(h, scale::AbstractVector, s...; center=false)=
+	LinearExtrude((height=h, scale=scale, center=center,), s...)
+@inline linear_extrude(h, scale::Real, s...; kwargs...) =
+	linear_extrude(h, SA[scale, scale], s...; kwargs...)
+@inline linear_extrude(h, s...; kwargs...) =
+	linear_extrude(h, 1, s...; kwargs...)
+
+# Rotational extrusion««2
+RotateExtrude = Transform{:rotate_extrude}
+@inline rotate_extrude(angle::Real, s...; center=false) =
+	RotateExtrude((angle=angle, center=center), s...)
+@inline rotate_extrude(s...) = rotate_extrude(360, s...)
+# Offset
+Offset = Transform{:offset}
+@inline offset(r::Real, s...; join=:round, miter_limit=2.) =
+	Offset((r=r, join=join, miter_limit=miter_limit), s...)
+@inline scad_parameters(io::IO, s::Offset) =
+	scad_parameters(io, s, Val(parameters(s).join), parameters(s))
+@inline scad_parameters(io::IO, ::Offset, ::Val{:round}, param) =
+	scad_parameters(io, (r=param.r,))
+@inline scad_parameters(io::IO, ::Offset, ::Val{:miter}, param) =
+	scad_parameters(io, (delta=param.r, chamfer=false,))
+@inline scad_parameters(io::IO, ::Offset, ::Val{:square}, param) =
+	scad_parameters(io, (delta=param.r, chamfer=true,))
+
+# Affine transforms««1
+# Affine type««2
+# type and constructors««3
+"""
+    Affine(a, b)
+		Affine(a)
+		Affine(a, center=c)
+
+A structure representing an affine transformation `x -> a*x + b`.
+This is purposely kept as generic as possible.
+
+As a special case, `a == Val(true)` corresponds to translations,
+while `b == Val(false)` corresponds to linear maps. (The `+` and `*`
+operators are overloaded correspondingly).
+"""
+struct Affine{A,B}
+	a::A
+	b::B
+end
+# default constructors: Affine{A,B}(::A,::B), Affine(::A,::B)
+# @inline Affine(a; center) = Affine(a, a*center - center)
+@inline Affine(a;center=Val(false)) = Affine(a, Val(false))
+
+@inline apply(f::Affine, v) = f.a * v + f.b
+@inline apply(f::Affine, p::Path) = [apply(f, v) for v in p]
+
+# neutral elements: ««3
+# this could in principle be defined for Val{T} where{T}, but we try
+# to pirate a minimum number of functions in Base.
+@inline Base.:*(::Val{true}, v) = v
+@inline Base.:*(a, v::Val{false}) = v
+@inline Base.:+(v, ::Val{false}) = v
+@inline Base.:-(v, ::Val{false}) = v
+
+# I/O: ««3
+# OpenSCAD only uses 4×4 matrices for transformations;
+# we pad the matrix to this size if needed:
+function scad_parameters(io::IO, f::Affine)
+	m = [ mat33(f.a) vec3(f.b); 0 0 0 1 ]
+	print(io, "[")
+	join(io, map(i->Float64.(view(m,i,:)),1:size(m,1)),",")
+	print(io, "]")
+end
+
+@inline mat33(a::AbstractMatrix) = [ get(a, (i,j), i==j) for i=1:3, j=1:3 ]
+@inline mat33(a::Diagonal) = Diagonal(vec3(diag(a)))
+@inline mat33(a::Real) = SDiagonal(a,a,a)
+@inline mat33(::Val{b}) where{b} = mat33(b)
+
+@inline vec3(b::AbstractVector) = SVector{3}(get(b, i, 0) for i in 1:3)
+@inline vec3(::Val{b}) where{b} = SA[b, b, b]
+
+# Reflections««2
+"""
+		Reflection
+
+A type containing compressed information for an orthogonal reflection
+matrix. Inspired by the `Diagonal` type.
+"""
+struct Reflection{D,T,V<:AbstractVector{T}} <: StaticMatrix{D,D,T}
+	axis::V
+	@inline Reflection{D,T,V}(v::V) where {D,T,V<:AnyVec{D,T}} =
+		new{D,T,V}(v)
+end
+# we use only static vectors in Reflections:
+@inline Reflection(v::AbstractVector) = Reflection(SVector{length(v)}(v))
+# FIXME: add some method where we know that v is normed already
+@inline Reflection(v::Vec{D}) where{D} = let u = v/norm(v)
+	Reflection{D,typeof(u[1]),typeof(u)}(u)
+end
+# Mat{3}(R::Reflection{2}) = Reflection([R.axis;SA[0]])
+
+@inline size(R::Reflection{D}) where{D} = (D,D)
+@inline getindex(R::Reflection{D}, i::Int) where{D} =
+	getindex(R, fld1(i,D), mod1(i,D))
+@inline getindex(R::Reflection, i::Int, j::Int) = let a = R.axis
+	(i == j) - 2*a[i]*a[j]
+end
+function Matrix{T}(R::Reflection{D,T}) where{D,T}
+	# R(x) = x - 2<x, axis>/‖axis‖² · axis
+	a = R.axis
+	I(D) - 2*a*a'
+end
+
+# AffineTransform««2
+AffineTransform = Transform{:multmatrix}
+
+"""
+    mult_matrix(a, [center=c], solid...)
+    mult_matrix(a, b, solid...)
+    mult_matrix(a, b) * solid
+
+Represents the affine operation `x -> a*x + b`.
+
+# Extended help
+!!! note "Types of `mult_matrix` parameters"
+
+    The precise type of parameters `a` and `b` is not specified.
+    Usually, `a` will be a matrix and `b` a vector, but this is left open
+    on purpose; for instance, `a` can be a scalar (for a scaling)
+    and `b` can be `Val(false)` for a linear operation. Any types so that
+    `a * Vector + b` is defined will be accepted.
+
+    Conversion to a matrix will be done when converting to OpenSCAD
+    format.
+
+!!! note "Matrix multiplication"
+
+    Chained `mult_matrix` operations will be combined into a single
+    operation when possible. This saves time: multiple 
+    (3 × n) matrix multiplications are replaced by
+    (3 × 3) multiplications, followed by a single (3 × n).
+"""
+@inline mult_matrix(a, s...; kwargs...) =
+	AffineTransform(Affine(a; kwargs...), s...)
+@inline mult_matrix(a, b::Union{AbstractVector,Val{false}}, s...) =
+	AffineTransform(Affine(a, b), s...)
+
+# these two functions are now enough to pre-compose all affine transforms
+# *before* applying them to objects:
+@inline assoc(::Curry{:multmatrix}, ::Curry{:multmatrix}) = :left
+@inline function compose(c1::Curry{:multmatrix}, c2::Curry{:multmatrix})
+	(f1, f2) = (extract(c1), extract(c2))
+	mult_matrix(f1.a*f2.a, f1.a*f2.b + f1.b)
+end
+
+# Translation, scaling, rotation, mirror««2
+# FIXME change this '1' to a compile-time constant?
+"""
+    translate(v, s...)
+    translate(v) * s
+
+Translates solids `s...` by vector `v`.
+"""
+@inline translate(v::AnyVec, s...) = mult_matrix(1, v, s...)
+"""
+    scale(a, s...; center=0)
+    scale(a; center=0) * s
+Scales solids `s` by factor `a`. If `center` is given then this will be
+the invariant point.
+
+`a` may also be a vector, in which case coordinates will be multiplied by
+the associated diagonal matrix.
+"""
+@inline scale(a::Real, s...; kwargs...) = mult_matrix(a, s...; kwargs...)
+@inline scale(a::AnyVec, s...; kwargs...) =
+	mult_matrix(Diagonal(a), s...; kwargs...)
+"""
+    mirror(v, s...; center=0)
+    mirror(v; center=0) * s
+
+Reflection with axis given by the hyperplane normal to `v`.
+If `center` is given, then the affine hyperplane through this point will
+be used.
+"""
+@inline mirror(v::AnyVec, s...; kwargs...) =
+	mult_matrix(Reflection(v), s...; kwargs...)
+
+@inline rotation(θ::AnyAngle; axis=SA[0,0,1], kwargs...) =
+	real_type(θ,axis...).(Rotations.AngleAxis(radians(θ), axis...))
+@inline rotation(θ::AnyList{<:AnyAngle}; kwargs...) =
+	real_type(θ,axis...).(Rotations.RotZYX(radians.(θ); kwargs...))
+
+"""
+    rotate(θ, {center=center}, {solid...})
+    rotate(θ, axis=axis, {center=center}, {solid...})
+
+Rotation around the Z-axis (in trigonometric direction, i.e.
+counter-clockwise).
+"""
+@inline rotate(θ, s...; kwargs...) = mult_matrix(rotation(θ; kwargs...), s...)
+"""
+    rotate((θ,φ,ψ), {center=center}, {solid...})
+
+Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
+"""
+@inline rotate(θ::Real, φ::Real, ψ::Real, s...; kwargs...) =
+	mult_matrix(rotation((θ,φ,ψ); kwargs...), s...)
+
+# Operators««2
+@inline +(v::AnyVec, x::AbstractSolid) = translate(v,x)
+@inline +(x::AbstractSolid, v::AnyVec) = translate(v,x)
+
+# this purposely does not define a method for -(x::AbstractSolid).
+@inline Base.:-(x::AbstractSolid, y::AbstractSolid, tail...) =
+	difference(x, [y, tail...])
+@inline Base.:-(x::AbstractSolid{D}) where{D} = difference(intersect(), x)
+@inline Base.:-(x::AbstractVector{<:AbstractSolid},
+                y::AbstractVector{<:AbstractSolid}) = difference(x, y)
+
+# @inline *(f::AbstractAffineMap, x::AbstractSolid) = mult_matrix(f, x)
+@inline *(s::Union{Real,AnyVec{3}}, x::AbstractSolid) = scale(s,x)
+
+⋃ = Base.union
+⋂ = Base.intersect
+
 # # Attachments««1
 # # Anchor system««2
 # """
@@ -1582,7 +1582,7 @@ function hrep(p1::AnyVec{2}, p2::AnyVec{2}, p3::AnyVec{2})
 	        halfplane(p3=>p1, p2))
 end
 
-# Generic triangulations««1
+# Generic simplicial complexes««1
 # AbstractSimplicial««2
 """
     AbstractSimplicial
@@ -1712,7 +1712,6 @@ evaluates to a true value. Points are renamed.
 """
 function select_faces(test::Function, s::AbstractSimplicial)
 	renum = fill(0, eachindex(points(s)))
-# 	println("before renum: $s")
 	newfaces = Int[]
 	newpoints = similar(points(s))
 	n = 0
@@ -1722,19 +1721,11 @@ function select_faces(test::Function, s::AbstractSimplicial)
 			if renum[p] == 0
 				renum[p] = (n+= 1)
 				newpoints[n] = points(s)[p]
-# 				println("renumbering $p=$(points(s)[p]) to $(renum[p])")
 			end
 		end
 		push!(newfaces, i)
 	end
 	resize!(newpoints, n)
-# 	println("faces kept = $newfaces")
-# 	println("points renumbered = $renum")
-# 	println("newpoints = $newpoints")
-# 	for f in newfaces
-# 		println("renum face $f $(faces(s)[f]) => $(renum[faces(s)[f]])")
-# 	end
-# 	println([renum[faces(s)[f]] for f in newfaces])
 	return (typeof(s))(
 		newpoints,
 		renum[faces(s)[f]] for f in newfaces)
@@ -1769,6 +1760,52 @@ function connected_components(points, faces)
 		points[filter(p->component[p] == i, 1:N)],
 		[ [newindex[p] for p in f] for f in faces if component[f[1]] == i ]
 		) for i in eachindex(C) ]
+end
+
+# Manifoldness test««2
+"""
+    ismanifold(s::AbstractSimplicial)
+
+Returns `(value, text)`, where `value` is a Bool indicating whether this
+is a manifold surface, and `text` explains, if this is not manifold,
+where the problem lies.
+"""
+function ismanifold(s::AbstractSimplicial)
+	# TODO: check that triangles do not intersect
+	inc = incidence(s)
+	for (e, f) in pairs(inc.edge_faces)
+		if length(f) != 2
+			return (value=false, text="edge $e adjacent to $(length(f)) faces: $f")
+		end
+		# check orientability; we stored orientation in the sign bit, this
+		# simplifies the following code **a lot**:
+		if f[1]*f[2] > 0
+			return (value=false, text="edge $e: incompatible orientation for faces $(f[1]) $(faces(s)[f[1]]) and $(f[2]) $(faces(s)[f[2]])")
+		end
+	end
+	for (p, flist) in pairs(inc.point_faces)
+		adj = [ flist ∩ inc.faces[f] for f in flist ]
+		for (i, a) in pairs(adj)
+			if length(a) != 2
+				return (value=false,
+					text="vertex $p: face $(flist[i]) adjacent to $(length(a)) other faces ($a)")
+			end
+		end
+		# check connectedness
+		c = falses(length(flist)); c[1] = true; n = 1
+		rev = Dict{Int,Int}()
+		for (u,v) in pairs(flist) rev[v] = u; end
+		while n > 0
+			n = 0
+			for i in vcat(adj[c]...)
+				if !c[rev[i]] c[rev[i]] = true; n+= 1; end
+			end
+		end
+		if(!all(c))
+			return (value=false, text="faces around vertex $p do not forc a connected graph: $([flist[i] => adj[i] for i in eachindex(flist)])")
+		end
+	end
+	return (value=true, text="is manifold")
 end
 
 # Triangulation««2
@@ -2008,49 +2045,6 @@ function Triangulations(points, faces)
 	C = connected_components(points, faces)
 	return [ triangulate_surface(c...) for c in C ]
 end
-# manifoldness test««2
-"""
-    ismanifold(s::AbstractSimplicial)
-
-Returns `(value, text)`, where `value` is a Bool indicating whether this
-is a manifold surface, and `text` explains, if this is not manifold,
-where the problem lies.
-"""
-function ismanifold(s::AbstractSimplicial)
-	# TODO: check that triangles do not intersect
-	inc = incidence(s)
-	for (e, f) in pairs(inc.edge_faces)
-		if length(f) != 2
-			return (value=false, text="edge $e adjacent to $(length(f)) faces: $f")
-		end
-	end
-	for (p, flist) in pairs(inc.point_faces)
-		adj = [ flist ∩ inc.faces[f] for f in flist ]
-		for (i, a) in pairs(adj)
-			if length(a) != 2
-				return (value=false,
-					text="vertex $p: face $(flist[i]) adjacent to $(length(a))
-					other faces ($a)")
-			end
-		end
-		# check connectedness
-		m = falses(length(flist)); old_m = copy(m); m[1] = true
-		rev = Dict{Int,Int}()
-		for (u,v) in pairs(flist) rev[v] = u; end
-		while m ≠ old_m
-			copy!(old_m, m)
-			for i in vcat(adj[m]...)
-				m[rev[i]] = true
-			end
-		end
-		if(!all(m))
-			return (value=false, text="faces around vertex $p do not form a connected graph")
-		end
-		# follow cycle
-	end
-	return (value=true, text="is manifold")
-end
-
 #Convex hull««1
 # 2d convex hull ««2
 
