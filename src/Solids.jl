@@ -346,6 +346,9 @@ A type used to factorize code for the various primitive solids.
 From the info in `X` we can derive a default constructor
 (using keyword arguments matching the `NamedTuple`) and a
 `show` method.
+
+The coordinate type `T` is guessed from the values of the tuple using the
+`_infer_type(H;kwargs...)` method.
 """
 struct PrimitiveSolid{S,D,T,X} <: AbstractSolid{D,T}
 	parameters::X
@@ -363,6 +366,7 @@ end
 	Base.getproperty(parameters(s), name)
 
 # Ortho, Square, Cube««2
+# full name is orthotope, but that's a bit long...
 Ortho{S,D,T} = PrimitiveSolid{S,D,T,
 	@NamedTuple{size::Vec{D,T}, center::Bool}}
 @inline _infer_type(::Type{<:Ortho};size, center) = real_type(size...)
@@ -454,24 +458,49 @@ Polygon{T} = PrimitiveSolid{:polygon,2,T,
     Surface([points...], [faces...])
 
 Encodes information about a surface. `T` is the coordinate type and `V`
-is the type used for storing faces.
+is the type used for storing a face (e.g. `SVector{3,Int}`).
 """
 Surface{T,V} = PrimitiveSolid{:polyhedron,3,T,
   @NamedTuple{points::Path{3,T}, faces::Vector{V}}}
+
+TriangulatedSurface{T} = Surface{T,SVector{3,Int}}
+
 @inline _infer_type(::Type{<:Surface}; points, faces) =
 	real_type(eltype.(points)...)
+@inline function scad_param_value(io::IO,
+		::Val{:polyhedron}, ::Val{:points}, points)
+	print(io, "[")
+	for (i, p) in pairs(points)
+		print(io, Float64.(p))
+		if i < length(points) print(io, ","); end
+		print(io, "\t// ", i)
+		println(io)
+	end
+	print(io, "]")
+end
 # OpenSCAD is zero-indexed
 @inline function scad_param_value(io::IO,
 		::Val{:polyhedron}, ::Val{:faces}, faces)
 	print(io, "[")
-	join(io, [f .- 1 for f in faces], ",")
+	for (i, f) in pairs(faces)
+		print(io, f .- 1)
+		if i < length(faces) print(io, ","); end
+		print(io, "\t// ", i)
+		println(io)
+	end
+# 	join(io, [f .- 1 for f in faces], ",\n")
 	print(io, "]")
 end
 @inline (::Type{Surface{T}})(;points, faces) where{T} =
 	Surface{T,eltype(faces)}(points=points, faces=faces)
 @inline (T::Type{<:Surface})(points, faces) = T(points=points, faces=faces)
 
-abstract type LeafSolid{D,T} <: AbstractSolid{D,T} end
+@inline points(s::Surface) = s.points
+@inline faces(s::Surface) = s.faces
+
+# a lot of functions operating on 'Surface' values are defined later in
+# the meshing part of this file.
+
 # Neutral solids««2
 """
     NeutralSolid{D,T}
@@ -483,13 +512,14 @@ In those cases, it is impossible to know in advance
 the dimension of the returned solid;
 hence, as an exception to the general rule,
 the `D` type parameter is either the symbol `:empty` or `:full`.
+
 Since neutral objects are removed at compile-time
 from corresponding CSG operations,
 this should have no influence on the dimension of a top-level object.
 
 The `T` type parameter is always `Bool`.
 """
-struct NeutralSolid{D,T} <: LeafSolid{D,T} end
+struct NeutralSolid{D,T} <: AbstractSolid{D,T} end
 @inline scad_name(::NeutralSolid{D}) where{D} = D
 # @inline parameters(::IO, ::NeutralSolid) = nothing
 
@@ -556,7 +586,7 @@ end
 	DerivedSolid{D,S,T}(AbstractSolid[])
 @inline children(s::DerivedSolid) = s.children
 @inline scad_name(::DerivedSolid{D, S}) where{D,S} = S
-@inline scad_name(::DerivedSolid{D, :intersection}) where{D} = :intersection
+# @inline scad_name(::DerivedSolid{D, :intersection}) where{D} = :intersection
 
 # make operators associative; see definition of + in operators.jl
 for op in (:union, :intersect, :minkowski, :hull)
@@ -1240,7 +1270,8 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 # end
 # 
 # # Reduction of mult_matrix operations ««1
-# @inline affine_reduce(m::AbstractAffineMap, x::LeafSolid) = mult_matrix(m, x)
+# @inline affine_reduce(m::AbstractAffineMap, x::AbstractSolid) =
+# 	mult_matrix(m, x)
 # @inline affine_reduce(u::LinearMap{<:Diagonal}, x::Square) =
 # 	Square([ u.linear.diag[i] * @inbounds x.size[i] for i in 1:2 ], x.center)
 # @inline affine_reduce(u::LinearMap{<:Union{UniformScaling,Diagonal}},
@@ -1262,7 +1293,7 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 # affine_reduce(x::AbstractSolid) = affine_reduce(LinearMap(I), x)
 #————————————————————— Meshing —————————————————————————————— ««1
 #»»1
-# Accuracy and precision ««1
+# Dealing with circles and spheres««1
 # Accuracy is the absolute deviation allowed.
 # Default value is 2.0 (from OpenSCAD `$fs`), interpreted as 2mm.
 #
@@ -1283,12 +1314,37 @@ The base value `n` is given by the minimum of:
 """
 function sides(r::Real, parameters::NamedTuple, angle::AnyAngle = 360°)
 	θ = radians(angle)
-	acc = θ*r / (parameters.accuracy)
-	pre = θ/sqrt(8*parameters.precision)
+	acc = ceil(Int, θ*r / (parameters.accuracy))
+	pre = ceil(Int, θ/sqrt(8*parameters.precision))
 	base = min(acc, pre)
 	# a circle always has at least 4 sides
-	return round(Int, max(4, base), RoundUp)
+	return max(4, base)
 end
+"""
+    sphere_vertices(r::Real, parameters::NamedTuple)
+
+Returns the number `n` of points on a sphere according to these
+parameters.
+
+This produces n points on the sphere, hence 2n-4 triangular faces
+(genus 0). Average surface of a triangular face is 4πr²/(2n-4)=2πr²/(n-2),
+hence square of edge length is d²≈ 8πr²/√3/(n-2).
+(unit equilateral triangle s = √3d²/4, i.e. d²=4s/√3).
+
+* each edge length `d` must not be smaller than accuracy `α`:
+  namely 8πr²/√3/(n-2) ≥ α², or n ≤ (8π/√3) (r/α)² + 2.
+* each error (sagitta) must not be smaller than `r*ε`, where ε = precision;
+  sagitta formula: σ/r = 1-√(1-d²/4r²) = 1-√(1-(2π/√3)/(n-2)).
+  ∼ (π/√3)/(n-2) + O(n-2)^-2;
+  hence  n ≤ 2 + (π/√3)/ε.
+"""
+function sphere_vertices(r::Real, parameters::NamedTuple)
+	n_acc = ceil(Int, 2 + (8π/√3)*(r/parameters.accuracy)^2)
+	n_pre = ceil(Int, 2 + (π/√3)/parameters.precision)
+	# a sphere always has at least 6 vertices
+	return max(6, min(n_acc, n_pre))
+end
+
 
 """
     unit_n_gon(T::Type, n::Int)
@@ -1320,6 +1376,34 @@ function unit_n_gon(T::Type{<:Real}, n::Int)
 end
 @inline unit_n_gon(r, parameters) =
 	r*unit_n_gon(real_type(r), sides(r, parameters))
+
+const golden_angle = 2π/MathConstants.φ
+"""
+    fibonacci_sphere_points(T::Type{<:Real}, n::Int)
+
+Returns a set of `n` well-spaced points, of type `Vec{3,T}`, on the unit
+sphere.
+
+TODO: use ideas from
+http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
+
+to optimize for volume of convex hull.
+"""
+function fibonacci_sphere_points(T::Type{<:Real}, n::Int)
+
+	v = Vector{Vec{3,T}}(undef, n)
+	for i in eachindex(v)
+		θ = i*T(golden_angle)
+		z = (n+1-2i)/T(n)
+		ρ = √(1-z^2)
+		(s,c) = sincos(θ)
+		@inbounds v[i] = SA[c*ρ, s*ρ, z]
+	end
+	return v
+end
+@inline fibonacci_sphere_points(r::Real, parameters) =
+	r*fibonacci_sphere_points(real_type(r),
+		sphere_vertices(r, parameters))
 
 # Clipper.jl interface: clip, offset, simplify««1
 # This is the only section in this file which contains code directly
@@ -1583,37 +1667,27 @@ function hrep(p1::AnyVec{2}, p2::AnyVec{2}, p3::AnyVec{2})
 end
 
 # Generic simplicial complexes««1
-# AbstractSimplicial««2
+# Surface««2
+# function Base.show(io::IO, s::Surface)
+# 	println(io, typeof(s), "(\n[ # ", length(points(s)), " points:")
+# 	for (i, p) in pairs(points(s))
+# 		println(io, "  ", p, ",\t# ", i)
+# 	end
+# 	println(io, "],[ # ", length(faces(s)), " faces:")
+# 	for (i, f) in pairs(faces(s))
+# 		println(io, "  ", f, ",\t# ", i)
+# 	end
+# 	println(io, "]) # χ = ",
+# 		length(points(s))+length(faces(s))-1.5*length(faces(s)))
+# end
+ 
 """
-    AbstractSimplicial
-
-Basic type for triangulations etc. Interface:
- - `points(s)`
- - `faces(s)`
- - `(typeof(a))(points, faces)` constructor
-"""
-abstract type AbstractSimplicial end
-
-function Base.show(io::IO, s::AbstractSimplicial)
-	println(io, typeof(s), "(\n[ # ", length(points(s)), " points:")
-	for (i, p) in pairs(points(s))
-		println(io, "  ", p, ",\t# ", i)
-	end
-	println(io, "],[ # ", length(faces(s)), " faces:")
-	for (i, f) in pairs(faces(s))
-		println(io, "  ", f, ",\t# ", i)
-	end
-	println(io, "]) # χ = ",
-		length(points(s))+length(faces(s))-1.5*length(faces(s)))
-end
-
-"""
-    adjacency_points(s::AbstractSimplicial)
+    adjacency_points(s::Surface)
 
 Returns the adjacency matrix on points of s, indexed by entries of
 `points(s)`.
 """
-@inline adjacency_points(s::AbstractSimplicial) =
+@inline adjacency_points(s::Surface) =
 	adjacency_points(points(s), faces(s))
 function adjacency_points(points, faces)
 	n = length(points)
@@ -1627,7 +1701,7 @@ function adjacency_points(points, faces)
 end
 
 """
-    incidence(s::AbstractSimplicial)
+    incidence(s::Surface)
 
 Returns an incidence and ajacency structure for the simplicial complex s.
 This returns a named tuple with fields:
@@ -1639,7 +1713,7 @@ This returns a named tuple with fields:
 TODO: add bool options to compute only a part of this. And allow passing
 precomputed incidence structures to functions who need them.
 """
-function incidence(s::AbstractSimplicial)
+function incidence(s::Surface)
   inc_pf = [Int[] for p in points(s)]
 	for (i, f) in pairs(faces(s)), p in f
 		push!(inc_pf[p], i)
@@ -1665,15 +1739,15 @@ function incidence(s::AbstractSimplicial)
 	)
 end
 
-@inline copy(s::AbstractSimplicial) = (typeof(s))(points(s), faces(s))
+@inline copy(s::Surface) = (typeof(s))(points(s), faces(s))
 
 """
-    merge(s1::AbstractSimplicial, s2::AbstractSimplicial)
+    merge(s1::Surface, s2::Surface)
 
 Combines both triangulations, renumbering points of `s2` as needed.
 (Numbering in `s1` is preserved).
 """
-function merge(s1::AbstractSimplicial, s2::AbstractSimplicial, same = isequal)
+function merge(s1::Surface, s2::Surface, same = isequal)
 	renum = Vector{Int}(undef, length(points(s2)))
 	# renumber points:
 	p1 = length(points(s1))
@@ -1705,12 +1779,12 @@ function merge(s1::AbstractSimplicial, s2::AbstractSimplicial, same = isequal)
 end
 
 """
-    select_faces(f, s::AbstractSimplicial)
+    select_faces(f, s::Surface)
 
 Returns the subcomplex containing only the faces `i` for which `f(i)`
 evaluates to a true value. Points are renamed.
 """
-function select_faces(test::Function, s::AbstractSimplicial)
+function select_faces(test::Function, s::Surface)
 	renum = fill(0, eachindex(points(s)))
 	newfaces = Int[]
 	newpoints = similar(points(s))
@@ -1728,16 +1802,16 @@ function select_faces(test::Function, s::AbstractSimplicial)
 	resize!(newpoints, n)
 	return (typeof(s))(
 		newpoints,
-		renum[faces(s)[f]] for f in newfaces)
+		[renum[faces(s)[f]] for f in newfaces])
 end
 
 """
-    connected_components(s::AbstractSimplicial)
+    connected_components(s::Surface)
 
 Returns a vector of objects (same type as `s`), each one of which is a
 (renumbered) connected component.
 """
-@inline connected_components(s::AbstractSimplicial) =
+@inline connected_components(s::Surface) =
 	[ typeof(s)(p,f)
 		for (p,f) in connected_components(points(s), faces(s)) ]
 function connected_components(points, faces)
@@ -1764,31 +1838,34 @@ end
 
 # Manifoldness test««2
 """
-    ismanifold(s::AbstractSimplicial)
+    ismanifold(s::Surface)
 
 Returns `(value, text)`, where `value` is a Bool indicating whether this
 is a manifold surface, and `text` explains, if this is not manifold,
 where the problem lies.
 """
-function ismanifold(s::AbstractSimplicial)
+function ismanifold(s::Surface)
 	# TODO: check that triangles do not intersect
 	inc = incidence(s)
 	for (e, f) in pairs(inc.edge_faces)
 		if length(f) != 2
-			return (value=false, text="edge $e adjacent to $(length(f)) faces: $f")
+			# edge adjacent to wrong number of faces
+			return (value=false, text=(:singular_edge, e, f))
 		end
 		# check orientability; we stored orientation in the sign bit, this
 		# simplifies the following code **a lot**:
 		if f[1]*f[2] > 0
-			return (value=false, text="edge $e: incompatible orientation for faces $(f[1]) $(faces(s)[f[1]]) and $(f[2]) $(faces(s)[f[2]])")
+			# incompatible orientations for both faces
+			return (value=false, text=(:not_orientable, e, f))
 		end
 	end
 	for (p, flist) in pairs(inc.point_faces)
 		adj = [ flist ∩ inc.faces[f] for f in flist ]
 		for (i, a) in pairs(adj)
 			if length(a) != 2
-				return (value=false,
-					text="vertex $p: face $(flist[i]) adjacent to $(length(a)) other faces ($a)")
+				# face adjacent to wrong number of faces around this vertex
+				return (value=false, text=(:vertex_faces_adj, p, flist[i], a))
+# 					text="vertex $p: face $(flist[i]) adjacent to $(length(a)) other faces ($a)")
 			end
 		end
 		# check connectedness
@@ -1802,30 +1879,33 @@ function ismanifold(s::AbstractSimplicial)
 			end
 		end
 		if(!all(c))
-			return (value=false, text="faces around vertex $p do not forc a connected graph: $([flist[i] => adj[i] for i in eachindex(flist)])")
+			# faces around this vertex do not form a simple loop
+			return (value=false, text=(:singular_vertex, p,
+				[flist[i]=>adj[i] for i in eachindex(flist)]))
+# 			return (value=false, text="faces around vertex $p do not forc a connected graph: $([flist[i] => adj[i] for i in eachindex(flist)])")
 		end
 	end
 	return (value=true, text="is manifold")
 end
 
-# Triangulation««2
-# TODO: allow indexation by something else than integers?
-struct Triangulation{T,A} <: AbstractSimplicial
-	points::A # e.g. Vector of SVector, ...
-	faces::Vector{SVector{3,Int}}
-	@inline Triangulation{T,A}(points, faces) where{T,A} =
-		new{T,A}(points, SVector{3,Int}.(faces))
-	@inline Triangulation{T}(points::AbstractArray{<:AnyVec}, faces) where{T} =
-		Triangulation{T,typeof(points)}(points, faces)
-	@inline Triangulation(points, faces) =
-		Triangulation{eltype(eltype(points))}(points, faces)
-	@inline Triangulation(;points, faces) =
-		new{eltype(eltype(points)),typeof(points)}(points, faces)
-end
-
-@inline points(t::Triangulation) = t.points
-@inline faces(t::Triangulation) = t.faces
-
+# TriangulatedSurface««2
+# # TODO: allow indexation by something else than integers?
+# struct TriangulatedSurface{T,A} <: Surface
+# 	points::A # e.g. Vector of SVector, ...
+# 	faces::Vector{SVector{3,Int}}
+# 	@inline TriangulatedSurface{T,A}(points, faces) where{T,A} =
+# 		new{T,A}(points, SVector{3,Int}.(faces))
+# 	@inline TriangulatedSurface{T}(points::AbstractArray{<:AnyVec}, faces) where{T} =
+# 		TriangulatedSurface{T,typeof(points)}(points, faces)
+# 	@inline TriangulatedSurface(points, faces) =
+# 		TriangulatedSurface{eltype(eltype(points))}(points, faces)
+# 	@inline TriangulatedSurface(;points, faces) =
+# 		new{eltype(eltype(points)),typeof(points)}(points, faces)
+# end
+# 
+# @inline points(t::TriangulatedSurface) = t.points
+# @inline faces(t::TriangulatedSurface) = t.faces
+# 
 # 2d triangulation««2
 """
     triangulate_loop(path::Path{2})
@@ -1863,123 +1943,121 @@ end
 # end
 
 # 3d -> 2d projections««2
-const plus1mod3 = [2,3,1]
-const plus2mod3 = [3,1,2]
+const plus1mod3 = SA[2,3,1]
+const plus2mod3 = SA[3,1,2]
 # TODO: merge the various functions here.
-function face_normal(points)
-	@assert length(points) >= 3
-	return cross(points[2]-points[1], points[3]-points[1])
+# Interfaces used for best_projection:
+# - triangle_∩: best_projection(hyperplane), with affine section
+#A- triangulate_face_convex: best_proj_2d(points, direction)
+#   computes projection from direction and applies to points
+#B- triangulate_face: best_proj_2d(points)
+#A- inter_union: compute 2 best coords from direction
+#
+# (A) direction => 2 best coords *and* worst
+# (B) face_normal
+# (C) A=> retraction
+@inline function project_2d(direction::AnyVec{3}, index::Val = Val(false))
+	# we inline the 'findmax' call since we know the length is 3:
+	# (doing this about halves the running time of this function. Besides,
+	# since the value 'e' only takes three possible values, it enables the
+	# compiler to propagate constants.)
+	a1 = abs(direction[1]); a2=abs(direction[2]); a3=abs(direction[3])
+	k = (a1 < a2) ? ((a2 < a3) ? 3 : 2) : ((a1 < a3) ? 3 : 1)
+	v = direction[k]
+	@inbounds p = (v > 0) ? SA[plus1mod3[k], plus2mod3[k]] :
+		SA[plus2mod3[k], plus1mod3[k]]
+	return _project_2d(index, p, k)
 end
-"""
-    best_projection(points; direction)
+# @inline function project_2d1(direction::AnyVec{3}, index::Val = Val(false))
+# 	# we inline the 'findmax' call since we know the length is 3:
+# 	# (doing this about halves the running time of this function)
+# 	a1 = abs(direction[1]); a2=abs(direction[2]); a3=abs(direction[3])
+# 	# this part does not do any speed-up (constant propagation):
+# 	if a1 < a2
+# 		if a2 < a3 @goto max3; end
+# 		if direction[2] > 0
+# 			return _project_2d(index, SA[3,1], 2)
+# 		else
+# 			return _project_2d(index, SA[1,3], 2)
+# 		end
+# 	elseif a1 < a3
+# 		@label max3
+# 		if direction[3] > 0
+# 			return _project_2d(index, SA[1,2], 3)
+# 		else
+# 			return _project_2d(index, SA[2,1], 3)
+# 		end
+# 	else
+# 		if direction[1] > 0
+# 			return _project_2d(index, SA[2,3], 1)
+# 		else
+# 			return _project_2d(index, SA[3,2], 1)
+# 		end
+# 	end
+# end
+@inline _project_2d(::Val{false}, p, _) = p
+@inline _project_2d(::Val{true}, p, e) = (p, e)
 
-Given a set of 3d points (assumed affine-coplanar)
-and optionally a normal vector (otherwise one is computed),
-returns (as a pair of Int) two indices in {1,2,3} giving the best 2d
-projection.
 """
-function best_projection_idx(points; direction = [])
-	if direction == []
-		direction = face_normal(points)
-	end
-	# index of largest absolute value of coordinate for projection:
-	# if direction[e] >= 0: return [e+1, e+2]
-	e = findmax(abs.(direction))[2]
-	if direction[e] > 0
-		return [2,3,1,2][[e,e+1]]
-	else
-		return [2,3,1,2][[e+1,e]]
-	end
-# 	return filter(i->i!=e, 1:3)
-end
-"""
-    best_projection(hyperplane)
+    project_2d(plane::Polyhedra.HyperPlane)
 
 Returns a (named) tuple `(coordinates, linear, origin)` where
  - `coordinates` is the set of coordinates to keep for projection,
  - `linear`*x+`origin` is an affine section.
 """
-function best_projection(hyperplane::Polyhedra.HyperPlane)
-	# remove largest absolute-value coordinate of normal vector
-	v = direction(hyperplane)
-	e = findmax(abs.(v))[2]
-	f = inv(convert(real_type(eltype(v)), v[e]))
-	if v[e] > 0
+function project_2d(plane::Polyhedra.HyperPlane)
+	v = direction(plane)
+  (coords, k) = project_2d(v, Val(true))
+	f = inv(convert(real_type(eltype(v)), v[k]))
 		# e=1: proj=(2,3) sect=[-b/a -c/a;1 0;0 1]
 		# e=2: proj=(3,1) sect=[0 1;-a/b -c/b;1 0]
 		# e=3: proj=(1,2) sect=[1 0;0 1;-a/c -b/c]
-		coords = [2,3,1,2][[e,e+1]]
-	else
 		# e=1: proj=(3,2) sect=[-c/a -b/a;0 1;1 0]
 		# e=2: proj=(1,3) sect=[1 0;-a/b -c/b;0 1]
 		# e=3: proj=(2,1) sect=[0 1;1 0;-b/c -a/c]
-		coords = [2,3,1,2][[e+1,e]]
-	end
-  # e.g. ax + by + cz = d, b is largest
-	# (x,z) -> (x,y,z) such that ax+by+cz=d, or y=(-a/b)x + (-c/b)z + (d/b)
-	# matrix: [1 0;-a/b -c/b;0 1], constant [0 d/b 0]
-	m = SMatrix{3,2}((i == e) ? -f*v[coords[j]] : (i == coords[j])
-		for i=1:3, j=1:2)
-	c = SVector{3}((i == e) ? hyperplane.β*f : 0 for i in 1:3)
+	m = SMatrix{3,2}((i==k) ? -f*v[coords[j]] : (i == coords[j])
+			for i=1:3, j=1:2)
+	c = SVector{3}((i==k) ? plane.β*f : 0 for i in 1:3)
 	return (coordinates=coords, linear=m, origin=c)
 end
-"""
-    best_project_2d(points, direction)
 
-Given a set of 3d points (assumed affine-coplanar)
-and optionally a normal vector (otherwise one is computed),
-returns a faithful 2d projection (as a matrix N×2) of these points.
-"""
-function best_project_2d(points; direction = [])
-	proj = best_projection_idx(points; direction)
-	N = length(points)
-	points2d = Matrix{Float64}(undef, N, 2)
-	for (i, p) in pairs(points), (j, x) in pairs(proj)
-		points2d[i, j] = p[x]
-	end
-	return points2d
+function face_normal(points)
+	@assert length(points) >= 3
+	return cross(points[2]-points[1], points[3]-points[1])
 end
 # 3d face triangulation««2
 """
-    triangulate_face_convex(points; direction, map)
+    triangulate_face(points; direction, map, convex)
 
 Returns a triangulation of the face (assumed convex; points in any order)
 Optional keyword arguments:
  - `direction` is a normal vector (used for projecting to 2d).
  - `map` is a labeling of points (default is identity map).
+ - `convex` is a Val(true) or Val(false).
 
 The triangulation is returned as a vector of StaticVector{3,Int},
 containing the labels of three points of each triangle.
 """
-function triangulate_face_convex(
-		points::AbstractVector{<:AnyVec{3,<:Number}}
-		;
-		direction::AbstractVector = [],
-		map::AbstractVector{<:Integer} = [1:length(points)...]
-		)
-	points2d = best_project_2d(points, direction)
-	return Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
-end
-"""
-    triangulate_face(points; direction, map)
-
-Returns a triangulation of the face (with points ordered along the face
-in direct order).
-"""
 function triangulate_face(
 		points::AbstractVector{<:AnyVec{3,<:Number}}
 		;
-		direction::AbstractVector = [],
-		map::AbstractVector{<:Integer} = [1:length(points)...]
-	)
-	points2d = best_project_2d(points; direction)
-	# build edges matrix as a N×2 matrix:
+		direction::AbstractVector = face_normal(points),
+		map::AbstractVector{<:Integer} = [1:length(points)...],
+		convex::Val = Val(false)
+		)
+	coords = project_2d(direction)
 	N = length(points)
-	edges = vcat(([map[i] map[mod1(i+1,N)]] for i in 1:N)...)
-	ct = Vec{3,Int}.(Triangulate.constrained_triangulation(points2d,
-		map, edges))
-	# FIXME
-	return ct
+	points2d = Matrix{Float64}(undef, N, 2)
+	for (i, p) in pairs(points), (j, x) in pairs(coords)
+		points2d[i, j] = p[x]
+	end
+	if convex isa Val{true}
+		return Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
+	else
+		edges = vcat(([map[i] map[mod1(i+1,N)]] for i in 1:N)...)
+		return  Vec{3,Int}.(Triangulate.constrained_triangulation(points2d,
+			map, edges))
+	end
 end
 # Triangulating surfaces««2
 # # connected_comp(points, faces)««
@@ -2019,7 +2097,7 @@ end
 """
     triangulate_surface(points, faces)
 
-Returns a triangulation of the faces (as a `Triangulation` structure).
+Returns a triangulation of the faces (as a `TriangulatedSurface` structure).
 """
 function triangulate_surface(points, faces)
 	triangles = Vec{3,Int}[]
@@ -2031,7 +2109,7 @@ function triangulate_surface(points, faces)
 		# kill all degenerate faces
 		push!(triangles, filter(t->norm(face_normal(points[t])) > 0, tri)...)
 	end
-	return Triangulation(points=points, faces=triangles)
+	return TriangulatedSurface(points=points, faces=triangles)
 end
 """
     simplify_surface(points, faces)
@@ -2039,7 +2117,7 @@ end
 Returns [(newpoints1, newfaces1), (newpoints2, newfaces2), ...]
 as a union of connected, triangulated surfaces.
 This function also removes all degenerate (collinear) faces.
-Returns a `Triangulation` structure.
+Returns a `TriangulatedSurface` structure.
 """
 function Triangulations(points, faces)
 	C = connected_components(points, faces)
@@ -2049,11 +2127,11 @@ end
 # 2d convex hull ««2
 
 """
-    convex_hull([2d points])
+    convex_hull([vector of 2d points])
 
 Returns the convex hull (as a vector of 2d points).
 """
-function convex_hull(points::AbstractVector{<:Vec{2,T}}) where{T}
+function convex_hull(points::AbstractVector{<:Vec{2}})
 # M is a matrix with the points as *columns*, hence the transpose
 # below:
 	PH = Polyhedra
@@ -2092,7 +2170,7 @@ end
 # 3d convex hull ««2
 
 """
-		convex_hull(x::AbstractSolid{3}...)
+    convex_hull(x::AbstractSolid{3}...)
 
 Returns the convex hull of the union of all the given solids, as a
 pair `(points, faces)`. `faces` is a list of triangles.
@@ -2100,6 +2178,12 @@ pair `(points, faces)`. `faces` is a list of triangles.
 @inline convex_hull(x::AbstractSolid{3}) =
 	convex_hull(vcat([Vec{3}.(points(y)) for y in x]...))
 
+"""
+    convex_hull(vector of 3d points)
+
+Returns the convex hull of these points, as a pair `(points, faces)`.
+All the faces are triangles.
+"""
 function convex_hull(p::AbstractVector{<:Vec{3,T}}) where{T}
 	M = hcat(Vector.(p)...)
 	PH = Polyhedra
@@ -2111,8 +2195,11 @@ function convex_hull(p::AbstractVector{<:Vec{3,T}}) where{T}
 	for i in PH.eachindex(PH.halfspaces(poly)) # index of halfspace
 		h = PH.get(poly, i)
 		pts = PH.incidentpointindices(poly, i) # vector of indices of points
-		for t in triangulate_face_convex([Vec{3,T}(PH.get(poly, j)) for j in pts],
-					direction = h.a, map = [j.value for j in pts])
+		for t in triangulate_face(
+				[Vec{3,T}(PH.get(poly, j)) for j in pts];
+				direction = h.a,
+				map = [j.value for j in pts],
+				convex = Val(true))
 			(a,b,c) = (V[j] for j in t)
 			k = det([b-a c-a h.a])
 			push!(triangles, (k > 0) ? t : SA[t[1], t[3], t[2]])
@@ -2188,7 +2275,7 @@ end
 # Represents a union of polygons. Each polygon is assumed to be simple and
 # ordered in trigonometric ordering.
 # """
-# struct PolyUnion{T} <: LeafSolid{2,T}
+# struct PolyUnion{T} <: AbstractSolid{2,T}
 # 	poly::Vector{Path{2,T}}
 # 	@inline PolyUnion{T}(p::AbstractVector{<:AnyPath{2,T}}) where{T} =
 # 		new{T}(Path{2,T}.(p))
@@ -2389,7 +2476,7 @@ returns the (sparse) matrix of all triangles `(t1, t2)`
 with intersecting bounding boxes.
 """
 # FIXME: this would be more efficient with an octtree.
-intersecting_bboxes(s1::AbstractSimplicial, s2::AbstractSimplicial) =
+intersecting_bboxes(s1::Surface, s2::Surface) =
 	return (Bool[!isempty(intersect(
 			bounding_box(points(s1)[f1]...),
 			bounding_box(points(s2)[f2]...)))
@@ -2414,7 +2501,7 @@ function supporting_plane(p1::Vec{3}, p2::Vec{3}, p3::Vec{3})
 end
 
 """
-    triangle_intersections(triangle, s::Triangulation)
+    triangle_intersections(triangle, s::TriangulatedSurface)
 
 Computes all intersections of faces of `s`
 with the given `triangle`.
@@ -2425,12 +2512,12 @@ faces)`, as a pair (points, edges). The first three points are always
 the three vertices of the original `triangle`.
 
 """
-function triangle_intersections(triangle::AnyPath{3}, s::Triangulation)
+function triangle_intersections(triangle::AnyPath{3}, s::TriangulatedSurface)
 # 	println("*** intersecting triangle:$triangle")
 	hyperplane = supporting_plane(triangle...)
 # 	println(hyperplane)
 	# proj is a set of indices, e.g. [1,2]:
-	(proj, linear, origin) = best_projection(hyperplane)
+	(proj, linear, origin) = project_2d(hyperplane)
 # 	println("proj=$proj linear=$linear origin=$origin")
 # 	proj = best_projection_idx(triangle; direction=direction(hyperplane))
 	# 2d projection of triangle according to `proj`:
@@ -2480,19 +2567,19 @@ function triangle_intersections(triangle::AnyPath{3}, s::Triangulation)
 # 	println("\e[31mnewpoints3=$newpoints3")
 # 	println("linear=$linear; origin=$origin; hyperplane=$hyperplane; proj=$proj")
 	# we return a small triangulation for just this triangle:
-	return Triangulation(
+	return TriangulatedSurface(
 		points=[newpoints3[i,:]+origin for i in 1:size(newpoints3,1)],
 		faces=newtri)
 end
 # Merging triangulations««2
 """
-    cotriangulate(s1::Triangulation, s2::Triangulation)
+    cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
 
 Returns a refined triangulation of `s1`, as subdivided by the
 intersections with faces from `s2`.
 """
-function cotriangulate(s1::Triangulation, s2::Triangulation)
-	s3 = Triangulation(points(s1), [])
+function cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
+	s3 = TriangulatedSurface(points(s1), [])
 # 	newpoints = copy(points(s1))
 # 	newfaces = SVector{3,Int}[]
 	for f in faces(s1)
@@ -2512,10 +2599,10 @@ is `-1` if the edge was reversed.
 """
 @inline edge_can(e) =(sign(e[2]-e[1]), SA[minimum(e), maximum(e)])
 """
-    inter_union(s1::Triangulation, s2::Triangulation)
+    inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 
 """
-function inter_union(s1::Triangulation, s2::Triangulation)
+function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	# dissect both triangulations
 	s1a = cotriangulate(s1, s2)
 	s2a = cotriangulate(s2, s1)
@@ -2620,201 +2707,210 @@ function inter_union(s1::Triangulation, s2::Triangulation)
 	return (triangulation = s3, mark = mark)
 end
 
-function inter(s1::Triangulation, s2::Triangulation)
+function inter(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	iu = inter_union(s1, s2)
 	return select_faces(i->iu.mark[i] == 2, iu.triangulation)
 end
-function union(s1::Triangulation, s2::Triangulation)
+function union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	iu = inter_union(s1, s2)
 	return select_faces(i->iu.mark[i] == 1, iu.triangulation)
 end
-# Points of cubes, etc.««2
-# # function points(s::Cube, parameters::NamedTuple)
-# # 	if s.center
-# # 		(a,b,c) = one_half(s.size)
-# # 		return [SA[-a,-b,-c], SA[-a,b,-c], SA[a,b,-c], SA[a,-b,-c],
-# # 			SA[-a,-b,c], SA[-a,b,c], SA[a,b,c], SA[a,-b,c]]
-# # 	else
-# # 		return [SA[0,0,0], SA[0,s.size[2],0],
-# # 			SA[s.size[1],s.size[2],0], SA[s.size[1],0,0],
-# # 			SA[0,0,s.size[3]], SA[0,s.size[2],s.size[3]],
-# # 			s.size, SA[s.size[1],0,s.size[3]]]
-# # 	end
-# # end
-# # function points(c::Cylinder, parameters)
-# # 
-# # 	p1 = unit_n_gon(c.r1, parameters)
-# # 	p2 = unit_n_gon(c.r2, parameters)
-# # 	h = one_half(c.h)
-# # 	z = h*~c.center
-# # 	return vcat([ [ p; h-z ] for p in p1], [[p; h+z ] for p in p2 ])
-# # end
-# 
-# # Extrusion ««1
-# # Path extrusion ««2
-# # poly_dist_type(::Type{Vec{2,T}}) where{T} = T
-# # poly_dist_type(::Type{Clipper.IntPoint}) = Int
-# distance2(x::Vec{2,T}, y::Vec{2,T}) where{T} = let z = x .- y
-# 	z[1]*z[1] + z[2]*z[2]
-# end
-# 
-# # triangulate_between: triangulate between two parallel paths««
-# """
-# 		triangulate_between(poly1, poly2, start1, start2)
-# 
-# Given two polygons `poly1` and `poly2`, both of them represented as a
-# vector of paths, and produced as offsets from a common path,
-# find a triangulation for the region between the two polygons.
-# 
-# This functions returns a pair `(triangulation, edge)`, where:
-# 
-#  - the triangulation is a vector of `SVector{3,Int}`,
-# where each point is represented by its index. Indices in `poly1` start at
-# value `start1`, and in `poly2` at `start2`.
-# 
-#  - the edge is a pair `(lastidx1, lastidx2)` corresponding to the last
-# 	 points visited on each polygon. (this will be useful for closing the
-# 	 extrusion).
-# 
-# """
-# function triangulate_between(
-# 		poly1::AbstractVector{<:Path{D,T}},
-# 		poly2::AbstractVector{<:Path{D,T}},
-# 		start1::Int = 1, start2::Int = 1) where {D,T}
-# # 	println("T=$T")
-# 	Big = typemax(T)
-# # 	Distance = poly_dist_type(T); Big = typemax(Distance)
-# 	Triangle = SVector{3,Int}
-# 	triangles = Triangle[]
-# 	# head is the marker of current leading edge
-# 	# headpoint[i] is the point marked to by head[i]
-# 	# headidx is the new index for this marked point
-# 	# status[i][j] is the number of last used point in j-th path of i-th poly
-# 	head = [(1,1), (1,1)]
-# 	headpoint = [poly1[1][1], poly2[1][1]]
-# 	headidx = [start1, start2]
-# 	status = zeros.(Int,length.((poly1, poly2)))
-# 	# so far we used exactly one point on each side:
-# 	status[1][1] = status[2][1] = 1
-# 
-# 	# we need a way to convert (poly, path, index) to integer index««
-# 	function first_indices(start::Int, l::Vector{Int})::Vector{Int}
-# 		f = zeros.(Int, length(l))
-# 		f[1] = start
-# 		for i in 1:length(l)-1
-# 			@inbounds f[i+1] = f[i] + l[i]
-# 		end
-# 		f
-# 	end
-# 	# firstindex[poly][path] is the first index for this path
-# 	# firstindex[1][1] = start1
-# 	# firstindex[1][2] = start1 + len(poly1[1]) etc.
-# 	firstindex = (first_indices(start1, length.(poly1)),
-# 								first_indices(start2, length.(poly2)))
-# 	newindex(poly::Int, path::Int, index::Int)::Int =
-# 		firstindex[poly][path] + index - 1
-# #»»
-# 	# computing diagonal distances to find the smallest one:««
-# 	distance(pt, path, i) =
-# 		i > length(path) ? Big : distance2(pt, path[i])
-# 
-# 	closest(pt, poly, status) =
-# 		findmin([distance(pt, poly[i], status[i]+1) for i in eachindex(poly)])
-# #»»
-# 
-# 	while true
-# 		d1, i1 = closest(headpoint[2], poly1, status[1])
-# 		d2, i2 = closest(headpoint[1], poly2, status[2])
-# 		# if no more points are left, we return:
-# 		(d1 == d2 == Big) && break
-# 
-# 		if d1 < d2 # we append a point from poly1
-# 			# add the triangle: head1, head2, newpoint
-# 			s = status[1][i1] += 1
-# 			newidx = newindex(1, i1, s)
-# 			push!(triangles, SA[headidx[1], headidx[2], newidx])
-# 			# update head1 to point to new point
-# 			headidx[1] = newidx
-# 			head[1] = (i1, s)
-# 			headpoint[1] = poly1[i1][s]
-# 		else
-# 			# add the triangle: head1, head2, newpoint
-# 			s = status[2][i2] += 1
-# 			newidx = newindex(2, i2, s)
-# 			push!(triangles, SA[headidx[1], headidx[2], newidx])
-# 			# update head1 to point to new point
-# 			headidx[2] = newidx
-# 			head[2] = (i2, s)
-# 			headpoint[2] = poly2[i2][s]
-# 		end
-# 	end
-# 	(triangles, (headidx[1], headidx[2]))
-# end#»»
-# # path_extrude««
-# """
-# 		path_extrude(path, poly, options...)
-# 
-# Extrudes the given polygon (a path of points forming a simple loop)
-# along the given path. Both arguments are provided as a
-# `Vector{SVector{2}}`.
-# 
-# Returns a `Surface` (defined by points and a triangulation).
-# """
-# function path_extrude(path::Path{2,T},
-# 	poly::Path{2};
-# 	join = :round,
-# 	miter_limit::Float64 = 2.0,
-# 	precision::Float64 = 0.25,
-# 	closed::Bool = true
-# 	) where{T}
-# 
-# 	N = length(poly)
-# 	# offset_path is a vector of vector of paths
-# 	offset_path = offset([path], [pt[1] for pt in poly],
-# 		join = join, ends = closed ? :closed : :butt)
-# 	global OP = offset_path
-# 	# new_points is a flat list of all 3d points produced
-# 	new_points = [[
-# 		[ SA[pt[1], pt[2], poly[i][2]] for pt in [p...;] ]
-# 		for (i, p) in pairs(offset_path)
-# 	]...;]
-# # 	println("returning new_points:")
-# 
-# 	# first index for each path
-# 	first_face = cumsum([1; # initial
-# 		map(p->sum(length.(p)), offset_path)])
-# # 	println("first_face=$first_face")
-# 
-# 	triangles = map(1:N) do i
-# 		i1 = mod1(i+1, N)
-# 		triangulate_between(offset_path[i], offset_path[i1],
-# 			first_face[i], first_face[i1])
-# 		# XXX keep the last edge for closing the poly
-# 	end
-# 	# this completes the set of triangles for the tube:
-# 	tube_triangles = vcat([ t[1] for t in triangles ]...)
-# 	last_face = [ t[2][1] for t in triangles ]
-# # 	println("last_face=$last_face")
-# 	# here we decide if it is closed or open
-# 	# if open, triangulate the two facets
-# 	# if closed, join them together
-# 	if closed
-# 		more_triangles = vcat(map(1:N) do i
-# 			j = (i%N)+1
-# 			[ SA[first_face[i], last_face[i], first_face[j]],
-# 				SA[first_face[j], last_face[i], last_face[j]] ]
-# 		end...)
-# # 		println("more_triangles=$more_triangles")
-# 		tube_triangles = [ tube_triangles; more_triangles ]
-# 	else
-# 	# TODO: triangulate the surface
-# 	# or, for now, close with two non-triangular facets...
-# 		more_triangles = [ reverse(first_face), last_face ]
-# # 		println("more_triangles=$more_triangles")
-# 	end
-# 	Surface( new_points, tube_triangles )
-# end#»»
-# 
+# Extrusion ««1
+# Path extrusion ««2
+# poly_dist_type(::Type{Vec{2,T}}) where{T} = T
+# poly_dist_type(::Type{Clipper.IntPoint}) = Int
+distance2(x::Vec{2,T}, y::Vec{2,T}) where{T} = let z = x .- y
+	z[1]*z[1] + z[2]*z[2]
+end
+
+# triangulate_between: triangulate between two parallel paths««
+"""
+		triangulate_between(poly1, poly2, start1, start2)
+
+Given two polygons `poly1` and `poly2`, both of them represented as a
+vector of paths, and produced as offsets from a common path,
+find a triangulation for the region between the two polygons.
+
+This functions returns a pair `(triangulation, edge)`, where:
+
+ - the triangulation is a vector of `SVector{3,Int}`,
+where each point is represented by its index. Indices in `poly1` start at
+value `start1`, and in `poly2` at `start2`.
+
+ - the edge is a pair `(lastidx1, lastidx2)` corresponding to the last
+	 points visited on each polygon. (this will be useful for closing the
+	 extrusion).
+
+"""
+function triangulate_between(
+		poly1::AbstractVector{<:Path{D,T}},
+		poly2::AbstractVector{<:Path{D,T}},
+		start1::Int = 1, start2::Int = 1) where {D,T}
+# 	println("T=$T")
+	Big = typemax(T)
+# 	Distance = poly_dist_type(T); Big = typemax(Distance)
+	Triangle = SVector{3,Int}
+	triangles = Triangle[]
+	# head is the marker of current leading edge
+	# headpoint[i] is the point marked to by head[i]
+	# headidx is the new index for this marked point
+	# status[i][j] is the number of last used point in j-th path of i-th poly
+	head = [(1,1), (1,1)]
+	headpoint = [poly1[1][1], poly2[1][1]]
+	headidx = [start1, start2]
+	status = zeros.(Int,length.((poly1, poly2)))
+	# so far we used exactly one point on each side:
+	status[1][1] = status[2][1] = 1
+
+	# we need a way to convert (poly, path, index) to integer index««
+	function first_indices(start::Int, l::Vector{Int})::Vector{Int}
+		f = zeros.(Int, length(l))
+		f[1] = start
+		for i in 1:length(l)-1
+			@inbounds f[i+1] = f[i] + l[i]
+		end
+		f
+	end
+	# firstindex[poly][path] is the first index for this path
+	# firstindex[1][1] = start1
+	# firstindex[1][2] = start1 + len(poly1[1]) etc.
+	firstindex = (first_indices(start1, length.(poly1)),
+								first_indices(start2, length.(poly2)))
+	newindex(poly::Int, path::Int, index::Int)::Int =
+		firstindex[poly][path] + index - 1
+#»»
+	# computing diagonal distances to find the smallest one:««
+	distance(pt, path, i) =
+		i > length(path) ? Big : distance2(pt, path[i])
+
+	closest(pt, poly, status) =
+		findmin([distance(pt, poly[i], status[i]+1) for i in eachindex(poly)])
+#»»
+
+	while true
+		d1, i1 = closest(headpoint[2], poly1, status[1])
+		d2, i2 = closest(headpoint[1], poly2, status[2])
+		# if no more points are left, we return:
+		(d1 == d2 == Big) && break
+
+		if d1 < d2 # we append a point from poly1
+			# add the triangle: head1, head2, newpoint
+			s = status[1][i1] += 1
+			newidx = newindex(1, i1, s)
+			push!(triangles, SA[headidx[1], headidx[2], newidx])
+			# update head1 to point to new point
+			headidx[1] = newidx
+			head[1] = (i1, s)
+			headpoint[1] = poly1[i1][s]
+		else
+			# add the triangle: head1, head2, newpoint
+			s = status[2][i2] += 1
+			newidx = newindex(2, i2, s)
+			push!(triangles, SA[headidx[1], headidx[2], newidx])
+			# update head1 to point to new point
+			headidx[2] = newidx
+			head[2] = (i2, s)
+			headpoint[2] = poly2[i2][s]
+		end
+	end
+	(triangles, (headidx[1], headidx[2]))
+end#»»
+# path_extrude««
+"""
+		path_extrude(path, poly, options...)
+
+Extrudes the given polygon (a path of points forming a simple loop)
+along the given path. Both arguments are provided as a
+`Vector{SVector{2}}`.
+
+Returns a `Surface` (defined by points and a triangulation).
+"""
+function path_extrude(path::Path{2,T},
+	poly::Path{2};
+	join = :round,
+	miter_limit::Float64 = 2.0,
+	precision::Float64 = 0.25,
+	closed::Bool = true
+	) where{T}
+
+	N = length(poly)
+	# offset_path is a vector of vector of paths
+	offset_path = offset([path], [pt[1] for pt in poly],
+		join = join, ends = closed ? :closed : :butt)
+	global OP = offset_path
+	# new_points is a flat list of all 3d points produced
+	new_points = [[
+		[ SA[pt[1], pt[2], poly[i][2]] for pt in [p...;] ]
+		for (i, p) in pairs(offset_path)
+	]...;]
+# 	println("returning new_points:")
+
+	# first index for each path
+	first_face = cumsum([1; # initial
+		map(p->sum(length.(p)), offset_path)])
+# 	println("first_face=$first_face")
+
+	triangles = map(1:N) do i
+		i1 = mod1(i+1, N)
+		triangulate_between(offset_path[i], offset_path[i1],
+			first_face[i], first_face[i1])
+		# XXX keep the last edge for closing the poly
+	end
+	# this completes the set of triangles for the tube:
+	tube_triangles = vcat([ t[1] for t in triangles ]...)
+	last_face = [ t[2][1] for t in triangles ]
+# 	println("last_face=$last_face")
+	# here we decide if it is closed or open
+	# if open, triangulate the two facets
+	# if closed, join them together
+	if closed
+		more_triangles = vcat(map(1:N) do i
+			j = (i%N)+1
+			[ SA[first_face[i], last_face[i], first_face[j]],
+				SA[first_face[j], last_face[i], last_face[j]] ]
+		end...)
+# 		println("more_triangles=$more_triangles")
+		tube_triangles = [ tube_triangles; more_triangles ]
+	else
+	# TODO: triangulate the surface
+	# or, for now, close with two non-triangular facets...
+		more_triangles = [ reverse(first_face), last_face ]
+# 		println("more_triangles=$more_triangles")
+	end
+	return Surface(new_points, tube_triangles)
+end#»»
+
+# Meshing of 3d objects««1
+# Converting 3d primitive objects««2
+function points(s::Cube, parameters::NamedTuple)
+	if s.center
+		(a,b,c) = one_half(s.size)
+		return [SA[-a,-b,-c], SA[-a,b,-c], SA[a,b,-c], SA[a,-b,-c],
+			SA[-a,-b,c], SA[-a,b,c], SA[a,b,c], SA[a,-b,c]]
+	else
+		return [SA[0,0,0], SA[0,s.size[2],0],
+			SA[s.size[1],s.size[2],0], SA[s.size[1],0,0],
+			SA[0,0,s.size[3]], SA[0,s.size[2],s.size[3]],
+			s.size, SA[s.size[1],0,s.size[3]]]
+	end
+end
+function points(c::Cylinder, parameters)
+	p1 = unit_n_gon(c.r1, parameters)
+	p2 = unit_n_gon(c.r2, parameters)
+	h = one_half(c.h)
+	z = h*~c.center
+	return vcat([ [ p; h-z ] for p in p1], [[p; h+z ] for p in p2 ])
+end
+@inline points(s::Sphere, parameters) =
+	fibonacci_sphere_points(s.radius, parameters)
+
+# All of these are convex, so we use the lazy approach and just take
+# convex hull of all the points.
+function Surface(s::Union{Cube, Cylinder, Sphere},
+		parameters = _DEFAULT_PARAMETERS)
+	p = points(s, parameters)
+	return Surface(convex_hull(p)...)
+end
 # # # Annotations ««1
 # # abstract type AbstractAnnotation{D} end
 # # 
@@ -2870,7 +2966,7 @@ end
 # export offset, hull, minkowski, convex_hull
 # 
 # »»1
-function scad(s::Solids.AbstractSimplicial, io::IO = stdout; scale=50,
+function scad(s::Solids.Surface, io::IO = stdout; scale=50,
 		offset=[0.,0.,0.])
 	println(io, "translate($offset) {")
 	for (i, p) in pairs(Solids.points(s))
@@ -2890,7 +2986,7 @@ function scad(s::Solids.AbstractSimplicial, io::IO = stdout; scale=50,
 	end
 	println(io, "]); }")
 end
-@inline scad(s::Solids.AbstractSimplicial, f::AbstractString; kwargs...) =
+@inline scad(s::Solids.Surface, f::AbstractString; kwargs...) =
 	open(f, "w") do io scad(s, io; kwargs...) end
 end #««1 module
 # »»1
