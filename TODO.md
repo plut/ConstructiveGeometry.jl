@@ -1,20 +1,3 @@
-# project2
- 1. `triangle_inter`: hyperplane -> proj, affine section
- 2. `tri_face`: points -> proj of points (as matrix)
- 3. `tri_face_convex`: (points, direction) -> proj of points (as matrix)
-
-A direction => proj
-A' direction => proj + index
-B  index, direction => matrix
-B' index, offset => offset
-C points -> normal
-D points, proj -> matrix
-
- 1. is A'B B'
- 2. is CA
- 3. is A
-
-
 # Immediate work
  - a common name for meshing objects (either `Mesh` or `elements` ?)
    => **realize**
