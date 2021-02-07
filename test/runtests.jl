@@ -66,6 +66,10 @@ CH = convex_hull([SA[0,0,0],SA[0,0,10],SA[10,0,0],SA[0,10,0],SA[1,1,1],SA[1,0,0]
 end
 @testset "Surfaces" begin #<<<1
 using Solids: connected_components
+v=[[0,-1],[1,0],[0,1],[-1,0]]
+for j in eachindex(v), i in 1:i-1
+	@test Solids.circular_lt(v[i], v[j])
+end
 @test connected_components([:a, :b, :c, :d, :e], [[1,2],[1,3],[4,5]]) ==
 	[([:a, :b, :c], [[1,2],[1,3]]),
 	 ([:d, :e], [[1,2]]) ]

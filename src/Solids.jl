@@ -2568,89 +2568,22 @@ function supporting_plane(p1::Vec{3}, p2::Vec{3}, p3::Vec{3})
 	return Polyhedra.HyperPlane(c, b)
 end
 
-# """
-#     triangle_intersections(triangle, s::TriangulatedSurface)
-# 
-# Computes all intersections of faces of `s`
-# with the given `triangle`.
-#  - `triangle`: given as a triple of Vec{3}.
-# 
-# Returns a triangulation structure describing a dissection of the triangle
-# compatible with `(points ,faces)`. The first three points are always
-# the three vertices of the original `triangle`.
-# """
-# function triangle_intersections(triangle::AnyPath{3}, s::TriangulatedSurface)
-# # 	println("*** intersecting triangle:$triangle")
-# 	hyperplane = supporting_plane(triangle...)
-# # 	println(hyperplane)
-# 	# proj is a set of indices, e.g. [1,2]:
-# 	(proj, linear, origin) = project_2d(hyperplane)
-# # 	println("proj=$proj linear=$linear origin=$origin")
-# # 	proj = best_projection_idx(triangle; direction=direction(hyperplane))
-# 	# 2d projection of triangle according to `proj`:
-# 	tri2v = [p[proj] for p in triangle]
-# 	tri2h = hrep(tri2v...)
-# # 	println("tri2v=$tri2v\ntri2h=$tri2h")
-# 	# points and edges for the contrained triangulation
-# 	newpoints0 = Dict(v=>k for (k,v) in pairs(tri2v))
-# 	newedges = Matrix{Int}(undef, 0, 2)
-# # 	newedges = [1 2;2 3;3 1]
-# 	for f in faces(s)
-# 		# compute coordinates of incident triangle (as a triple of points):
-# 		incident = points(s)[f]
-# # 		println("  incident=$(Vector.(incident))")
-# 		inc_plane = inter(incident, hyperplane)
-# # 		println("  inc_plane=$(inc_plane)")
-# 		inc2v = [p[proj] for p in inc_plane] # vrep
-# # 		println("  inc2v=$(inc2v)")
-# 		int2v = inter(inc2v, tri2h...)
-# # 		println("  inter: $(int2v)")
-# 		# int2v = intersection of the two triangles (in 2d coordinates)
-# 		# if this intersection is empty or a point, we drop it;
-# 		if length(int2v) <= 1 continue; end
-# 		# otherwise we append all those edges to the constraints of the
-# 		# triangulation:
-# 		for v in int2v
-# 			if !haskey(newpoints0, v) newpoints0[v] = length(newpoints0)+1 ;
-# # 			println(" * add $(length(newpoints0)): $v")
-# 			end
-# 		end
-# 		for i in eachindex(int2v)
-# 			j = mod1(i+1, length(int2v))
-# 			newedges = [newedges; newpoints0[int2v[i]] newpoints0[int2v[j]]]
-# # 			println(" - add edge $((i,j)) => $(newedges[size(newedges,1),:])")
-# 		end
-# 	end
-# 	# convert the Dict of newpoints to a Matrix (with points in rows)
-# 	# and a list of returned points
-# 	n = length(newpoints0)
-# 	if n == 3
-# 		return TriangulatedSurface(points=triangle, faces=[SA[1,2,3]])
-# 	end
-# 	newpoints = Matrix{eltype(tri2v[1])}(undef, n, 2)
-# 	allpoints = Vector{eltype(triangle)}(undef, n)
-# 	allpoints[1:3] = triangle
-# 	for (k,v) in pairs(newpoints0)
-# 		newpoints[v,:] = k
-# 		if v ≥ 4
-# 			allpoints[v] = linear*k + origin
-# 		end
-# 	end
-# 	perimeter = convex_hull_list(rows(newpoints))
-# 	newedges = vcat(newedges,
-# 		[perimeter[mod1(i+j, length(perimeter))] for i=1:length(perimeter),j=1:2])
-# 	println("newedges = $newedges")
-# 	println(newedges)
-# 	println("constrained_triangulation($newpoints, $(collect(1:n)), $newedges")
-# 	newtri = Triangulate.constrained_triangulation(newpoints,
-# 		collect(1:n), newedges)
-# 	# points are in rows, hence the transpose:
-# 	# we return a small triangulation for just this triangle:
-# 	return TriangulatedSurface(
-# 		points=allpoints,
-# 		faces=newtri)
-# end
-# Self-intersect and sub-triangulation««2
+"""
+    circular_lt
+
+Circular comparison of vectors, sorted according to their angle in
+]-π,π]. Implemented with only integral arithmetic (no `atan2`, `√` or `/`).
+"""
+@inline function circular_lt(p,q)
+	if p[2] < 0
+		if q[2] ≥ 0 return true; end
+	else # p[2] ≥ 0
+		if q[2] < 0 return false; end
+		if p[2] == 0 && q[2] == 0 return p[1] > q[1]; end
+	end
+	return det2(p, q) > 0
+end
+
 """
     self_intersect(s::TriangulatedSurface)
 
@@ -2866,43 +2799,6 @@ function subtriangulate(s::TriangulatedSurface)
 	return TriangulatedSurface(newpoints, newfaces)
 end
 
-# """
-#     cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
-# 
-# Returns a refined triangulation of `s1`, as subdivided by the
-# intersections with faces from `s2`.
-# """
-# function cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
-# 	s3 = TriangulatedSurface(copy(points(s1)), [])
-# # 	newpoints = copy(points(s1))
-# # 	newfaces = SVector{3,Int}[]
-# 	for f in faces(s1)
-# 		triangle = points(s1)[f]
-# 		s = triangle_intersections(triangle, s2)
-# # 		println("\e[32m### merging triangulation for triangle $triangle\e[m")
-# 		println("\e[31mface $f: found $(length(points(s))) intersections\e[m")
-# 		println("   face $(points(s1)[f])")
-# 		println("   new points $(points(s))")
-# 		s3 = merge(s3, s)
-# 		println("\e[31;4mface $f : added $(length(points(s))), total $(length(points(s3)))\e[m")
-# 	end
-# 	return s3
-# end
-# Computation of intersection and union««2
-"""
-    circular_lt
-
-Circular comparison of angles in ]-π, π].
-"""
-@inline function circular_lt(p,q)
-	if p[2] < 0
-		if q[2] ≥ 0 return true; end
-	else # p[2] ≥ 0
-		if q[2] < 0 return false; end
-		if p[2] == 0 && q[2] == 0 return p[1] > q[1]; end
-	end
-	return det2(p, q) > 0
-end
 """
     inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 

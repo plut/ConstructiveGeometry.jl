@@ -1,25 +1,23 @@
 # Immediate work
+ * intersection and union: ray-shooting (it is possible even within the
+	 merged structure)
+   - force-remove opposite faces (neither ∪ nor ∩)
+	 - check if it works for complement
  - a common name for meshing objects (either `Mesh` or `elements` ?)
    => **realize**
  - Boolean operations work even if non-connected triangulation
    -> remove conn.comp. split from `Triangulation()` converter
  - add complement (of triangulation, and symbolic)
  - add difference (of triangulations)
- * intersection and union: ray-shooting (it is possible even within the
-	 merged structure)
-   - force-remove opposite faces (neither ∪ nor ∩)
-	 - check if it works for complement
- + use `import` for modules used only a few times once (`Color`, all geometry)
-   to avoid polluting the namespace
  * test suite
  - what to do for polygons with holes?
    - look in `Makie`
 	 - in `BasicGeometry`: a list of polygons + list of holes
 	 - parity is probably simplest bet (easily allows both non-connected
 		 polys and holes)
+	 - `PolygonXor` type
  - replace minkowski with circle by an offset
  - Minkowski difference
- + finish grouping all Clipper stuff in one section
  - fix `Offset` for polygon unions
  - choose a correct value for `Clipper` precision
  * check `convex_hull` works
@@ -43,7 +41,7 @@
    (i.e. first thing in call stack outside module).
 # 2d vs 3d
  - before deciding what *“should”* be done, write a set of examples of
-	 **how it should work** (for various operations, e.g. linear maps,
+	 **what it should do** (for various operations, e.g. linear maps,
 	 Minkowski, hull) and then decide how to best implement this behavior
  - Objects should really have *two* dimensions: intrinsic and embedding.
  E.g. a `square(1)` has dimensions `(2,2)`, while its translation by
@@ -129,7 +127,7 @@
    terribly useful (in particular with angles in radians).
  - *Julia*: add `cossin` to `sincos` (helps with complex units).
 # Packaging
- - write a full doc about how to define a new transform
+ * write a full doc about how to define a new transform
  - complete the list of exports
  * write a minimal regression test
  * make this a proper package
@@ -141,7 +139,7 @@
    - `MeshIO`
 # Extras
  - improve `unit_n_gon` to take advantage of symmetries
- - investigate Fibonacci spheres
+ + investigate Fibonacci spheres
  + Color
  - Annotations in 2d
  - Annotations in 3d (this might depend on the visualizer though)
