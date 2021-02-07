@@ -1960,12 +1960,10 @@ in the list of points.
 """
 function triangulate_loop(points::Matrix{Float64})
 	N = size(points, 1)
-	println("here0")
 	return Triangulate.constrained_triangulation(
 		points,
 		collect(1:N), # identity map on points
 		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
-	println("done0")
 end
 @inline triangulate_loop(points::AnyPath{2}) =
 	triangulate_loop(Matrix{Float64}(vcat(transpose.(points)...)))
@@ -2665,12 +2663,14 @@ as indices in `points(s)`∪ {new points}.
 
 """
 function self_intersect(s::TriangulatedSurface)
+	println("incidence...")
 	inc = incidence(s) # we only need edge_faces
+	println("planes...")
 	# we precompute all planes: we need them later for edge intersections
 	planes = [ supporting_plane(points(s)[f]...) for f in faces(s) ]
 
 	n = length(points(s))
-	println("self_intersect: $n points at beginning")
+# 	println("self_intersect: $n points at beginning")
 	new_points = similar(points(s), 0)
 	T = eltype(eltype(points(s)))
 	face_points = [ Int[] for _ in faces(s) ]
@@ -2681,9 +2681,9 @@ function self_intersect(s::TriangulatedSurface)
 		return n + length(new_points)
 	end
 	@inline function add_point_edge!(e, k, p)#««
-		println("adding point $k=$p to edge $e")
-		println("  current points for this edge: $(edge_points[e])")
-		println("  current coordinates: $(edge_coords[e])")
+# 		println("adding point $k=$p to edge $e")
+# 		println("  current points for this edge: $(edge_points[e])")
+# 		println("  current coordinates: $(edge_coords[e])")
 		vec = points(s)[e[2]]-points(s)[e[1]]
 		# fixme: unroll this loop to allow constant-propagation:
 		i = argmax(abs.(vec))
@@ -2692,18 +2692,20 @@ function self_intersect(s::TriangulatedSurface)
 			push!(edge_coords[e], p[i])
 			return
 		end
-		println("  sorted by coordinate $i ($(vec[i]))")
-		println("  e=$e")
+# 		println("  sorted by coordinate $i ($(vec[i]))")
+# 		println("  e=$e")
 		rev = (vec[i] < 0)
 		j = searchsorted(edge_coords[e], p[i]; rev=rev)
-		println("  inserting at position $j, $(first(j))")
+# 		println("  inserting at position $j, $(first(j))")
 		insert!(edge_points[e], first(j), k)
 		insert!(edge_coords[e], first(j), p[i])
+# 		println("  now edge_points[$e] = $(edge_points[e])")
 	end#»»
 
+	println("faces...")
 	# face-edge and face-vertex intersections««
 	for (i, f) in pairs(faces(s))
-		println("  face $i: $f")
+# 		println("  face $i: $f")
 		# set up infrastructure for this face
 		triangle = points(s)[f]
 		bbox = bounding_box(triangle...)
@@ -2721,13 +2723,13 @@ function self_intersect(s::TriangulatedSurface)
 				continue
 			end
 			# vertex is inside this face, mark it
-			println("vertex $j inside face $i=$f")
+# 			println("vertex $j inside face $i=$f")
 			push!(face_points[i], j)
 		end#»»
 		# face-edge intersections««
 		for (e, flist) in pairs(inc.edge_faces)
 			segment = points(s)[e]
-			if isempty(bounding_box(segment...) ∩ bbox)
+			if isempty(bounding_box(segment...) ∩ bbox) || !isempty(e ∩ f)
 				continue
 			end
 			(z1, z2) = plane.(segment)
@@ -2741,12 +2743,13 @@ function self_intersect(s::TriangulatedSurface)
 			end
 			p3 = lift * p2 + origin
 			k = create_point!(p3)
-			println("edge $e intersects face $i=$f at $(last(new_points))")
-			println("  adding point $k to face $i=$f")
+# 			println("edge $e intersects face $i=$f at $(last(new_points))")
+# 			println("  adding point $k to face $i=$f")
 			push!(face_points[i], k)
 			add_point_edge!(e, k, p3)
 		end#»»
 	end#»»
+	println("edges...")
 	# edge-edge and edge-vertex intersections««
 	for (e, flist) in pairs(inc.edge_faces)
 		# two equations define this edge:
@@ -2769,7 +2772,7 @@ function self_intersect(s::TriangulatedSurface)
 
 			# edge (segment) is intersection of bbox and line,
 			# therefore here we know that the point is on the edge:
-			println("vertex $j is on edge $e")
+# 			println("vertex $j is on edge $e")
 			add_point_edge!(e, j, p)
 		end#»»
 		# edge-edge intersections:««
@@ -2790,18 +2793,18 @@ function self_intersect(s::TriangulatedSurface)
 			# the other plane
 			p = (w1*segment[2]-w2*segment[1])/(w1-w2)
 			if eq2(p[proj]) ≠ 0 continue; end
-			println("""
-Edges $e, $e1:
-flist = $flist = $(faces(s)[abs.(flist)])
-equations = $eq1, $eq2
-segment = $segment
-(z1, z2) = $((z1, z2))
-(w1, w2) = $((w1, w2))
-candidate p (segment ∩ z): $p
-""")
-		@assert false
 			# point p is a new point and on both edges e and e1
-			println("edges $e and $e1 intersect")
+# 			println("edges $e and $e1 intersect")
+# 			println("""
+# Edges $e, $e1:
+# flist = $flist = $(faces(s)[abs.(flist)])
+# equations = $eq1, $eq2
+# segment = $segment
+# (z1, z2) = $((z1, z2))
+# (w1, w2) = $((w1, w2))
+# candidate p (segment ∩ z): $p
+# """)
+# 		@assert false
 			k = create_point!(p)
 			add_point_edge!(e, k, p)
 			add_point_edge!(e1, k, p)
@@ -2818,26 +2821,43 @@ Returns a refined triangulation of `s` with vertices at all
 self-intersection points.
 """
 function subtriangulate(s::TriangulatedSurface)
+	println("self-intersect...")
 	self_int = self_intersect(s)
+	println("subtriangulate...")
 	newpoints = [ points(s); self_int.points ]
 	newfaces = SVector{3,Int}[]
+	@inline edge_points(e1, e2) =
+		e1 < e2 ? self_int.edge_points[SA[e1,e2]] :
+		reverse(self_int.edge_points[SA[e2,e1]])
+
 	for (i, f) in pairs(faces(s))
 		extra = self_int.face_points[i]
-		if length(extra) == 0
+# 		println("subtriangulating face $f: inserting $extra")
+# 		println("first face $f[1] $f[2]: $(edge_points(f[1],f[2]))")
+		perimeter =
+			[ f[1]; edge_points(f[1], f[2]);
+			  f[2]; edge_points(f[2], f[3]);
+				f[3]; edge_points(f[3], f[1]); ]
+# 		println("  perimeter=$perimeter")
+		if length(extra) == 0 && length(perimeter) == 3
 			push!(newfaces, f)
 			continue
 		end
-# 		println("subtriangulating face $f: inserting $extra")
+
 		triangle = points(s)[f]
 		plane = supporting_plane(triangle...)
 		proj = project_2d(direction(plane))
 
-		plist = [f; extra] # indices of points in face
+		plist = [ perimeter; extra] # indices of points in face
 		# as a matrix for `constrained_triangulation`:
 		coords = [ newpoints[p][i] for p in plist, i in proj ]
-		perimeter = plist[convex_hull_list(rows(coords))]
 # 		println("perimeter = $perimeter")
 		l = length(perimeter)
+		cons = [perimeter[mod1(i+j,l)] for i in eachindex(perimeter), j in 0:1]
+# 		for (i, p) in pairs(plist)
+# 			println("$(coords[i,1]) $(coords[i,2]) $p")
+# 		end
+# 		println("($coords, $plist, $cons)")
 		tri = Triangulate.constrained_triangulation(coords, plist,
 			[perimeter[mod1(i+j,l)] for i in eachindex(perimeter), j in 0:1])
 # 		println("triangulation = $tri")
@@ -2869,83 +2889,80 @@ end
 # 	return s3
 # end
 # Computation of intersection and union««2
+"""
+    circular_lt
 
+Circular comparison of angles in ]-π, π].
+"""
+@inline function circular_lt(p,q)
+	if p[2] < 0
+		if q[2] ≥ 0 return true; end
+	else # p[2] ≥ 0
+		if q[2] < 0 return false; end
+		if p[2] == 0 && q[2] == 0 return p[1] > q[1]; end
+	end
+	return det2(p, q) > 0
+end
 """
     inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 
 """
 function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
-	# dissect both triangulations
-	explain(s1, "/tmp/s1.scad")
-	s1a = cotriangulate(s1, s2)
-	explain(s1a, "/tmp/s1a.scad")
-	s2a = s2
-# 	s2a = cotriangulate(s2, s1)
-	println("# sizes: $(length(points(s1a))) $(length(points(s2a)))")
-	explain(s1a, "/tmp/s3.scad")
-	@assert false
+	s = subtriangulate(merge(s1, s2))
+	explain(s, "/tmp/s.scad")
 	# since ∪ and ∩ are commutative, we don't need to know the origin of
 	# the faces, and merging the two triangulations at this stage will make
 	# indexing much simpler (e.g. no need to renumber vertices, etc.).
 	# Note that this does not remove duplicate faces; this is on purpose
 	# (the inside of a duplicate face is automatically ∩):
-	s3 = merge(s1a, s2a)
-	explain(s3, "/tmp/s3.scad")
-	println("merged: $(length(points(s1a))) + $(length(points(s2a))) => $(length(points(s3)))")
-	@assert false
-	inc_data = incidence(s3)
+# 	println("merged: $(length(points(s1))) + $(length(points(s2))) => $(length(points(s)))")
+	inc = incidence(s)
 	# mark[f] holds the type of face f, coded as: -1=unknown;
-	# 0 = to be removed; 1=union; 2=inter; 3=both
-	mark = fill(-1, length(faces(s3)))
-	@inline setmark!(c, k) = begin
+	# 0 = to be removed; 1=union; 2=inter; etc.
+	mark = fill(-1, length(faces(s)))
+	nmarked = 0
+	@inline setmark!(c, k) = begin#««
 # 		if faces(s3)[c] == [3,11,14]
 # 			println("\e[31;1m ########## ICI:\e[m")
 # 		end
-# 		println("  marking face($c)$(faces(s3)[c]) = $k")
-		if mark[c] == -1  mark[c] = k; end
-	end
-
+# 		println("    \e[32mmarking face($c)$(faces(s)[c]) = $k\e[m")
+		if mark[c] == -1 
+			nmarked+= 1
+			mark[c] = k
+			end
+	end#»»
   # mark faces around each edge««
-	for (e, flist) in pairs(inc_data.edge_faces)
-		# e is a pair of indices in points(s3),
+	for (e, flist) in pairs(inc.edge_faces)
+		# e is a pair of indices in points(s),
 		# flist a vector of faces touching this edge
 		# we look only for edges where the two surfaces intersect:
 		if length(flist) ≤ 2; continue; end
 
-		face_vec3 = begin # 3d vectors representing all adjacent faces
-			face_pt3 = [sum(faces(s3)[abs(f)]) - sum(e) for f in flist]
-			pt = points(s3)
+		# for each adjacent face, compute a (3d) vector which, together with
+		# the edge, generates the face (and pointing from the edge to the face):
+		face_vec3 = begin
+			face_pt3 = [sum(faces(s)[abs(f)]) - sum(e) for f in flist]
+			pt = points(s)
 		[ pt[i] - pt[e[2]] for i in face_pt3 ]
 		end
 		# we project these faces on the plane perpendicular to edge e;
 		# the eye is at position e[2] looking towards e[1].
 		face_vec2 = begin # 2d projection of face_vec3 (preserving orientation)
-			dir3 = points(s3)[e[2]]-points(s3)[e[1]]
+			dir3 = points(s)[e[2]]-points(s)[e[1]]
 			(proj, k) = project_2d(dir3, Val(true))
 			dir2 = dir3[proj]
 			dir2scaled = dir2/norm2(dir3)
 		[ v[proj] - (v ⋅ dir3)*dir2scaled for v in face_vec3 ]
 		end
-		# conversion to rational parameter of circle (for sorting): t = y/(x+1)
-		# since some types (Fixed) cannot hold a ∞ value, we clamp it to
-		# some arbitrary constant B, by composing on [0,∞] by homography
-		# t ↦ Bt/(t+B) (and on [0,∞] by the opposite).
-		rat_param = begin
-			@inline xy2rat(x,y, B=1024) =
-				(y == 0) ? (x > 0 ? zero(x) : oftype(x,B)) :
-				(y*B)/(B*(x+1) + abs(y))
-		[ xy2rat(v...) for v in face_vec2 ]
-		end
-		reorder = sort(eachindex(flist); by=i->rat_param[i])
+		reorder = sort(eachindex(flist); by=i->face_vec2[i], lt=circular_lt)
 
-		println("\e[1medge $e:\e[m")
-		for i in eachindex(flist)
-			f = abs(flist[i])
-			println("  face $(flist[i]) = $(faces(s3)[f])")
-			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
-		end
-		println("  rat_param=$rat_param")
-		println("  reorder=$reorder to $(flist[reorder])")
+# 		println("\e[1medge $e:\e[m")
+# 		for i in eachindex(flist)
+# 			f = abs(flist[i])
+# 			println("  face $(flist[i]) = $(faces(s)[f])")
+# 			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
+# 		end
+# 		println("  reorder=$reorder to $(flist[reorder])")
 
 		for (i, r1) in pairs(reorder)
 			r2 = reorder[mod1(i+1, length(reorder))] # next face
@@ -2962,28 +2979,18 @@ function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	# propagate marks on adjacent faces (where mark is not already
 	# defined).
 	function propagate!(data, mat)
-		c = 0
+		c = nmarked
 		for (f, adj) in pairs(mat), g in adj
-			if(data[f] != -1 && data[g] == -1)
-				c+= 1
-				data[g] = data[f]
+			if(data[f] != -1)
+				setmark!(g, data[f])
 			end
 		end
-		return c
+		return nmarked - c
 	end
 
-# 	_label = Dict(-1=>"?", 0=>"none", 1=>"∪", 2=>"∩", 3=>"both")
-# 	for (i, f) in pairs(faces(s3))
-# 		println("$i: $f => $(_label[mark[i]])")
-# 	end
+	while(propagate!(mark, inc.faces) > 0); end
 
-	while(propagate!(mark, inc_data.faces) > 0); end
-
-# 	for (i, f) in pairs(faces(s3))
-# 		println("$i: $f => $(_label[mark[i]])")
-# 	end
-	return (triangulation = s3, mark = [1 for _ = eachindex(faces(s3))])
-	return (triangulation = s3, mark = mark)
+	return (triangulation = s, mark = mark)
 end
 
 function inter(s1::TriangulatedSurface, s2::TriangulatedSurface)
@@ -3270,8 +3277,10 @@ translate($scale*$p) {
 	end
 	println(io, "]); }")
 end
-@inline explain(s::Solids.Surface, f::AbstractString; kwargs...) =
+@inline explain(s::Solids.Surface, f::AbstractString; kwargs...) = begin
+	println("writing a surface with $(length(points(s))) points to $f")
 	open(f, "w") do io explain(s, io; kwargs...) end
+end
 end #««1 module
 # »»1
 
