@@ -55,11 +55,14 @@ c = [SA[cos(i),sin(i)] for i in 0:.1:π]; c=[c;[SA[0,-1]]]
 @test (path_extrude(20c, C)) != 0
 end
 @testset "Convex hull" begin #<<<1
-using Solids: convex_hull convex_hull_list
+using Solids: convex_hull, convex_hull_list
 CH = convex_hull([SA[0,0,0],SA[0,0,10],SA[10,0,0],SA[0,10,0],SA[1,1,1],SA[1,0,0]])
 @test Set(CH[1]) == Set([SA[0,0,0],SA[0,0,10],SA[10,0,0],SA[0,10,0]])
 @test length(CH[2]) ==4
 @test Solids.convex_hull_list([ SA[0., 0], SA[1., 1], SA[-1., 1], SA[.2, 2.], SA[0, .8], SA[-.2, .8], ]) == [1,2,4,3]
+@test Solids.convex_hull_list(Solid.rows(SA[0. 0;1. 1;-1. 1;.2 2.;0 .8;-.2 .8])) == [1,2,4,3]
+@test Solids.convex_hull_list([[-2.627798062316817, 1.075268817204301], [-0.5030257403564974, -1.720430107526882], [0.7927283156659947, 2.7956989247311825], [0.0, 2.396978520135108], [0.0, 0.03278003249806397]]) == [2,3,1]
+@test Solids.convex_hull_list([[-2.150537634408602, 1.3494700327417308], [-0.4301075268817205, -2.097580910437773], [2.3655913978494625, 0.04739817471346019], [0.0, 0.0], [2.3038140933536018, 0.0], [0.0, 0.7294358146330306]]) == [2,5,3,6,1]
 end
 @testset "Surfaces" begin #<<<1
 using Solids: connected_components

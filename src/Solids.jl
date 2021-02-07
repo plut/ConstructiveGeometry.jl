@@ -21,7 +21,8 @@ import Colors
 import Clipper
 import LightGraphs
 
-import Base: show, print, length, getindex, size, iterate, eltype, convert
+import Base: show, print
+import Base: length, getindex, size, iterate, keys, eltype, convert
 import Base: union, intersect, setdiff, copy, isempty
 import Base: *, +, -, ∈
 
@@ -192,9 +193,21 @@ function findextrema(itr; lt=isless)
   return (min=(m, mi), max=(M, Mi))
 end
 
+# iterate over rows of matrix
+struct Rows{T,M,V} <: AbstractVector{V}
+  mat::M
+end
+@inline Rows{T,M}(A::Matrix) where{T,M} = Rows{T,M,Vector{T}}(A)
+@inline Rows(A::AbstractMatrix) = Rows{eltype(A),typeof(A)}(A)
+@inline Rows{T,M}(A::SMatrix) where{T,M} =
+	Rows{T,M,SVector{Size(A)[1],T}}(A)
+@inline rows(A::AbstractMatrix) = Rows(A)
+@inline getindex(r::Rows, i::Integer) = view(r.mat,i,:)
+@inline size(r::Rows) = (size(r.mat, 1),)
+
 # 2-dimensional determinant, useful for computing orientation
-@inline det2(v1::AnyVec{2}, v2::AnyVec{2}) = v1[1]*v2[2] - v1[2]*v2[1]
-@inline det2(pt1::Vec{2}, pt2::Vec{2}, pt3::Vec{2}) = det2(pt2-pt1, pt3-pt1)
+@inline det2(v1, v2) = v1[1]*v2[2] - v1[2]*v2[1]
+@inline det2(pt1, pt2, pt3) = det2(pt2-pt1, pt3-pt1)
 
 # AbstractSolid ««1
 # Some reasons not to use `GeometryBasics.jl`:
@@ -1624,6 +1637,7 @@ end
 # `Polyhedra.jl` is a bit slow for these simple cases, so we write them
 # here:
 
+regularize(x::Float64) = (x == -0.0) ? 0.0 : x
 """
     inter(path, hyperplane::Polyhedra.HyperPlane)
 
@@ -1639,7 +1653,7 @@ function inter(path::AnyPath, hyperplane::Polyhedra.HyperPlane)
 		end
 		for j in 1:i-1
 			if s[i] * s[j] < 0
-				newpath[c+= 1] = (s[j]*path[i]-s[i]*path[j])/(s[j]-s[i])
+				newpath[c+= 1] = regularize.((s[j]*path[i]-s[i]*path[j])/(s[j]-s[i]))
 			end
 		end
 	end
@@ -1674,17 +1688,28 @@ end
 	inter(inter(path, h), t...)
 
 """
+    line(p1=>p2)
+"""
+function line(p12::Pair{<:AnyVec{2}})
+	(x1, y1) = p12[1]
+	(x2, y2) = p12[2]
+	a = SA[y1-y2, x2-x1]
+	b = y1*x2 - x1*y2
+	return Polyhedra.HyperPlane(a, b)
+end
+"""
     halfplane(p1=>p2, p3)
 
 Returns the half-plane through (p1, p2) such that h(p3) > 0.
 """
 function halfplane(p12::Pair{<:AnyVec{2}}, p3::AnyVec{2})
-	(x1, y1) = p12[1]
-	(x2, y2) = p12[2]
-	a = SA[y1-y2, x2-x1]
-	b = y1*x2 - x1*y2
-	s = sign(a ⋅ p3 - b)
-	return Polyhedra.HalfSpace(s*a, s*b)
+	l = line(p12)
+# 	(x1, y1) = p12[1]
+# 	(x2, y2) = p12[2]
+# 	a = SA[y1-y2, x2-x1]
+# 	b = y1*x2 - x1*y2
+	s = sign(l.a ⋅ p3 - l.β)
+	return Polyhedra.HalfSpace(s*l.a, s*l.β)
 end
 
 """
@@ -1721,6 +1746,15 @@ function adjacency_points(points, faces)
 end
 
 """
+    edge_can
+
+Puts an edge in canonical form. Returns `(sign, canonical)`,
+where the boolean is `true` if the edge was reversed.
+"""
+@inline edge_can(e) =
+	(e[1] < e[2]) ? (false, SA[e[1],e[2]]) : (true, SA[e[2],e[1]])
+# this must return an array because we use array[array] shorthand
+"""
     incidence(s::Surface)
 
 Returns an incidence and ajacency structure for the simplicial complex s.
@@ -1738,12 +1772,12 @@ function incidence(s::Surface)
 	for (i, f) in pairs(faces(s)), p in f
 		push!(inc_pf[p], i)
   end
-	inc_ef = Dict{typeof(SA[0,0]), Vector{Int}}()
+	inc_ef = Dict{SVector{2,Int}, Vector{Int}}()
 	for (i, f) in pairs(faces(s)), u in 1:3
-		e = [f[u], f[plus1mod3[u]]]
+		e = (f[u], f[plus1mod3[u]])
 		(b, c) = edge_can(e)
 		if !haskey(inc_ef, c) inc_ef[c] = []; end
-		push!(inc_ef[c], b*i)
+		push!(inc_ef[c], b ? -i : i)
 	end
 	inc_ff = [Int[] for f in faces(s)]
 	for a in values(inc_ef), i in eachindex(a), j in 1:i-1
@@ -1768,16 +1802,19 @@ end
 Combines both triangulations, renumbering points of `s2` as needed.
 (Numbering in `s1` is preserved).
 """
-function merge(s1::Surface, s2::Surface, same = isequal)
+function merge(s1::Surface, s2::Surface, same = ==)
 	renum = Vector{Int}(undef, length(points(s2)))
 	# renumber points:
 	p1 = length(points(s1))
 	p2 = length(points(s2))
 	newpoints = similar(points(s1), p1+p2)
 	newpoints[1:p1] = points(s1)
+# 	println("we have current points = $(points(s1))")
 	idx = p1
 	for (i, p) in pairs(points(s2))
+# 		println("  searching index of point $i=$p")
 		k = findfirst(same(p), newpoints)
+# 		println("  found $k")
 		if k == nothing
 			newpoints[idx+=1] = p
 			renum[i] = idx
@@ -2046,16 +2083,12 @@ function triangulate_face(
 		points2d[i, j] = p[x]
 	end
 	if convex isa Val{true}
-		println("here1")
 		r= Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
-		println("done1")
 		return r
 	else
-		println("here2")
 		edges = vcat(([map[i] map[mod1(i+1,N)]] for i in 1:N)...)
 		r= Vec{3,Int}.(Triangulate.constrained_triangulation(points2d,
 			map, edges))
-		println("done2")
 		return r
 	end
 end
@@ -2113,22 +2146,57 @@ end
 Returns the convex hull of the points, as a list of indexes (in direct
 order, starting at a reproducible index in the list of points).
 """
-function convex_hull_list(points::AbstractVector{<:Vec{2}})
-	# Uses Graham scan
-	# In practice this is faster than using `Polyhedra.jl`.
-	i0 = findextrema(points;
-		lt=(p,q)->(p[2]<q[2])||(p[2]==q[2] && p[1]>q[1])).min[2]
-	@inline detp2(i,j,k) = det2(points[[i,j,k]]...)
-	scan = sort(filter(!isequal(i0), eachindex(points)),
-		lt=(p,q)->detp2(i0,p,q) > 0)
-	stack = [i0, scan[1]]
-	for s in scan[2:end]
-		while detp2(last(stack), s, stack[end-1]) < 0
-			pop!(stack)
-		end
-		push!(stack, s)
-	end
-	return stack
+function convex_hull_list(points)
+  # Uses Graham scan
+  # In practice this is faster than using `Polyhedra.jl`.
+#   println("points=$points, length=$(length(points))")
+  i0 = findextrema(points;
+    lt=(p,q)->(p[2]<q[2])||(p[2]==q[2] && p[1]>q[1])).min[2]
+  @inline detp2(i,j,k) = det2(points[[i,j,k]]...)
+  @inline function are_aligned(i,j,k)
+    v1 = points[j]-points[i]
+    v2 = points[k]-points[j]
+    d = det2(v1, v2)
+    c = v1 ⋅ v2
+    return abs(d) < 1e-3*abs(c)
+  end
+  scan = sort(filter(!isequal(i0), eachindex(points)),
+    lt=(p,q)->detp2(i0,p,q) > 0)
+#   println("i0=$i0, scan=$scan")
+  stack = [i0, scan[1]]
+  for h in scan[2:end]
+#     println("scanning: $stack + $h")
+    v1 = points[stack[end]] - points[stack[end-1]]
+    v2 = points[h] - points[stack[end]]
+    s = det2(v1, v2)
+    c = v1 ⋅ v2
+    if abs(s) < 1e-3*abs(c) && c < 0 # points are aligned and backwards
+			# here we know that we can insert at (end)
+			# look for an insertion point i:
+			i = length(stack)
+			while i > 2
+# 				println(" try to insert at $i")
+				v1 = points[stack[i]] - points[stack[i-1]]
+				v2 = points[h] - points[stack[i]]
+				s = det2(v1, v2)
+				c = v1 ⋅ v2
+				if s < -1e-3*abs(c)
+# 					println(" break at $i")
+					break
+				end
+				i -= 1
+			end
+# 			println("  inserting at $i")
+			insert!(stack, i, h)
+			continue
+# 			println("  now stack=$stack")
+    end
+    while detp2(last(stack), h, stack[end-1]) < 0
+      pop!(stack)
+    end
+    push!(stack, h)
+  end
+  return stack
 end
 
 """
@@ -2466,29 +2534,29 @@ end
 	BoundingBox([intersect(a.proj[i], b.proj[i]) for i in 1:D]...)
 @inline intersects(a::BoundingBox{D}, b::BoundingBox{D}) where{D} =
 	all(i->intersects(a.proj[i], b.proj[i]), 1:D)
-bounding_box(points::AnyVec{D,<:Number}...) where{D} = BoundingBox{D}([
+bounding_box(points::Vec{D,<:Number}...) where{D} = BoundingBox{D}([
 	ClosedInterval(extrema([p[i] for p in points])...) for i in 1:D]...)
 @inline show(io::IO, b::BoundingBox) = join(io, b.proj, "×")
 # Triangle intersection««2
-"""
-    intersecting_bboxes(s1, s2)
-
-Given two triangulated surfaces (s1, s2),
-returns the (sparse) matrix of all triangles `(t1, t2)`
-with intersecting bounding boxes.
-"""
-# FIXME: this would be more efficient with an octtree.
-intersecting_bboxes(s1::Surface, s2::Surface) =
-	return (Bool[!isempty(intersect(
-			bounding_box(points(s1)[f1]...),
-			bounding_box(points(s2)[f2]...)))
-		for f1 in faces(s1), f2 in faces(s2)])
-# function intersecting_bboxes(points1, tri1, points2, tri2)
+# """
+#     intersecting_bboxes(s1, s2)
+# 
+# Given two triangulated surfaces (s1, s2),
+# returns the (sparse) matrix of all triangles `(t1, t2)`
+# with intersecting bounding boxes.
+# """
+# # FIXME: this would be more efficient with an octtree.
+# intersecting_bboxes(s1::Surface, s2::Surface) =
 # 	return (Bool[!isempty(intersect(
-# 			bounding_box(points1[t1]...),
-# 			bounding_box(points2[t2]...)))
-# 		for t1 in tri1, t2 in tri2])
-# end
+# 			bounding_box(points(s1)[f1]...),
+# 			bounding_box(points(s2)[f2]...)))
+# 		for f1 in faces(s1), f2 in faces(s2)])
+# # function intersecting_bboxes(points1, tri1, points2, tri2)
+# # 	return (Bool[!isempty(intersect(
+# # 			bounding_box(points1[t1]...),
+# # 			bounding_box(points2[t2]...)))
+# # 		for t1 in tri1, t2 in tri2])
+# # end
 
 """
     supporting_plane(p1, p2, p3)
@@ -2502,127 +2570,329 @@ function supporting_plane(p1::Vec{3}, p2::Vec{3}, p3::Vec{3})
 	return Polyhedra.HyperPlane(c, b)
 end
 
+# """
+#     triangle_intersections(triangle, s::TriangulatedSurface)
+# 
+# Computes all intersections of faces of `s`
+# with the given `triangle`.
+#  - `triangle`: given as a triple of Vec{3}.
+# 
+# Returns a triangulation structure describing a dissection of the triangle
+# compatible with `(points ,faces)`. The first three points are always
+# the three vertices of the original `triangle`.
+# """
+# function triangle_intersections(triangle::AnyPath{3}, s::TriangulatedSurface)
+# # 	println("*** intersecting triangle:$triangle")
+# 	hyperplane = supporting_plane(triangle...)
+# # 	println(hyperplane)
+# 	# proj is a set of indices, e.g. [1,2]:
+# 	(proj, linear, origin) = project_2d(hyperplane)
+# # 	println("proj=$proj linear=$linear origin=$origin")
+# # 	proj = best_projection_idx(triangle; direction=direction(hyperplane))
+# 	# 2d projection of triangle according to `proj`:
+# 	tri2v = [p[proj] for p in triangle]
+# 	tri2h = hrep(tri2v...)
+# # 	println("tri2v=$tri2v\ntri2h=$tri2h")
+# 	# points and edges for the contrained triangulation
+# 	newpoints0 = Dict(v=>k for (k,v) in pairs(tri2v))
+# 	newedges = Matrix{Int}(undef, 0, 2)
+# # 	newedges = [1 2;2 3;3 1]
+# 	for f in faces(s)
+# 		# compute coordinates of incident triangle (as a triple of points):
+# 		incident = points(s)[f]
+# # 		println("  incident=$(Vector.(incident))")
+# 		inc_plane = inter(incident, hyperplane)
+# # 		println("  inc_plane=$(inc_plane)")
+# 		inc2v = [p[proj] for p in inc_plane] # vrep
+# # 		println("  inc2v=$(inc2v)")
+# 		int2v = inter(inc2v, tri2h...)
+# # 		println("  inter: $(int2v)")
+# 		# int2v = intersection of the two triangles (in 2d coordinates)
+# 		# if this intersection is empty or a point, we drop it;
+# 		if length(int2v) <= 1 continue; end
+# 		# otherwise we append all those edges to the constraints of the
+# 		# triangulation:
+# 		for v in int2v
+# 			if !haskey(newpoints0, v) newpoints0[v] = length(newpoints0)+1 ;
+# # 			println(" * add $(length(newpoints0)): $v")
+# 			end
+# 		end
+# 		for i in eachindex(int2v)
+# 			j = mod1(i+1, length(int2v))
+# 			newedges = [newedges; newpoints0[int2v[i]] newpoints0[int2v[j]]]
+# # 			println(" - add edge $((i,j)) => $(newedges[size(newedges,1),:])")
+# 		end
+# 	end
+# 	# convert the Dict of newpoints to a Matrix (with points in rows)
+# 	# and a list of returned points
+# 	n = length(newpoints0)
+# 	if n == 3
+# 		return TriangulatedSurface(points=triangle, faces=[SA[1,2,3]])
+# 	end
+# 	newpoints = Matrix{eltype(tri2v[1])}(undef, n, 2)
+# 	allpoints = Vector{eltype(triangle)}(undef, n)
+# 	allpoints[1:3] = triangle
+# 	for (k,v) in pairs(newpoints0)
+# 		newpoints[v,:] = k
+# 		if v ≥ 4
+# 			allpoints[v] = linear*k + origin
+# 		end
+# 	end
+# 	perimeter = convex_hull_list(rows(newpoints))
+# 	newedges = vcat(newedges,
+# 		[perimeter[mod1(i+j, length(perimeter))] for i=1:length(perimeter),j=1:2])
+# 	println("newedges = $newedges")
+# 	println(newedges)
+# 	println("constrained_triangulation($newpoints, $(collect(1:n)), $newedges")
+# 	newtri = Triangulate.constrained_triangulation(newpoints,
+# 		collect(1:n), newedges)
+# 	# points are in rows, hence the transpose:
+# 	# we return a small triangulation for just this triangle:
+# 	return TriangulatedSurface(
+# 		points=allpoints,
+# 		faces=newtri)
+# end
+# Self-intersect and sub-triangulation««2
 """
-    triangle_intersections(triangle, s::TriangulatedSurface)
+    self_intersect(s::TriangulatedSurface)
 
-Computes all intersections of faces of `s`
-with the given `triangle`.
- - `triangle`: given as a triple of Vec{3}.
-
-Returns a dissection of the given `triangle` compatible with `(points,
-faces)`, as a pair (points, edges). The first three points are always
-the three vertices of the original `triangle`.
+Returns all self-intersections of `s`, as a `NamedTuple`:
+ - `points`: all points of intersection
+ - `edge_points`: for all edges, list of new points (sorted along the
+	 edge)
+ - `face_points`: for all faces of `s`, the list of new points in this face,
+as indices in `points(s)`∪ {new points}.
 
 """
-function triangle_intersections(triangle::AnyPath{3}, s::TriangulatedSurface)
-# 	println("*** intersecting triangle:$triangle")
-	hyperplane = supporting_plane(triangle...)
-# 	println(hyperplane)
-	# proj is a set of indices, e.g. [1,2]:
-	(proj, linear, origin) = project_2d(hyperplane)
-# 	println("proj=$proj linear=$linear origin=$origin")
-# 	proj = best_projection_idx(triangle; direction=direction(hyperplane))
-	# 2d projection of triangle according to `proj`:
-	tri2v = [p[proj] for p in triangle]
-	tri2h = hrep(tri2v...)
-# 	println("tri2v=$tri2v\ntri2h=$tri2h")
-	# points and edges for the contrained triangulation
-	newpoints0 = Dict(v=>k for (k,v) in pairs(tri2v))
-	# FIXME: some inner edges might seem to cross these outer edges,
-	# therefore we need to compute the outer perimeter first
-	newedges = Matrix{Int}(undef, 0, 2)
-# 	newedges = [1 2;2 3;3 1]
-	for f in faces(s)
-		# compute coordinates of incident triangle (as a triple of points):
-		incident = points(s)[f]
-# 		println("  incident=$(Vector.(incident))")
-		inc_plane = inter(incident, hyperplane)
-# 		println("  inc_plane=$(inc_plane)")
-		inc2v = [p[proj] for p in inc_plane] # vrep
-# 		println("  inc2v=$(inc2v)")
-		int2v = inter(inc2v, tri2h...)
-# 		println("  inter: $(int2v)")
-		# int2v = intersection of the two triangles (in 2d coordinates)
-		# if this intersection is empty or a point, we drop it;
-		if length(int2v) <= 1 continue; end
-		# otherwise we append all those edges to the constraints of the
-		# triangulation:
-		for v in int2v
-			if !haskey(newpoints0, v) newpoints0[v] = length(newpoints0)+1 ;
-# 			println(" * add $(length(newpoints0)): $v")
+function self_intersect(s::TriangulatedSurface)
+	inc = incidence(s) # we only need edge_faces
+	# we precompute all planes: we need them later for edge intersections
+	planes = [ supporting_plane(points(s)[f]...) for f in faces(s) ]
+
+	n = length(points(s))
+	println("self_intersect: $n points at beginning")
+	new_points = similar(points(s), 0)
+	T = eltype(eltype(points(s)))
+	face_points = [ Int[] for _ in faces(s) ]
+	edge_points = Dict([ k=>Int[] for k in keys(inc.edge_faces) ])
+	edge_coords = Dict([ k=>T[] for k in keys(inc.edge_faces) ])# used for sorting
+	@inline function create_point!(p)
+		push!(new_points, p)
+		return n + length(new_points)
+	end
+	@inline function add_point_edge!(e, k, p)#««
+		println("adding point $k=$p to edge $e")
+		println("  current points for this edge: $(edge_points[e])")
+		println("  current coordinates: $(edge_coords[e])")
+		vec = points(s)[e[2]]-points(s)[e[1]]
+		# fixme: unroll this loop to allow constant-propagation:
+		i = argmax(abs.(vec))
+		if length(edge_points[e]) == 0 # most common case
+			push!(edge_points[e], k)
+			push!(edge_coords[e], p[i])
+			return
+		end
+		println("  sorted by coordinate $i ($(vec[i]))")
+		println("  e=$e")
+		rev = (vec[i] < 0)
+		j = searchsorted(edge_coords[e], p[i]; rev=rev)
+		println("  inserting at position $j, $(first(j))")
+		insert!(edge_points[e], first(j), k)
+		insert!(edge_coords[e], first(j), p[i])
+	end#»»
+
+	# face-edge and face-vertex intersections««
+	for (i, f) in pairs(faces(s))
+		println("  face $i: $f")
+		# set up infrastructure for this face
+		triangle = points(s)[f]
+		bbox = bounding_box(triangle...)
+		plane = planes[i]
+		(proj, lift, origin) = project_2d(plane)
+		triangle2 = hrep([p[proj] for p in triangle]...) # hrep of projection
+
+		# face-vertex intersections««
+		for (j, p) in pairs(points(s))
+			if j ∈ f || p ∉ bbox || p ∉ plane
+				continue
 			end
-		end
-		for i in eachindex(int2v)
-			j = mod1(i+1, length(int2v))
-			newedges = [newedges; newpoints0[int2v[i]] newpoints0[int2v[j]]]
-# 			println(" - add edge $((i,j)) => $(newedges[size(newedges,1),:])")
-		end
-	end
-	# convert the Dict of newpoints to a Matrix (with points in rows)
-	n = length(newpoints0)
-	newpoints = Matrix{eltype(tri2v[1])}(undef, n, 2)
-	for (k,v) in pairs(newpoints0) newpoints[v,:] = k; end
-	# compute triangulation
-# 	println("newpoints=$newpoints\n")
-# 	println("newedges=$newedges\n")
-	println("here3")
-	# add outer edges: these are the convex hull of all points
-	tri = convex_hull([SVector{2}(newpoints[i,:]) for i in 1:size(newpoints,1)])
-	println("tri = $tri")
-	println(newedges)
-	newtri = Triangulate.constrained_triangulation(newpoints,
-		collect(1:n), newedges)
-	println("done3")
-	# points are in rows, hence the transpose:
-	newpoints3 = newpoints * transpose(linear)
-# 	println("\e[31mnewpoints3=$newpoints3")
-# 	println("linear=$linear; origin=$origin; hyperplane=$hyperplane; proj=$proj")
-	# we return a small triangulation for just this triangle:
-	return TriangulatedSurface(
-		points=[newpoints3[i,:]+origin for i in 1:size(newpoints3,1)],
-		faces=newtri)
+			p2 = p[proj]
+			if any(h(p2) <= 0 for h in triangle2)
+				continue
+			end
+			# vertex is inside this face, mark it
+			println("vertex $j inside face $i=$f")
+			push!(face_points[i], j)
+		end#»»
+		# face-edge intersections««
+		for (e, flist) in pairs(inc.edge_faces)
+			segment = points(s)[e]
+			if isempty(bounding_box(segment...) ∩ bbox)
+				continue
+			end
+			(z1, z2) = plane.(segment)
+			if z1 * z2 >= 0
+				continue
+			end
+			# the previous line ensures that z1 ≠ z2, so this never fails:
+			p2 = (z2*segment[1][proj] - z1*segment[2][proj])/(z2-z1)
+			if any(h(p2) <= 0 for h in triangle2)
+				continue
+			end
+			p3 = lift * p2 + origin
+			k = create_point!(p3)
+			println("edge $e intersects face $i=$f at $(last(new_points))")
+			println("  adding point $k to face $i=$f")
+			push!(face_points[i], k)
+			add_point_edge!(e, k, p3)
+		end#»»
+	end#»»
+	# edge-edge and edge-vertex intersections««
+	for (e, flist) in pairs(inc.edge_faces)
+		# two equations define this edge:
+		# first one is that of an adjacent face
+		eq1 = planes[abs(flist[1])]
+		# for the second equation, it happens (quite often) that edges
+		# delimitate two parallel faces, so we cannot use a second face
+		# equation. Instead we project on first plane and look for an
+		# equation of the projection here.
+		v = direction(eq1)
+		(proj, kmax) = project_2d(v, Val(true))
+		eq2 = line(points(s)[e[1]][proj] => points(s)[e[2]][proj])
+
+		bbox = bounding_box(points(s)[e]...)
+		# edge-vertex intersections:««
+		for (j, p) in pairs(points(s))
+			if p ∉ bbox || j ∈ e || eq2(p[proj]) ≠ 0 || eq1(p) ≠ 0
+				continue
+			end
+
+			# edge (segment) is intersection of bbox and line,
+			# therefore here we know that the point is on the edge:
+			println("vertex $j is on edge $e")
+			add_point_edge!(e, j, p)
+		end#»»
+		# edge-edge intersections:««
+		for (e1, flist1) in pairs(inc.edge_faces)
+			# TODO: could this be made simpler by just checking if determinant
+			# is zero?
+			segment = points(s)[e1]
+			# this makes the iteration triangular:
+			if e1 == e break; end
+			if isempty(bounding_box(points(s)[e1]...) ∩ bbox) continue; end
+			if !isempty(e ∩ e1) break; end
+			(z1, z2) = eq2.([p[proj] for p in segment])
+			# this also removes (already counted) edge-vertex intersections:
+			if z1*z2 ≥ 0 continue; end
+			(w1, w2) = eq1.(segment)
+			if w1*w2 ≥ 0 continue; end
+			# compute intersection point with one plane and check if it is on
+			# the other plane
+			p = (w1*segment[2]-w2*segment[1])/(w1-w2)
+			if eq2(p[proj]) ≠ 0 continue; end
+			println("""
+Edges $e, $e1:
+flist = $flist = $(faces(s)[abs.(flist)])
+equations = $eq1, $eq2
+segment = $segment
+(z1, z2) = $((z1, z2))
+(w1, w2) = $((w1, w2))
+candidate p (segment ∩ z): $p
+""")
+		@assert false
+			# point p is a new point and on both edges e and e1
+			println("edges $e and $e1 intersect")
+			k = create_point!(p)
+			add_point_edge!(e, k, p)
+			add_point_edge!(e1, k, p)
+		end#»»
+	end#»»
+	return (points = new_points,
+		edge_points = edge_points,
+		face_points = face_points)
 end
-# Merging triangulations««2
 """
-    cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
+    subtriangulate(s::TriangulatedSurface)
 
-Returns a refined triangulation of `s1`, as subdivided by the
-intersections with faces from `s2`.
+Returns a refined triangulation of `s` with vertices at all
+self-intersection points.
 """
-function cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
-	s3 = TriangulatedSurface(points(s1), [])
-# 	newpoints = copy(points(s1))
-# 	newfaces = SVector{3,Int}[]
-	for f in faces(s1)
-		triangle = points(s1)[f]
-		s = triangle_intersections(triangle, s2)
-# 		println("\e[32m### merging triangulation for triangle $triangle\e[m")
-		s3 = merge(s3, s)
+function subtriangulate(s::TriangulatedSurface)
+	self_int = self_intersect(s)
+	newpoints = [ points(s); self_int.points ]
+	newfaces = SVector{3,Int}[]
+	for (i, f) in pairs(faces(s))
+		extra = self_int.face_points[i]
+		if length(extra) == 0
+			push!(newfaces, f)
+			continue
+		end
+# 		println("subtriangulating face $f: inserting $extra")
+		triangle = points(s)[f]
+		plane = supporting_plane(triangle...)
+		proj = project_2d(direction(plane))
+
+		plist = [f; extra] # indices of points in face
+		# as a matrix for `constrained_triangulation`:
+		coords = [ newpoints[p][i] for p in plist, i in proj ]
+		perimeter = plist[convex_hull_list(rows(coords))]
+# 		println("perimeter = $perimeter")
+		l = length(perimeter)
+		tri = Triangulate.constrained_triangulation(coords, plist,
+			[perimeter[mod1(i+j,l)] for i in eachindex(perimeter), j in 0:1])
+# 		println("triangulation = $tri")
+		push!(newfaces, tri...)
 	end
-	return s3
+	return TriangulatedSurface(newpoints, newfaces)
 end
 
-"""
-    edge_can
+# """
+#     cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
+# 
+# Returns a refined triangulation of `s1`, as subdivided by the
+# intersections with faces from `s2`.
+# """
+# function cotriangulate(s1::TriangulatedSurface, s2::TriangulatedSurface)
+# 	s3 = TriangulatedSurface(copy(points(s1)), [])
+# # 	newpoints = copy(points(s1))
+# # 	newfaces = SVector{3,Int}[]
+# 	for f in faces(s1)
+# 		triangle = points(s1)[f]
+# 		s = triangle_intersections(triangle, s2)
+# # 		println("\e[32m### merging triangulation for triangle $triangle\e[m")
+# 		println("\e[31mface $f: found $(length(points(s))) intersections\e[m")
+# 		println("   face $(points(s1)[f])")
+# 		println("   new points $(points(s))")
+# 		s3 = merge(s3, s)
+# 		println("\e[31;4mface $f : added $(length(points(s))), total $(length(points(s3)))\e[m")
+# 	end
+# 	return s3
+# end
+# Computation of intersection and union««2
 
-Puts an edge in canonical form. Returns `(sign, canonical)`, where sign
-is `-1` if the edge was reversed.
-"""
-@inline edge_can(e) =(sign(e[2]-e[1]), SA[minimum(e), maximum(e)])
 """
     inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 
 """
 function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	# dissect both triangulations
+	explain(s1, "/tmp/s1.scad")
 	s1a = cotriangulate(s1, s2)
-	s2a = cotriangulate(s2, s1)
+	explain(s1a, "/tmp/s1a.scad")
+	s2a = s2
+# 	s2a = cotriangulate(s2, s1)
+	println("# sizes: $(length(points(s1a))) $(length(points(s2a)))")
+	explain(s1a, "/tmp/s3.scad")
+	@assert false
 	# since ∪ and ∩ are commutative, we don't need to know the origin of
 	# the faces, and merging the two triangulations at this stage will make
 	# indexing much simpler (e.g. no need to renumber vertices, etc.).
 	# Note that this does not remove duplicate faces; this is on purpose
 	# (the inside of a duplicate face is automatically ∩):
 	s3 = merge(s1a, s2a)
+	explain(s3, "/tmp/s3.scad")
+	println("merged: $(length(points(s1a))) + $(length(points(s2a))) => $(length(points(s3)))")
+	@assert false
 	inc_data = incidence(s3)
 	# mark[f] holds the type of face f, coded as: -1=unknown;
 	# 0 = to be removed; 1=union; 2=inter; 3=both
@@ -2668,14 +2938,14 @@ function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 		end
 		reorder = sort(eachindex(flist); by=i->rat_param[i])
 
-# 		println("\e[1medge $e:\e[m")
-# 		for i in eachindex(flist)
-# 			f = abs(flist[i])
-# 			println("  face $(flist[i]) = $(faces(s3)[f])")
-# 			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
-# 		end
-# 		println("  rat_param=$rat_param")
-# 		println("  reorder=$reorder to $(flist[reorder])")
+		println("\e[1medge $e:\e[m")
+		for i in eachindex(flist)
+			f = abs(flist[i])
+			println("  face $(flist[i]) = $(faces(s3)[f])")
+			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
+		end
+		println("  rat_param=$rat_param")
+		println("  reorder=$reorder to $(flist[reorder])")
 
 		for (i, r1) in pairs(reorder)
 			r2 = reorder[mod1(i+1, length(reorder))] # next face
@@ -2712,6 +2982,7 @@ function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 # 	for (i, f) in pairs(faces(s3))
 # 		println("$i: $f => $(_label[mark[i]])")
 # 	end
+	return (triangulation = s3, mark = [1 for _ = eachindex(faces(s3))])
 	return (triangulation = s3, mark = mark)
 end
 
@@ -2975,28 +3246,32 @@ end
 # export offset, hull, minkowski, convex_hull
 # 
 # »»1
-# function scad(s::Solids.Surface, io::IO = stdout; scale=50,
-# 		offset=[0.,0.,0.])
-# 	println(io, "translate($offset) {")
-# 	for (i, p) in pairs(Solids.points(s))
-# 		println(io, "color(\"black\") translate($scale*$p) linear_extrude(1) text(\"$i\");")
-# 	end
-# 	println(io, "color(\"cyan\", .5) polyhedron([")
-# 	b = false
-# 	for p in Solids.points(s)
-# 		println(io, b ? "," : ""); b = true
-# 		print(io, " $scale*",Vector{Float64}(p))
-# 	end
-# 	println(io, "],[")
-# 	b = false
-# 	for f in Solids.faces(s)
-# 		println(io, b ? "," : ""); b = true
-# 		println(io, " ", Vector{Int}(f) .- 1)
-# 	end
-# 	println(io, "]); }")
-# end
-# @inline scad(s::Solids.Surface, f::AbstractString; kwargs...) =
-# 	open(f, "w") do io scad(s, io; kwargs...) end
+function explain(s::Solids.Surface, io::IO = stdout; scale=50,
+		offset=[0.,0.,0.])
+	println(io, "translate($offset) {")
+	for (i, p) in pairs(Solids.points(s))
+		println(io, """
+translate($scale*$p) {
+	color("red") sphere(1);
+	color("black", .8) linear_extrude(1) text(\"$i\", size=5);
+}""")
+	end
+	println(io, "color(\"cyan\", .5) polyhedron([")
+	b = false
+	for p in Solids.points(s)
+		println(io, b ? "," : ""); b = true
+		print(io, " $scale*",Vector{Float64}(p))
+	end
+	println(io, "],[")
+	b = false
+	for f in Solids.faces(s)
+		println(io, b ? "," : ""); b = true
+		println(io, " ", Vector{Int}(f) .- 1)
+	end
+	println(io, "]); }")
+end
+@inline explain(s::Solids.Surface, f::AbstractString; kwargs...) =
+	open(f, "w") do io explain(s, io; kwargs...) end
 end #««1 module
 # »»1
 
