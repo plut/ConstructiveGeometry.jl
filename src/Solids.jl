@@ -24,7 +24,7 @@ import LightGraphs
 import Base: show, print
 import Base: length, getindex, size, iterate, keys, eltype, convert
 import Base: union, intersect, setdiff, copy, isempty
-import Base: *, +, -, ∈
+import Base: *, +, -, ∈, inv, sign
 
 #————————————————————— Ideal objects —————————————————————————————— ««1
 #»»1
@@ -209,6 +209,10 @@ end
 @inline det2(v1, v2) = v1[1]*v2[2] - v1[2]*v2[1]
 @inline det2(pt1, pt2, pt3) = det2(pt2-pt1, pt3-pt1)
 
+# 3-dimensional determinant
+@inline det3(v1, v2, v3) = det([v1 v2 v3])
+@inline det3(p1, p2, p3, p4) = det3(p2-p1, p3-p1, p4-p1)
+
 # AbstractSolid ««1
 # Some reasons not to use `GeometryBasics.jl`:
 # - (as of 2021-01-14) not documented
@@ -244,10 +248,21 @@ out of planar objects, and 3 otherwise.
 @inline Base.show(io::IO, s::AbstractSolid) = scad(io, s, "")
 
 """
-    scad(filename::AbstractString, s::AbstractSolid...
+    scad(filename::AbstractString, s::AbstractSolid)
     scad(io::IO, s::AbstractSolid)
 
 Prints an OpenSCAD-like representation of the given solid(s).
+
+## The various `scad_*` functions
+
+    `scad_name(s)`
+Returns, in printable form (e.g. `Symbol` or `String`), the OpenSCAD name
+of this object.
+
+    `scad_parameters(io, Val(:name), parameters(s))`
+Prints the parameters (everything between the parentheses, included). The
+`Val(name)` allows diversification depending on object type.
+
 """
 @inline function scad(filename::AbstractString, L::AbstractSolid...)
 	open(filename, "w") do f
@@ -884,6 +899,9 @@ end
 @inline apply(f::Affine, v) = f.a * v + f.b
 @inline apply(f::Affine, p::Path) = [apply(f, v) for v in p]
 
+@inline sign(f::Affine{<:Number}) = sign(f.a)
+@inline sign(f::Affine{<:AbstractMatrix}) = sign(det(f.a))
+
 # neutral elements: ««3
 # this could in principle be defined for Val{T} where{T}, but we try
 # to pirate a minimum number of functions in Base.
@@ -967,7 +985,7 @@ Represents the affine operation `x -> a*x + b`.
 !!! note "Matrix multiplication"
 
     Chained `mult_matrix` operations will be combined into a single
-    operation when possible. This saves time: multiple 
+    operation when possible. This saves time: multiple
     (3 × n) matrix multiplications are replaced by
     (3 × 3) multiplications, followed by a single (3 × n).
 """
@@ -975,6 +993,7 @@ Represents the affine operation `x -> a*x + b`.
 	AffineTransform(Affine(a; kwargs...), s...)
 @inline mult_matrix(a, b::Union{AbstractVector,Val{false}}, s...) =
 	AffineTransform(Affine(a, b), s...)
+@inline parameters(s::AffineTransform) = (m=s.data,)
 
 # these two functions are now enough to pre-compose all affine transforms
 # *before* applying them to objects:
@@ -1724,6 +1743,37 @@ function hrep(p1::AnyVec{2}, p2::AnyVec{2}, p3::AnyVec{2})
 	        halfplane(p3=>p1, p2))
 end
 
+function line_inter(s1::Pair{<:Vec{2}}, s2::Pair{<:Vec{2}})
+	((x1,y1), (x2,y2)) = s1
+	((x3,y3), (x4,y4)) = s2
+	d=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4)
+	if iszero(d) return nothing; end
+	a = x1*y2-y1*x2; b = x3*y4-y3*x4
+	d1 = inv(to_real(d))
+	return d1 .* SA[a*(x3-x4)-b*(x1-x2), a*(y3-y4)-b*(y1-y2)]
+end
+function segment_inter(s1::Pair{<:Vec{2}}, s2::Pair{<:Vec{2}})
+	c = line_inter(s1, s2)
+	if c isa Nothing return nothing; end
+	if c ∈ bounding_box(s1...) return c; end
+	return nothing
+end
+function segment_inter(s1::Pair{<:Vec{3}}, s2::Pair{<:Vec{3}})
+	d = det3(s1[2]-s1[1], s2[1]-s1[1], s2[2]-s1[1])
+	# check all points are coplanar
+	if !iszero(d)
+		return nothing
+	end
+	# compute supporting plane
+	plane = supporting_plane(s1[1], s1[2], s2[1])
+	(proj, linear, origin) = project_2d(plane)
+	int2 = segment_inter(s1[1][proj]=>s1[2][proj], s2[1][proj]=>s2[2][proj])
+	if int2 == nothing
+		return nothing
+	end
+	return linear*int2 + origin
+end
+
 # Operations on simplicial complexes««1
 # Incidence and adjacency««2
 """
@@ -2151,12 +2201,15 @@ function convex_hull_list(points)
   i0 = findextrema(points;
     lt=(p,q)->(p[2]<q[2])||(p[2]==q[2] && p[1]>q[1])).min[2]
   @inline detp2(i,j,k) = det2(points[[i,j,k]]...)
+	# 1024 is an arbitrary value for detecting “aligned” points (i.e. up to
+	# representation errors), which should be fast for both Float and Fixed
+	# division
   @inline function are_aligned(i,j,k)
     v1 = points[j]-points[i]
     v2 = points[k]-points[j]
     d = det2(v1, v2)
     c = v1 ⋅ v2
-    return abs(d) < 1e-3*abs(c)
+    return abs(d) < abs(c)/1024
   end
   scan = sort(filter(!isequal(i0), eachindex(points)),
     lt=(p,q)->detp2(i0,p,q) > 0)
@@ -2168,7 +2221,7 @@ function convex_hull_list(points)
     v2 = points[h] - points[stack[end]]
     s = det2(v1, v2)
     c = v1 ⋅ v2
-    if abs(s) < 1e-3*abs(c) && c < 0 # points are aligned and backwards
+    if abs(s) < abs(c)/1024 && c < 0 # points are aligned and backwards
 			# here we know that we can insert at (end)
 			# look for an insertion point i:
 			i = length(stack)
@@ -2513,6 +2566,7 @@ end
 @inline iterate(a::ClosedInterval) = (a.low, Val(:high))
 @inline iterate(a::ClosedInterval, ::Val{:high}) = (a.high, nothing)
 @inline iterate(a::ClosedInterval, ::Nothing) = nothing
+@inline +(a::ClosedInterval, v::Real) = ClosedInterval(a.low+v, a.high+v)
 
 @inline show(io::IO, a::ClosedInterval) =
 	print(io, "[", a.low, ":", a.high, "]")
@@ -2535,27 +2589,9 @@ end
 bounding_box(points::Vec{D,<:Number}...) where{D} = BoundingBox{D}([
 	ClosedInterval(extrema([p[i] for p in points])...) for i in 1:D]...)
 @inline show(io::IO, b::BoundingBox) = join(io, b.proj, "×")
-# Triangle intersection««2
-# """
-#     intersecting_bboxes(s1, s2)
-# 
-# Given two triangulated surfaces (s1, s2),
-# returns the (sparse) matrix of all triangles `(t1, t2)`
-# with intersecting bounding boxes.
-# """
-# # FIXME: this would be more efficient with an octtree.
-# intersecting_bboxes(s1::Surface, s2::Surface) =
-# 	return (Bool[!isempty(intersect(
-# 			bounding_box(points(s1)[f1]...),
-# 			bounding_box(points(s2)[f2]...)))
-# 		for f1 in faces(s1), f2 in faces(s2)])
-# # function intersecting_bboxes(points1, tri1, points2, tri2)
-# # 	return (Bool[!isempty(intersect(
-# # 			bounding_box(points1[t1]...),
-# # 			bounding_box(points2[t2]...)))
-# # 		for t1 in tri1, t2 in tri2])
-# # end
-
+@inline +(a::BoundingBox{D}, v::Vec{D}) where{D} =
+	BoundingBox{D}([a.proj[i] + v[i] for i in eachindex(v)])
+# Low-level functions««2
 """
     supporting_plane(p1, p2, p3)
 
@@ -2584,6 +2620,109 @@ Circular comparison of vectors, sorted according to their angle in
 	return det2(p, q) > 0
 end
 
+# Rays««2
+"""
+    AffineRay
+
+An open ray, of the form `a + ]0,∞[ v`.
+"""
+struct AffineRay{D,T}
+	origin::Vec{D,T}
+	direction::Vec{D,T}
+end
+
+@inline eltype(a::AffineRay{D,T}) where{D,T} = T
+@inline dim(a::AffineRay{D}) where{D} = D
+@inline direction(a::AffineRay) = a.direction
+@inline origin(a::AffineRay) = a.origin
+@inline AffineRay(origin::SVector{D}, direction::SVector{D}) where{D} =
+	AffineRay{D,promote_type(eltype.((origin,direction))...)}(origin, direction)
+
+"""
+    intersects(a::AffineRay{3}, t::Triangle)
+
+Returns 1 iff ray intersects triangle in given order,
+-1 if it intersects in opposite order, otherwise 0.
+
+Algorithm is inspired by Segura-Feito[1]:
+after translating everything so that the ray starts at the origin,
+we apply the linear transformation
+x ↦ (⟨x,v2,v3⟩,⟨v1,x,v3⟩,⟨v1,v2,x⟩)  (⟨⟩ is the determinant)
+This maps the three points of the triangle to
+(δ,0,0), (0,δ,0), (0,0,δ), where δ=⟨v1,v2,v3⟩.
+The sign of δ gives the position of the origin w.r.t the triangle: δ⟩0
+iff the origin is *inside* the triangle.
+
+Once the vertices of the triangle are aligned to the axes, the ray
+intersects the triangle iff the 3 coordinates of its direction `u` are >0.
+This means that ⟨u,v2,v3⟩, ⟨v2,u,v3⟩, ⟨v1,v2,u⟩ > 0.
+
+[1] https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.2.2084&rep=rep1&type=pdf
+
+"""
+function intersects(a::AffineRay, p1, p2, p3)
+	u = a.direction
+	(v1, v2, v3) = [x-a.origin for x=(p1, p2, p3)]
+	d = det3(v1, v2, v3)
+	# FIXME: could be make slightly faster (but less readable)
+	# by precomputing u∧v2
+	if d > 0 && det3(u, v2, v3) > 0 && det3(v1, u, v3) > 0 && det3(v1, v2, u) > 0
+		return 1
+	elseif d < 0 && det3(u, v2, v3) < 0 && det3(v1, u, v3) < 0 && det3(v1, v2, u) < 0
+	end
+	return 0
+end
+
+
+struct AffineRayInv{D,T}
+	origin::Vec{D,T}
+	direction::Vec{D,T}
+	inv_dir::Vec{D,T}
+end
+_inv0(x::Real) = iszero(x) ? zero(real_type(x)) : inv(to_real(x))
+@inline inv(a::AffineRay{D,T}) where{D,T} =
+	AffineRayInv{D,real_type(T)}(a.origin, a.direction, _inv0.(a.direction))
+
+"""
+    intersects(a::AffineRay{3}, b::BoundingBox)
+
+https://tavianator.com/2011/ray_box.html
+"""
+function intersects(a::AffineRayInv{3}, b::BoundingBox; strict=false)
+	tmin = zero(eltype(a.direction))
+	tmax = typemax(eltype(a.direction))
+	for i in 1:3
+		# position = x + t*z, hence t = (position-x)*z1
+		x = a.origin[i]; z = a.direction[i]; z1 = a.inv_dir[i]
+		u = b.proj[i]
+		if iszero(z)
+			if x < u.low || x > u.high return false; end
+		else
+			# if z > 0 then p_min = x+tmin*z, p_max = x+tmax*z
+			#   (thus tmin = (pmin-x)*z1, tmax = (pmax-x)*z1)
+			# else tmin, tmax are swapped
+			@inline f(v) = (v-x)*z1
+			if z > 0
+				tmax = min(tmax, f(u.high))
+				tmin = min(tmin, f(u.low))
+			else
+				tmax = min(tmax, f(u.low))
+				tmin = min(tmin, f(u.high))
+			end
+			if strict
+				if tmin ≥ tmax return false; end
+			else
+				if tmin > tmax return false; end # early abort
+			end
+		end
+	end
+	return true
+end
+
+function intersections(a::AffineRay, s::TriangulatedSurface)
+	return sum(intersects(a, points(s)[f]...) for f in faces(s))
+end
+# Self-intersection««2
 """
     self_intersect(s::TriangulatedSurface)
 
@@ -2610,6 +2749,8 @@ function self_intersect(s::TriangulatedSurface)
 	edge_points = Dict([ k=>Int[] for k in keys(inc.edge_faces) ])
 	edge_coords = Dict([ k=>T[] for k in keys(inc.edge_faces) ])# used for sorting
 	@inline function create_point!(p)
+		j = findfirst(isequal(p), new_points)
+		if j isa Int; return j; end
 		push!(new_points, p)
 		return n + length(new_points)
 	end
@@ -2676,7 +2817,7 @@ function self_intersect(s::TriangulatedSurface)
 			end
 			p3 = lift * p2 + origin
 			k = create_point!(p3)
-# 			println("edge $e intersects face $i=$f at $(last(new_points))")
+# 			println("edge $e intersects face $i=$f at $k=$(last(new_points))")
 # 			println("  adding point $k to face $i=$f")
 			push!(face_points[i], k)
 			add_point_edge!(e, k, p3)
@@ -2710,21 +2851,21 @@ function self_intersect(s::TriangulatedSurface)
 		end#»»
 		# edge-edge intersections:««
 		for (e1, flist1) in pairs(inc.edge_faces)
+
 			# TODO: could this be made simpler by just checking if determinant
 			# is zero?
-			segment = points(s)[e1]
+			segment = points(s)[e]
 			# this makes the iteration triangular:
 			if e1 == e break; end
-			if isempty(bounding_box(points(s)[e1]...) ∩ bbox) continue; end
-			if !isempty(e ∩ e1) break; end
-			(z1, z2) = eq2.([p[proj] for p in segment])
-			# this also removes (already counted) edge-vertex intersections:
-			if z1*z2 ≥ 0 continue; end
-			(w1, w2) = eq1.(segment)
-			if w1*w2 ≥ 0 continue; end
-			# compute intersection point with one plane and check if it is on
-			# the other plane
-			p = (w1*segment[2]-w2*segment[1])/(w1-w2)
+			seg1 = points(s)[e1]
+			if isempty(bounding_box(seg1...) ∩ bbox) continue; end
+			if !isempty(e ∩ e1) continue; end
+			p = segment_inter(segment[1]=>segment[2], seg1[1]=>seg1[2])
+			if p isa Nothing continue; end
+			if p ∈ points(s)[[e[1], e[2], e1[1], e1[2]]]
+				# this is an edge-vertex intersection
+				continue;
+			end
 			if eq2(p[proj]) ≠ 0 continue; end
 			# point p is a new point and on both edges e and e1
 # 			println("edges $e and $e1 intersect")
@@ -2739,6 +2880,7 @@ function self_intersect(s::TriangulatedSurface)
 # """)
 # 		@assert false
 			k = create_point!(p)
+# 			println("edge intersection: $e, $e1 => $k = $p")
 			add_point_edge!(e, k, p)
 			add_point_edge!(e1, k, p)
 		end#»»
@@ -2747,6 +2889,7 @@ function self_intersect(s::TriangulatedSurface)
 		edge_points = edge_points,
 		face_points = face_points)
 end
+# Sub-triangulation««2
 """
     subtriangulate(s::TriangulatedSurface)
 
@@ -2796,9 +2939,21 @@ function subtriangulate(s::TriangulatedSurface)
 # 		println("triangulation = $tri")
 		push!(newfaces, tri...)
 	end
+	# remove opposite faces:
+	keep = trues(length(newfaces))
+	for (i, f) in pairs(newfaces), j in 1:i-1
+		g = newfaces[j]
+		if ((g[1] == f[1] && g[2] == f[3] && g[3] == f[2])
+		  ||(g[2] == f[2] && g[1] == f[3] && g[3] == f[1])
+			||(g[3] == f[3] && g[1] == f[2] && g[2] == f[1]))
+			keep[i] = keep[j] = false
+		end
+	end
+	newfaces = newfaces[keep]
 	return TriangulatedSurface(newpoints, newfaces)
 end
 
+# Inter_union: multiplicity marking««2
 """
     inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 
@@ -2818,9 +2973,6 @@ function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	mark = fill(-1, length(faces(s)))
 	nmarked = 0
 	@inline setmark!(c, k) = begin#««
-# 		if faces(s3)[c] == [3,11,14]
-# 			println("\e[31;1m ########## ICI:\e[m")
-# 		end
 # 		println("    \e[32mmarking face($c)$(faces(s)[c]) = $k\e[m")
 		if mark[c] == -1 
 			nmarked+= 1
@@ -2872,8 +3024,7 @@ function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 		end
 	end
 	#»»
-	# propagate marks on adjacent faces (where mark is not already
-	# defined).
+	# propagate marks on adjacent faces««
 	function propagate!(data, mat)
 		c = nmarked
 		for (f, adj) in pairs(mat), g in adj
@@ -2884,12 +3035,38 @@ function inter_union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 		return nmarked - c
 	end
 
-	while(propagate!(mark, inc.faces) > 0); end
+	while(propagate!(mark, inc.faces) > 0); end#»»
+	# ray-shooting to finish««
+	while nmarked < length(faces(s))
+		unmarked = 0
+		# find unmarked face
+		for i in eachindex(faces(s))
+			if mark[i] == -1 unmarked = i; break; end
+		end
+		# center of mass
+		@assert unmarked > 0
+		f = faces(s)[unmarked]
+# 		println("found unmarked face $unmarked = $f")
+# 		println("  triangle is $(points(s)[f])")
+		c = sum(points(s)[f])/convert(real_type(eltype(s)),3)
+# 		println("  center of mass is $c")
+		# and direction of ray
+		# we take the outer normal vector
+		# and perturbate it to avoid edges
+		v = face_normal(points(s)[f])
+		v+= norm(v)* convert.(eltype(s), randn(SVector{3}))/2
+# 		println("  direction of ray: $v")
+		ray = AffineRay(c, v)
+		# FIXME: this should abort if we encounter any *edge*
+		setmark!(unmarked, 1 + intersections(ray, s))
+		while propagate!(mark, inc.faces) > 0; end
+	end#»»
 
 	return (triangulation = s, mark = mark)
 end
 
-function inter(s1::TriangulatedSurface, s2::TriangulatedSurface)
+# Binary intersection and union««2
+function intersect(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	iu = inter_union(s1, s2)
 	return select_faces(i->iu.mark[i] == 2, iu.triangulation)
 end
@@ -2897,6 +3074,12 @@ function union(s1::TriangulatedSurface, s2::TriangulatedSurface)
 	iu = inter_union(s1, s2)
 	return select_faces(i->iu.mark[i] == 1, iu.triangulation)
 end
+@inline intersect(s1::TriangulatedSurface, s2::TriangulatedSurface,
+	s3::TriangulatedSurface...) =
+	reduce(intersect, [s1, s2, s3...])
+@inline union(s1::TriangulatedSurface, s2::TriangulatedSurface,
+	s3::TriangulatedSurface...) =
+	reduce(union, [s1, s2, s3...])
 # Extrusion ««1
 # Path extrusion ««2
 # poly_dist_type(::Type{Vec{2,T}}) where{T} = T
@@ -3093,7 +3276,24 @@ function Surface(s::Union{Cube, Cylinder, Sphere},
 	p = points(s, parameters)
 	return Surface(convex_hull(p)...)
 end
+# Transformations««2
+function Surface(s::AffineTransform)
+	g = Surface(s.child)
+	b = sign(s.data)
+	@assert b ≠ 0 "Only invertible linear transforms are supported (for now)"
+	if b > 0
+		return Surface(apply(s.data, points(g)), faces(g))
+	else
+		return Surface(apply(s.data, points(g)), reverse.(faces(g)))
+	end
+end
 # CSG operations««2
+function Surface(s::DerivedSolid{3,:union})
+	return union([Surface(x) for x in children(s)]...)
+end
+function Surface(s::DerivedSolid{3,:intersection})
+	return intersect([Surface(x) for x in children(s)]...)
+end
 # # # Annotations ««1
 # # abstract type AbstractAnnotation{D} end
 # # 
@@ -3149,7 +3349,7 @@ end
 # export offset, hull, minkowski, convex_hull
 # 
 # »»1
-function explain(s::Solids.Surface, io::IO = stdout; scale=50,
+function explain(s::Solids.Surface, io::IO = stdout; scale=1,
 		offset=[0.,0.,0.])
 	println(io, "translate($offset) {")
 	for (i, p) in pairs(Solids.points(s))

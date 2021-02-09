@@ -1,8 +1,9 @@
 using Test, StaticArrays, Colors
 
 # push!(LOAD_PATH, "./src", "src")
-using Solids: _FIXED, Vec, Path
-using Solids: from_clipper, to_clipper
+using Solids
+import Solids: _FIXED, Vec, Path
+import Solids: from_clipper, to_clipper
 
 function test_from_to(T, x)
 	return @test from_clipper(T, to_clipper(T, x)) == x
@@ -59,13 +60,13 @@ using Solids: convex_hull, convex_hull_list
 CH = convex_hull([SA[0,0,0],SA[0,0,10],SA[10,0,0],SA[0,10,0],SA[1,1,1],SA[1,0,0]])
 @test Set(CH[1]) == Set([SA[0,0,0],SA[0,0,10],SA[10,0,0],SA[0,10,0]])
 @test length(CH[2]) ==4
-@test Solids.convex_hull_list([ SA[0., 0], SA[1., 1], SA[-1., 1], SA[.2, 2.], SA[0, .8], SA[-.2, .8], ]) == [1,2,4,3]
-@test Solids.convex_hull_list(Solid.rows(SA[0. 0;1. 1;-1. 1;.2 2.;0 .8;-.2 .8])) == [1,2,4,3]
-@test Solids.convex_hull_list([[-2.627798062316817, 1.075268817204301], [-0.5030257403564974, -1.720430107526882], [0.7927283156659947, 2.7956989247311825], [0.0, 2.396978520135108], [0.0, 0.03278003249806397]]) == [2,3,1]
-@test Solids.convex_hull_list([[-2.150537634408602, 1.3494700327417308], [-0.4301075268817205, -2.097580910437773], [2.3655913978494625, 0.04739817471346019], [0.0, 0.0], [2.3038140933536018, 0.0], [0.0, 0.7294358146330306]]) == [2,5,3,6,1]
+@test convex_hull_list([ SA[0., 0], SA[1., 1], SA[-1., 1], SA[.2, 2.], SA[0, .8], SA[-.2, .8], ]) == [1,2,4,3]
+# @test convex_hull_list(Solids.rows(SA[0. 0;1. 1;-1. 1;.2 2.;0 .8;-.2 .8])) == [1,2,4,3]
+@test convex_hull_list([[-2.627798062316817, 1.075268817204301], [-0.5030257403564974, -1.720430107526882], [0.7927283156659947, 2.7956989247311825], [0.0, 2.396978520135108], [0.0, 0.03278003249806397]]) == [2,5,3,1]
+@test convex_hull_list([[-2.150537634408602, 1.3494700327417308], [-0.4301075268817205, -2.097580910437773], [2.3655913978494625, 0.04739817471346019], [0.0, 0.0], [2.3038140933536018, 0.0], [0.0, 0.7294358146330306]]) == [2,5,3,6,1]
 end
 @testset "Surfaces" begin #<<<1
-using Solids: connected_components
+using Solids: connected_components Surface
 v=[[0,-1],[1,0],[0,1],[-1,0]]
 for j in eachindex(v), i in 1:i-1
 	@test Solids.circular_lt(v[i], v[j])
@@ -73,6 +74,18 @@ end
 @test connected_components([:a, :b, :c, :d, :e], [[1,2],[1,3],[4,5]]) ==
 	[([:a, :b, :c], [[1,2],[1,3]]),
 	 ([:d, :e], [[1,2]]) ]
+function pyramid(t=[0,0,0], n=0)
+	points = Solids.Vec{3}.([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
+	faces = [[4,3,2,1],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
+	faces1 = [ f .+ n for f in faces ]
+	return Surface(points, faces1)
+end
+p1 = pyramid()
+p2 = pyramid([1,0,0])
+u12 = union(p1, p2)
+i12 = intersect(p1, p2)
+@test length(u12.points) == 14 && length(u12.faces) == 24
+@test length(i12.points) == 8  && length(u12.faces) == 12
 end
 #>>>1
 

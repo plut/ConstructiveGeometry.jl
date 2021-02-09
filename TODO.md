@@ -39,6 +39,7 @@
    depending on the dimension.
  - add a LineNode reference to constructors
    (i.e. first thing in call stack outside module).
+ - use an AABB tree (bounding box tree) for intersection detection
 # 2d vs 3d
  - before deciding what *“should”* be done, write a set of examples of
 	 **what it should do** (for various operations, e.g. linear maps,
