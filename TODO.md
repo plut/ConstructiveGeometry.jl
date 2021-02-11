@@ -1,4 +1,6 @@
 # Immediate work
+ - check using vs. import
+ - populate export list
  - add a display method that shows the tree
  - replace `triangulate_between` by an actual Triangulate call
  - write a few examples
@@ -146,6 +148,7 @@
  - create incidence structure on triangulated surface creation?
    use [directed edges structure](https://core.ac.uk/download/pdf/190807228.pdf)
  - maybe using ~ instead of `-` for reversed faces
+ - and use AABBtree for computing face intersections
  * [https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
  - add some visualization (`Makie`?)
  - export to SVG/STL/PLY

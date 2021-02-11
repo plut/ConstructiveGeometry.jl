@@ -1957,12 +1957,12 @@ function incidence(s::AbstractSurface;
 end
 
 """
-    connected_faces(s::AbstractSurface)
+    regular_components(s::AbstractSurface)
 
 Returns the set of connected components of faces of `s`, for the
 edge-adjacency relation restricted to binary edges.
 """
-function connected_faces(s::AbstractSurface;
+function regular_components(s::AbstractSurface;
 	edge_faces = incidence(s; vf=false, ff=false).edge_faces)
 	n = nfaces(s)
 	m = spzeros(Bool,n,n)
@@ -2758,16 +2758,28 @@ This means that ⟨u,v2,v3⟩, ⟨v2,u,v3⟩, ⟨v1,v2,u⟩ > 0.
 [1] https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.2.2084&rep=rep1&type=pdf
 
 """
-function intersects(a::AffineRay, t::Triangle)
+function intersects(a::AffineRay, t::Triangle, strict = false)
 	u = a.direction
 	(v1, v2, v3) = [x-a.origin for x ∈ vertices(t)]
 	d = det3(v1, v2, v3)
 	# FIXME: could be make slightly faster (but less readable)
 	# by precomputing u∧v2
-	if d > 0 && det3(u, v2, v3) > 0 && det3(v1, u, v3) > 0 && det3(v1, v2, u) > 0
-		return 1
-	elseif d < 0 && det3(u, v2, v3) < 0 && det3(v1, u, v3) < 0 && det3(v1, v2, u) < 0
-		return -1
+	if strict
+		if (d > 0 && det3(u, v2, v3) > 0
+			&& det3(v1, u, v3) > 0 && det3(v1, v2, u) > 0)
+			return 1
+		elseif (d < 0 && det3(u, v2, v3) < 0
+			&& det3(v1, u, v3) < 0 && det3(v1, v2, u) < 0)
+			return -1
+		end
+	else
+		if (d ≥ 0 && det3(u, v2, v3) ≥ 0
+			&& det3(v1, u, v3) ≥ 0 && det3(v1, v2, u) ≥ 0)
+			return 1
+		elseif (d ≤ 0 && det3(u, v2, v3) ≤ 0
+			&& det3(v1, u, v3) ≤ 0 && det3(v1, v2, u) ≤ 0)
+			return -1
+		end
 	end
 	return 0
 end
@@ -2818,8 +2830,10 @@ function intersects(a::AffineRayInv{3}, b::Box; strict=false)
 	return true
 end
 
-function intersections(a::AffineRay, s::TriangulatedSurface)
-	return sum(intersects(a, triangle(s,i)) for i in eachindex(faces(s)))
+function intersections(a::AffineRay, s::TriangulatedSurface,
+		minface = 0)
+	return sum(intersects(a, triangle(s,i), i>minface )
+		for i in eachindex(faces(s)))
 end
 # 3d union and intersection««1
 # Self-intersection««2
@@ -3061,7 +3075,7 @@ end
 function multiplicities(s::TriangulatedSurface)
 	inc = incidence(s; vf=false) # vf, ef, ff
 	# compute regular components: multiplicity is constant on these
-	cc = connected_faces(s; edge_faces=inc.edge_faces)
+	cc = regular_components(s; edge_faces=inc.edge_faces)
 	face_cc = Vector{Int}(undef, nfaces(s))
 # 	for (i, l) in pairs(cc), j in l face_cc[j] = i; end
 	T = real_type(coordtype(s))
@@ -3076,7 +3090,9 @@ function multiplicities(s::TriangulatedSurface)
 		direction+= norm(direction)*convert.(T, randn(SVector{3}))/2
 		ray = AffineRay(origin, direction)
 		# this ray is pointing outward, so we need to count the face
-		n = 1+s.∞+intersections(ray, s)
+		# dirty hack: we count only those faces with number ≥ index of this
+		# one, so that identical faces will get differing multiplicity count.
+		n = s.∞+intersections(ray, s, first(l))
 		println("regular component $i = $l has multiplicity $n")
 		multiplicity[i] = n
 	end
@@ -3420,7 +3436,7 @@ end
 	S(s.child, parameters...)
 # CSG operations««2
 function (S::Type{<:AbstractSurface})(s::CSGUnion{3}, parameters...)
-	return select_multiplicity(x->x≥1,
+	return select_multiplicity(isequal(1),
 		[S(x, parameters...) for x in children(s)]...)
 end
 function (S::Type{<:AbstractSurface})(s::CSGInter{3}, parameters...)
@@ -3539,4 +3555,4 @@ F = Fixed{Int64, 16}
 
 
 nothing
-# vim: fdm=marker fmr=««,»» noet ts=2:
+# vim: fdm=marker fmr=««,»» noet:

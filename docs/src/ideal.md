@@ -1,4 +1,4 @@
-# Ideal `Solids` objects
+# Ideal objects
 ```@meta
 CurrentModule = Solids
 ```
