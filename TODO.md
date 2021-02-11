@@ -1,6 +1,10 @@
 # Immediate work
+ - add a display method that shows the tree
  - replace `triangulate_between` by an actual Triangulate call
- + use `Meshes.jl`
+ - write a few examples
+ - use `Meshes.jl`
+  - make it work with `Makie` and `MeshIO`
+  - and suggest a few upstream PR.
  + clarify complements:
   + (if everything bounded) ∞ has multiplicity 1
 	+ add a “m∞” field in TriangulatedSurface to count this?
