@@ -2,9 +2,9 @@
 
 !!! warning
 
-This package is very much a work-in-progress. Right now only very basic
-functionality is available (describing geometries, and some cases for
-meshing). The code is absolutely not stable, and any contributions are welcome.
+    This package is very much a work-in-progress. Right now only very basic
+    functionality is available (describing geometries, and some cases for
+    meshing). The code is absolutely not stable, and any contributions are welcome.
 
 
 This package provides tools for describing 3d objects
