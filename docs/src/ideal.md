@@ -3,9 +3,6 @@
 CurrentModule = Solids
 ```
 
-```@docs
-Solids.AbstractSolid
-```
 ## Primitive solids
 
 ```@docs

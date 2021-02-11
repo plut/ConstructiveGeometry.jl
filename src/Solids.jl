@@ -387,11 +387,35 @@ end
 @inline Box{D}(a::Number; kwargs...) where{D} =
 	Box{D}(Vec{D}(a for _ in 1:D); kwargs...)
 
+"""
+    Square(size; origin, center=false)
+
+An axis-parallel square or rectangle  with given `size`
+(scalar or vector of length 2).
+"""
 Square = Box{2}
+"""
+    Cube(size; origin, center=false)
+
+A cube or parallelepiped  with given `size`
+(scalar or vector of length 3).
+"""
 Cube = Box{3}
 
 @inline Ball{D}(r::T) where{D,T} = Ball(Point(zero(SVector{D,T})), r)
+"""
+    Circle(radius)
+
+A circle. Discretization is done via the `accuracy` and `precision`
+parameters.
+"""
 Circle = Ball{2}
+"""
+    Sphere(radius)
+
+A sphere. Discretization is done via the `accuracy` and `precision`
+parameters.
+"""
 Sphere = Ball{3}
 # Cylinder ««2
 # """
@@ -773,7 +797,12 @@ function extract end
 
 # SetParameters««2
 SetParameters = Transform{:parameters}
+"""
+    set_parameters(;accuracy=accuracy, precision=precision)
 
+A transformation which passes down the specified parameter values to its
+child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
+"""
 @inline set_parameters(s...; parameters...) =
 	SetParameters(parameters.data, s...)
 
