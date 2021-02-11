@@ -1,14 +1,19 @@
 # Immediate work
- * intersection and union: ray-shooting (it is possible even within the
+ - replace `triangulate_between` by an actual Triangulate call
+ + use `Meshes.jl`
+ + clarify complements:
+  + (if everything bounded) ∞ has multiplicity 1
+	+ add a “m∞” field in TriangulatedSurface to count this?
+ + intersection and union: ray-shooting (it is possible even within the
 	 merged structure)
-   - force-remove opposite faces (neither ∪ nor ∩)
-	 - check if it works for complement
+   + force-remove opposite faces (neither ∪ nor ∩)
+	 + check if it works for complement
  - a common name for meshing objects (either `Mesh` or `elements` ?)
    => **realize**
- - Boolean operations work even if non-connected triangulation
-   -> remove conn.comp. split from `Triangulation()` converter
- - add complement (of triangulation, and symbolic)
- - add difference (of triangulations)
+ - ensure that ray-shooting never hits edges
+ - try 2 strategies for n-ary intersection/union:
+   - merge all structures and compute multiplicity with ray-shooting,
+	 - or reduce with binary op
  * test suite
  - what to do for polygons with holes?
    - look in `Makie`
@@ -16,19 +21,13 @@
 	 - parity is probably simplest bet (easily allows both non-connected
 		 polys and holes)
 	 - `PolygonXor` type
- - replace minkowski with circle by an offset
- - Minkowski difference
+ - Minkowski difference of polygons
  - fix `Offset` for polygon unions
  - choose a correct value for `Clipper` precision
  * check `convex_hull` works
 # Basic types
  - clarify `Path`: maybe add `points` iterator and `matrix` abstract
 	 conversion. Or make `Path` an actual struct type and add accessors.
- - add something for fake-3d objects (embedded in a subspace):
-   this would represent both `mult_matrix` with zero determinant,
-   `mult_matrix` of 2d object with 3d matrix,
-   and `project()` (or `cut()`).
-   It would also allow, say, convex hull with a translated 2d object.
  - this needs a plane object type (which could be the image by a 2x3
    multmatrix of `:full`).
  - think of using `LabelledArrays.jl` (`SLArray`) as an alternative to
@@ -41,6 +40,11 @@
    (i.e. first thing in call stack outside module).
  - use an AABB tree (bounding box tree) for intersection detection
 # 2d vs 3d
+ - add something for fake-3d objects (embedded in a subspace):
+   this would represent both `mult_matrix` with zero determinant,
+   `mult_matrix` of 2d object with 3d matrix,
+   and `project()` (or `cut()`).
+   It would also allow, say, convex hull with a translated 2d object.
  - before deciding what *“should”* be done, write a set of examples of
 	 **what it should do** (for various operations, e.g. linear maps,
 	 Minkowski, hull) and then decide how to best implement this behavior
@@ -120,6 +124,7 @@
       :left => Y, :right => Z,
     ] # as array *or* tuple
  - 3d Minkowski
+ - replace minkowski with circle by an offset
 # Issues in other packages
  - `StaticArrays.jl`: SDiagonal is currently *not* a static matrix?
     julia> SDiagonal(1,2,3) isa StaticMatrix
@@ -134,11 +139,15 @@
  * make this a proper package
  - distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
+ - create incidence structure on triangulated surface creation?
+   use [directed edges structure](https://core.ac.uk/download/pdf/190807228.pdf)
+ - maybe using ~ instead of `-` for reversed faces
  * [https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
  - add some visualization (`Makie`?)
  - export to SVG/STL/PLY
    - `MeshIO`
 # Extras
+ * [surface decimation](https://caffeineviking.net/papers/stima.pdf)
  - improve `unit_n_gon` to take advantage of symmetries
  + investigate Fibonacci spheres
  + Color
