@@ -1,9 +1,12 @@
 # Immediate work
+ - do something smart for triangle intersections
+   and on-the-fly retriangulation
  - check using vs. import
  - populate export list
  - add a display method that shows the tree
  - replace `triangulate_between` by an actual Triangulate call
  - write a few examples
+ - use `Dictionaries.jl`
  - use `Meshes.jl`
   - make it work with `Makie` and `MeshIO`
   - and suggest a few upstream PR.

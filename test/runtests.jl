@@ -80,7 +80,8 @@ CH = convex_hull([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),P(1,1,1),P(1,0,0),])
 	])== [2,5,3,6,1]
 end
 @testset "Surfaces" begin #<<<1
-using Solids: connected_components, Surface
+using Solids: connected_components, Surface, merge, select_faces
+using Solids: nvertices, nfaces
 v=[[0,-1],[1,0],[0,1],[-1,0]]
 for j in eachindex(v), i in 1:j-1
 	@test Solids.circular_lt(v[i], v[j])
@@ -90,12 +91,16 @@ end
 	 ([:d, :e], [[1,2]]) ]
 function pyramid(t=[0,0,0], n=0)
 	points = Solids.Point{3}.([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
-	faces = [[4,3,2,1],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
+	faces = [[4,3,2],[2,3,1],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
 	faces1 = [ f .+ n for f in faces ]
 	return Surface(points, faces1)
 end
 p1 = pyramid()
 p2 = pyramid([1,0,0])
+p3 = merge(p1, p2)
+p1bis = select_faces(1:6, p3)
+@test nfaces(p1bis) == nfaces(p1)
+@test nvertices(p1bis) == nvertices(p1)
 u12 = union(p1, p2)
 i12 = intersect(p1, p2)
 @test length(u12.points) == 14 && length(u12.faces) == 24

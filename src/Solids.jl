@@ -199,8 +199,8 @@ const ° = 1.
 @inline degrees(x::Angle) = x
 @inline degrees(x::AnyAngle) = degrees(Angle(x))
 
-# Tools««1
-# Extrema
+# General tools««1
+# findextrema««2
 """
     findextrema(itr; lt=isless)
 
@@ -224,17 +224,19 @@ function findextrema(itr; lt=isless)
   return (min=(m, mi), max=(M, Mi))
 end
 
-# iterate over rows of matrix
-struct Rows{T,M,V} <: AbstractVector{V}
+# RowIterator««2
+struct RowIterator{T,M,V} <: AbstractVector{V}
   mat::M
 end
-@inline Rows{T,M}(A::Matrix) where{T,M} = Rows{T,M,Vector{T}}(A)
-@inline Rows(A::AbstractMatrix) = Rows{eltype(A),typeof(A)}(A)
-@inline Rows{T,M}(A::SMatrix) where{T,M} =
-	Rows{T,M,SVector{Size(A)[1],T}}(A)
-@inline rows(A::AbstractMatrix) = Rows(A)
-@inline getindex(r::Rows, i::Integer) = view(r.mat,i,:)
-@inline size(r::Rows) = (size(r.mat, 1),)
+@inline RowIterator{T,M}(A::Matrix) where{T,M} = RowIterator{T,M,Vector{T}}(A)
+@inline RowIterator(A::AbstractMatrix) = RowIterator{eltype(A),typeof(A)}(A)
+@inline RowIterator{T,M}(A::SMatrix) where{T,M} =
+	RowIterator{T,M,SVector{Size(A)[1],T}}(A)
+@inline rows(A::AbstractMatrix) = RowIterator(A)
+@inline getindex(r::RowIterator, i::Integer) = view(r.mat,i,:)
+@inline size(r::RowIterator) = (size(r.mat, 1),)
+
+# small determinants««2
 
 # 2-dimensional determinant, useful for computing orientation
 @inline det2(v1, v2) = v1[1]*v2[2] - v1[2]*v2[1]
@@ -246,6 +248,36 @@ end
 	det3(p2-p1, p3-p1, p4-p1)
 # @inline det3(v1, v2, v3) = det([v1 v2 v3])
 # @inline det3(p1, p2, p3, p4) = det3(p2-p1, p3-p1, p4-p1)
+# IndexedView««2
+# Dictionary does not cut it: no dict[SA[1,2,3]]
+# Nor does Iterators.Pairs: collect() returns set of pairs
+struct IndexedView{T,X,Y}
+	array::X # <: AbstractArray{T}
+	keys::Y # <: AbstractArray{?,N}
+end
+@inline eltype(a::IndexedView) = eltype(a.array)
+@inline ndims(a::IndexedView) = ndims(keys(a))
+@inline Base.keys(a::IndexedView) = a.keys
+@inline Base.length(a::IndexedView) = length(keys(a))
+@inline function Base.getindex(a::IndexedView, i)
+	@assert all(x->x ∈ keys(a), i)
+	return getindex(a.array, i)
+end
+@inline function Base.setindex!(a::IndexedView, x, i)
+	@assert all(x->x ∈ keys(a), i)
+	return setindex!(a.array, x, i)
+end
+@inline function iterate(a::IndexedView, args...)
+	t = iterate(a.keys, args...)
+	t == nothing && return t
+	return (a.array[t[1]], t[2])
+end
+@inline Base.pairs(a::IndexedView) =Iterators.Pairs(a.array, a.keys)
+@inline indexedview(a, indices) =
+	IndexedView{eltype(a),typeof(a),typeof(indices)}(a, indices)
+# idempotence:
+@inline indexedview(a::IndexedView, indices) = indexedview(a.array, indices)
+	
 
 # Geometry ««1
 # Some reasons not to use `GeometryBasics.jl`:
@@ -462,82 +494,52 @@ end
 
 @inline vertices(p::Polygon) = p.points
 # Surface««2
+# TODO also store some face-neighbour information
+# this can be updated (not fully recomputed) for subtriangulation
 """
-    Surface{T,V}
+    AbstractSurface{T,F}
     Surface([points...], [faces...])
 
-Encodes information about a surface. `T` is the coordinate type and `V`
-is the type used for storing a face (e.g. `SVector{3,Int}`).
+Encodes information about a surface.
+
+Parameters
+ - `T` is the coordinate type
+ - `F` is the type used for storing a face (e.g. `SVector{3,Int}`)
 
 Interface
- - `nvertices(s)`, `vertices(s)`: count and iterator over vertices.
-    (a vertex is a Point{3,T})
- - `nfaces(s)`, `faces(s)`: count and iterator over faces
-    (a face is an AbstractVector{Int} identifying vertices)
+ - `vertices(s)`: `AbstractDictionary` of indices
+ - `faces(s)`: `AbstractDictionary` of faces
 """
-abstract type AbstractSurface{T} <: AbstractMesh{3,T} end
+abstract type AbstractSurface{T,F} <: AbstractMesh{3,T} end
+
 @inline nvertices(s::AbstractSurface) = length(vertices(s))
 @inline nfaces(s::AbstractSurface) = length(faces(s))
+@inline facetype(s::AbstractSurface{T,F}) where{T,F} = F
 
-struct Surface{T} <: AbstractSurface{T}
-	points::Vector{Point{3,T}}
-	faces::Vector{Vector{Int}}
-	∞::Integer # multiplicity of infinity
-end
-Surface(points, faces, inf=0) =
-	Surface{real_type(coordtype.(points)...)}(points, faces, inf)
+abstract type AbstractTriangulatedSurface{T} <:
+	AbstractSurface{T,SVector{3,Int}} end
 
-@inline vertices(s::Surface) = s.points
-@inline faces(s::Surface) = s.faces
+@inline AbstractMeshes.Triangle(s::AbstractTriangulatedSurface, i) =
+	Triangle(vertices(s)[faces(s)[i]])
 
-struct TriangulatedSurface{T} <: AbstractSurface{T}
-	points::Vector{Point{3,T}}
+struct TriangulatedSurface{T} <: AbstractTriangulatedSurface{T}
+	vertices::Vector{Point{3,T}}
 	faces::Vector{SVector{3,Int}}
-	∞::Integer # multiplicity of infinity (for complements)
 end
-@inline vertices(s::TriangulatedSurface) = s.points
+@inline TriangulatedSurface(points, faces) =
+	TriangulatedSurface{real_type(coordtype.(points)...)}(points, faces)
 @inline faces(s::TriangulatedSurface) = s.faces
-@inline TriangulatedSurface(points, faces, inf=0) =
-	TriangulatedSurface{real_type(coordtype.(points)...)}(points, faces, inf)
+@inline vertices(s::TriangulatedSurface) = s.vertices
 
-# Surface{T,V} = PrimitiveSolid{:polyhedron,3,T,
-#   @NamedTuple{points::Vector{Point{3,T}}, faces::Vector{V}}}
-# TriangulatedSurface{T} = Surface{T,SVector{3,Int}}
+struct SurfaceFacesView{T,F} <:
+	AbstractSurface{T,F}
+	parent::AbstractSurface{T,F}
+	indices::Vector{Int}
+end
+@inline faces(s::SurfaceFacesView) = indexedview(faces(s.parent), s.indices)
+@inline vertices(s::SurfaceFacesView) = vertices(s.parent)
 
-@inline triangle(s::TriangulatedSurface, faceindex::Int) =
-	Triangle(vertices(s)[faces(s)[faceindex]]...)
-
-# @inline _infer_type(::Type{<:Surface}; points, faces) =
-# 	real_type(coordtype.(points)...)
-# @inline function scad_param_value(io::IO,
-# 		::Val{:polyhedron}, ::Val{:points}, points)
-# 	print(io, "[")
-# 	for (i, p) in pairs(points)
-# 		print(io, Float64.(p))
-# 		if i < length(points) print(io, ","); end
-# 		print(io, "\t// ", i)
-# 		println(io)
-# 	end
-# 	print(io, "]")
-# end
-# # OpenSCAD is zero-indexed
-# @inline function scad_param_value(io::IO,
-# 		::Val{:polyhedron}, ::Val{:faces}, faces)
-# 	print(io, "[")
-# 	for (i, f) in pairs(faces)
-# 		print(io, f .- 1)
-# 		if i < length(faces) print(io, ","); end
-# 		print(io, "\t// ", i)
-# 		println(io)
-# 	end
-# # 	join(io, [f .- 1 for f in faces], ",\n")
-# 	print(io, "]")
-# end
-# @inline (::Type{Surface{T}})(;points, faces) where{T} =
-# 	Surface{T,eltype(faces)}(points=points, faces=faces)
-# @inline (T::Type{<:Surface})(points, faces) =
-# 	T(points=points, faces=faces)
-
+@inline indexedview(s::AbstractSurface, indices) = SurfaceFacesView(s, indices)
 
 # a lot of functions operating on 'Surface' values are defined later in
 # the meshing part of this file.
@@ -1956,27 +1958,29 @@ function incidence(s::AbstractSurface;
 	)
 end
 
-"""
-    regular_components(s::AbstractSurface)
-
-Returns the set of connected components of faces of `s`, for the
-edge-adjacency relation restricted to binary edges.
-"""
-function regular_components(s::AbstractSurface;
-	edge_faces = incidence(s; vf=false, ff=false).edge_faces)
-	n = nfaces(s)
-	m = spzeros(Bool,n,n)
-	for (e, a) in pairs(edge_faces)
-		if length(a) == 2
-			i = abs.(a)
-			println("adjacent: $a")
-			m[i[1],i[2]] = m[i[2],i[1]] = true
-		end
-	end
-	g = LightGraphs.SimpleGraph(m)
-	cc = LightGraphs.connected_components(g)
-	return cc
-end
+# """
+#     regular_components(s::AbstractSurface,
+# 			cc
+# 
+# Returns the set of connected components of faces of `s`, for the
+# edge-adjacency relation restricted to binary edges.
+# 
+# """
+# function regular_components(s::AbstractSurface;
+# 	edge_faces = incidence(s; vf=false, ff=false).edge_faces)
+# 	n = nfaces(s)
+# 	m = spzeros(Bool,n,n)
+# 	for (e, a) in pairs(edge_faces)
+# 		if length(a) == 2
+# 			i = abs.(a)
+# 			println("adjacent: $a")
+# 			m[i[1],i[2]] = m[i[2],i[1]] = true
+# 		end
+# 	end
+# 	g = LightGraphs.SimpleGraph(m)
+# 	cc = LightGraphs.connected_components(g)
+# 	return cc
+# end
 
 @inline copy(s::AbstractSurface) = (typeof(s))(vertices(s), faces(s))
 
@@ -2015,7 +2019,7 @@ function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
 		newfaces[f1+i] = renum[f] # array indexed by array trick
 	end
 
-	return (typeof(s1))(newpoints, sort(newfaces), s1.∞+s2.∞)
+	return (typeof(s1))(newpoints, sort(newfaces))
 end
 
 """
@@ -2042,41 +2046,41 @@ function select_faces(list::AbstractVector{<:Integer}, s::AbstractSurface)
 	resize!(newpoints, n)
 	return (typeof(s))(
 		newpoints,
-		[renum[faces(s)[f]] for f in newfaces], 0)
+		[renum[faces(s)[f]] for f in newfaces])
 end
 @inline select_faces(test::Function, s::AbstractSurface) =
 	select_faces(filter(test,eachindex(faces(s))), s)
 
-"""
-    connected_components(s::AbstractSurface)
-
-Returns a vector of objects (same type as `s`), each one of which is a
-(renumbered) connected component.
-"""
-@inline connected_components(s::AbstractSurface) =
-	[ typeof(s)(p,f)
-		for (p,f) in connected_components(vertices(s), faces(s)) ]
-function connected_components(points, faces)
-	# Build the incidence matrix from the list of faces
-	N = length(points)
-	G = LightGraphs.SimpleGraph(adjacency_points(points, faces))
-	C = LightGraphs.connected_components(G)
-	# C is a vector of vector of indices
-	# newindex[oldindex] = [component, new index]
-	component = zeros(Int, N)
-	newindex = zeros(Int, N)
-	for (i, c) in pairs(C)
-		for (j, p) in pairs(c)
-			component[p] = i
-			newindex[p] = j
-		end
-	end
-	return [ (typeof(s))(
-		# all points in component i
-		points[filter(p->component[p] == i, 1:N)],
-		[ [newindex[p] for p in f] for f in faces if component[f[1]] == i ]
-		) for i in eachindex(C) ]
-end
+# """
+#     connected_components(s::AbstractSurface)
+# 
+# Returns a vector of objects (same type as `s`), each one of which is a
+# (renumbered) connected component.
+# """
+# @inline connected_components(s::AbstractSurface) =
+# 	[ typeof(s)(p,f)
+# 		for (p,f) in connected_components(vertices(s), faces(s)) ]
+# function connected_components(points, faces)
+# 	# Build the incidence matrix from the list of faces
+# 	N = length(points)
+# 	G = LightGraphs.SimpleGraph(adjacency_points(points, faces))
+# 	C = LightGraphs.connected_components(G)
+# 	# C is a vector of vector of indices
+# 	# newindex[oldindex] = [component, new index]
+# 	component = zeros(Int, N)
+# 	newindex = zeros(Int, N)
+# 	for (i, c) in pairs(C)
+# 		for (j, p) in pairs(c)
+# 			component[p] = i
+# 			newindex[p] = j
+# 		end
+# 	end
+# 	return [ (typeof(s))(
+# 		# all points in component i
+# 		points[filter(p->component[p] == i, 1:N)],
+# 		[ [newindex[p] for p in f] for f in faces if component[f[1]] == i ]
+# 		) for i in eachindex(C) ]
+# end
 
 # Manifoldness test««2
 """
@@ -2131,6 +2135,143 @@ function ismanifold(s::AbstractSurface)
 	return (value=true, text="is manifold")
 end
 
+# # DirectedEdgesTriMesh««1
+# # Utilities««2
+# # struct DictOfList{A,B}
+# # 	data::Dict{A,Vector{B}}
+# # end
+# # @inline keytype(::Type{DictOfList{A,B}}) where{A,B} = A
+# # @inline valtype(::Type{DictOfList{A,B}}) where{A,B} = B
+# # @inline keytype(d::DictOfList) = keytype(typeof(d))
+# # @inline valtype(d::DictOfList) = valtype(typeof(d))
+# # 
+# # function Base.push!(d::DictOfList, key, value)
+# # 	if !haskey(d.data, key) d.data[key] = valtype(d)[]; end
+# # 	return push!(d.data[key], value)
+# # end
+# # @inline Base.getindex(d::DictOfList, key) = getindex(d.data, key)
+# 
+# # Basic types««2
+# struct DirectedEdgesTriMesh{T}
+# 	opposite::Vector{Int} # 3×n
+# 	destination::Vector{Int}
+# 	from::T # Vector or Dict
+# 	@inline DirectedEdgesTriMesh(;opposite, destination, from) =
+# 		new{typeof(from)}(opposite, destination, from)
+# end
+# 
+# function DirectedEdgesTriMesh(
+# 		faces::AbstractVector{<:AbstractVector{<:Integer}})
+# 	@assert all(length.(faces) .== 3)
+# 	# vf[p] = [faces containing point p]
+# 	points = union(faces...)
+# 	vf = Dict(p=>Int[] for p in points)
+# 	from = Dict(p=>0 for p in points)
+# # 	from = Vector{Int}(undef, length(points))
+# 	# face i has 3i-2..3i
+# 	for (i, f) in pairs(faces), (j, p) in pairs(f[1:3])
+# 		push!(vf[p], i)
+# 		from[p] = 3*i-3+j
+# 	end
+# 	function find_edge(p, q)#««
+# 	# returns index of edge pq (in this direction)
+# 		for i in vf[p]
+# 			f = faces[i]
+# 			if f[1]==p && f[2]==q return 3*i-2
+# 			elseif f[2]==p && f[3]==q return 3*i-1
+# 			elseif f[3]==p && f[1]==q return 3*i
+# 			end
+# 		end
+# 		return 0 # opposite edge not found: we are on the boundary
+# 		# (e.g. when dissecting a triangle)
+# 	end#»»
+# 	opposite = Vector{Int}(undef, 3*length(faces))
+# 	destination=Vector{Int}(undef, 3*length(faces))
+# 	for (i, f) in pairs(faces)
+# 		destination[3*i-2] = f[2]
+# 		destination[3*i-1] = f[3]
+# 		destination[3*i  ] = f[1]
+# 		opposite[3*i-2] = find_edge(f[2], f[1])
+# 		opposite[3*i-1] = find_edge(f[3], f[2])
+# 		opposite[3*i  ] = find_edge(f[1], f[3])
+# 	end
+# 	return DirectedEdgesTriMesh(;
+# 		opposite=opposite,
+# 		destination=destination,
+# 		from=from)
+# end
+# 
+# @inline next(::DirectedEdgesTriMesh, n) = n+1-3*(n%3==0)
+# @inline prev(::DirectedEdgesTriMesh, n) = n-1+3*(n%3==1)
+# @inline nfaces(m::DirectedEdgesTriMesh) = fld(length(m.opposite),3)
+# # @inline vertices(m::DirectedEdgesTriMesh) = m.points
+# @inline opposite(m::DirectedEdgesTriMesh, ab) = m.opposite[value(ab)]
+# @inline opposite!(m::DirectedEdgesTriMesh, ab, x) =
+# 	m.oposite[value(ab)] = x
+# @inline destination(m::DirectedEdgesTriMesh, ab) = m.destination[value(ab)]
+# @inline destination!(m::DirectedEdgesTriMesh, ab, x) =
+# 	m.destination[value(ab)] = x
+# @inline from(m::DirectedEdgesTriMesh, pt) = m.from[pt]
+# @inline from!(m::DirectedEdgesTriMesh, pt, x) = m.from[pt] = x
+# 
+# # @inline function new_half_edges(m:::DirectedEdgesTriMesh, n::Integer)
+# # 	l = length(m.opposite)
+# # 	resize!(m.opposite, l+n)
+# # 	resize!(m.destination, l+n)
+# # 	return (l+1:l+n)
+# # end
+# 
+# @inline destination(m::DirectedEdgesTriMesh, ab) = m.destination[value(ab)]
+# 
+# struct DirectedEdgesTriFaces <: AbstractVector{SVector{3,Int}}
+# 	mesh::DirectedEdgesTriMesh
+# end
+# @inline Base.size(itr::DirectedEdgesTriFaces) = (nfaces(itr.mesh),)
+# @inline Base.getindex(itr::DirectedEdgesTriFaces, n::Integer) =
+# 	SVector{3,Int}(view(itr.mesh.destination, 3*n-2:3*n))
+# @inline faces(m::DirectedEdgesTriMesh) = DirectedEdgesTriFaces(m)
+# 
+# # Splitting edges and faces««2
+# """
+#     split_edge!(m::DirectedEdgesTriMesh, ab, p)
+# 
+# Inserts points `p` in the middle of the half-edge `ab` and its opposite.
+# """
+# function split_edge!(m::DirectedEdgesTriMesh, ab, pt::Point{3})
+# 	n = nfaces(m)
+# 	# Grab all the edge and vertex info from structure
+# 	bc = next(m, ab); ca = next(m, ab)
+# 	cb = opposite(m, bc); ac = opposite(m, ca)
+# 	ba = opposite(m, ab); ad = next(m, ba); db = next(m, ad)
+# 	da = opposite(m, ad); bd = opposite(m, db)
+# 	# use the inner half-edges for computing destination:
+# 	# (outer half-edges might not be defined if we have a boundary...)
+# 	b = destination(m, ab); a = destination(m, ba)
+# 	c = destination(m, bc); d = destination(m, ad)
+# 	# Define new values for point x and triangles xbc, xad
+# 	push!(m.points, pt);
+# 	x = length(m.points)
+# 	resize!(m.halfedges, 3*n+6)
+# 	xb = 3*n+1; new_bc = 3*n+2; cx = 3*n+3
+# 	xa = 3*n+4; new_ad = 3*n+5; dx = 3*n+6
+# 	push!(m.from, xb)
+# 	# adjust structure to record all values
+# 	@inline set!(edge, dest, opp) = (
+# 		m.destination[edge] = dest; m.opposite[edge] = opp; )
+# 	# triangle axc
+# 	ax = ab; set!(ax, x, xa)
+# 	xc = bc; set!(xc, c, cx) # here we overwrite `c` by `c`...
+# 	# ca unchanged
+# 	# triangle bxd
+# 	bx = ba; set!(bx, x, xb)
+# 	xd = ad; set!(xd, d, dx) # ditto
+# 	# db unchanged
+# 	# triangle xbc
+# 	set!(xb, b, bx); set!(new_bc, c, cb); set!(cx, x, xc)
+# 	# triangle xad
+# 	set!(xa, a, ax); set!(new_ad, d, da); set!(dx, x, xd)
+# 	return m # or x...
+# end
 # Triangulations««1
 # 2d triangulation««2
 """
@@ -2832,28 +2973,31 @@ end
 
 function intersections(a::AffineRay, s::TriangulatedSurface,
 		minface = 0)
-	return sum(intersects(a, triangle(s,i), i>minface )
+	return sum(intersects(a, Triangle(s,i), i>minface )
 		for i in eachindex(faces(s)))
 end
 # 3d union and intersection««1
+# After [Zhou, Grinspun, Zorin, Jacobson](https://dl.acm.org/doi/abs/10.1145/2897824.2925901)
 # Self-intersection««2
 """
-    self_intersect(s::TriangulatedSurface)
+    self_intersect(s::AbstractTriangulatedSurface)
 
 Returns all self-intersections of `s`, as a `NamedTuple`:
- - `points`: all points of intersection
- - `edge_points`: for all edges, list of new points (sorted along the
-	 edge)
+ - `points`: all new points of intersection (as a vector of `Point{3}`,
+   to be appended to the original geometric points of the structure).
+ - `edge_points`: for all edges, a vector of indices of new points
+   (sorted in the direction of the edge).
  - `face_points`: for all faces of `s`, the list of new points in this face,
-as indices in `vertices(s)`∪ {new points}.
+
+Point indices are returned as indices in `vertices(s)` ∪ {new points}.
 
 """
-function self_intersect(s::TriangulatedSurface)
+function self_intersect(s::AbstractTriangulatedSurface)
 	println("incidence...")
 	inc = incidence(s; vf=false) # we only need edge_faces
 	println("planes...")
 	# we precompute all planes: we need them later for edge intersections
-	planes = [ supporting_plane(triangle(s, i)) for i in eachindex(faces(s)) ]
+	planes = [ supporting_plane(Triangle(s, i)) for i in eachindex(faces(s)) ]
 
 	n = nvertices(s)
 # 	println("self_intersect: $n points at beginning")
@@ -3008,13 +3152,15 @@ function self_intersect(s::TriangulatedSurface)
 		face_points = face_points)
 end
 # Sub-triangulation««2
+# FIXME: after [ZGZJ], this should be done in *clusters* of coplanar
+# faces, so as to ensure compatible triangulation in exceptional cases.
 """
-    subtriangulate(s::TriangulatedSurface)
+    subtriangulate(s::AbstractTriangulatedSurface)
 
 Returns a refined triangulation of `s` with vertices at all
 self-intersection points.
 """
-function subtriangulate(s::TriangulatedSurface)
+function subtriangulate(s::AbstractTriangulatedSurface)
 	println("self-intersect...")
 	self_int = self_intersect(s)
 	println("subtriangulate...")
@@ -3068,9 +3214,107 @@ function subtriangulate(s::TriangulatedSurface)
 		end
 	end
 	newfaces = newfaces[keep]
-	return TriangulatedSurface(newpoints, newfaces, s.∞)
+	return TriangulatedSurface(newpoints, newfaces)
 end
 
+# Splitting into cells««2
+"""
+    edgewise_connected_components(s)
+
+Returns a tuple `(components, label)`.
+ - `components[c]` is the list of face indexes in `c`-th connected comp.
+ - `label[i] = c` is the component to which faced `i` belongs.
+"""
+function edgewise_connected_components(s::TriangulatedSurface,
+		conn = incidence(s))
+	label = [0 for _ in eachindex(faces(s))]
+	components = Vector{Int}[]
+	visit = Int[]
+	@inline function mark_face(i, n)
+		label[i] = n; push!(components[n], i)
+		push!(visit, i)
+	end
+	for (i, f) in pairs(faces(s))
+		if !iszero(label[i]) continue; end
+		push!(components, Int[]); n = length(components)
+		mark_face(i, n)
+		while !isempty(visit)
+			i = pop!(visit)
+			for j in conn.faces[i]
+				if !iszero(label[j]) continue; end
+				mark_face(j, n)
+			end
+		end
+	end
+	return (components=components, label=label)
+end
+struct FaceEdgesIterator{T}
+	vertices::T
+end
+function iterate(itr::FaceEdgesIterator, s::Int = 1)
+	s > length(itr.vertices) && return nothing
+	(e1, e2) = itr.vertices[[s, mod1(s+1, length(itr.vertices))]]
+	return (e1 < e2 ? SA[e1, e2] : SA[e2, e1], s+1)
+end
+@inline length(itr::FaceEdgesIterator) = length(itr.vertices)
+"""
+    face_edges(f)
+
+Returns a list of edges bordering this face, in standard form.
+"""
+@inline face_edges(f) = FaceEdgesIterator(f)
+"""
+    regular_components(s)
+
+Returns a named tuple `(components, label, adjacency)` describing the partition of the surface in manifold patches.
+
+ - `components`: vector of faces in this regular component.
+ - `label`: label assignment (as an index in `components`) for each face.
+ - `adjacency`: for each pair of adjacent components, one of the adjacent edges.
+"""
+function regular_components(s::TriangulatedSurface,
+		conn = incidence(s))
+	label = [0 for _ in eachindex(faces(s))]
+	components = Vector{Int}[]
+	visit = Int[]
+	adjacency = zeros(SVector{2,Int},0,0)
+	@inline function mark_face(i, n)
+		println("   (marking face $i=$(faces(s)[i]) as $n)")
+		label[i] = n; push!(components[n], i)
+		push!(visit, i)
+	end
+	for (i₀, f₀) in pairs(faces(s))
+		if !iszero(label[i₀]) continue; end
+		push!(components, Int[]); n = length(components)
+		adjacency = let new_adjacency = similar(adjacency, n, n)
+			new_adjacency[1:n-1,1:n-1] .= adjacency
+			fill!(view(new_adjacency, n, :), SA[0,0])
+			fill!(view(new_adjacency, 1:n-1, n), SA[0,0])
+			new_adjacency
+		end
+		mark_face(i₀, n)
+		while !isempty(visit)
+			i = pop!(visit); f = faces(s)[i]
+			println(collect(face_edges(f)))
+			for e in face_edges(f)
+				println("  adjacent edge $e")
+				adj = filter(!isequal(i), abs.(conn.edge_faces[e]))
+				println("  faces = $adj")
+				if length(adj) == 1
+					# regular edge: 2 adjacent faces. One is f, mark the other.
+					iszero(label[adj[1]]) && mark_face(adj[1], n)
+				else # singular edge
+				# populate adjacency matrix
+					for g in adj
+						l = label[g]
+						iszero(l) || (adjacency[l,n] = adjacency[n,l] = e)
+					end
+				end
+			end
+		end
+	end
+	return (components=components, label=label, adjacency=adjacency)
+end
 # Multiplicity marking««2
 function multiplicities(s::TriangulatedSurface)
 	inc = incidence(s; vf=false) # vf, ef, ff
@@ -3092,7 +3336,7 @@ function multiplicities(s::TriangulatedSurface)
 		# this ray is pointing outward, so we need to count the face
 		# dirty hack: we count only those faces with number ≥ index of this
 		# one, so that identical faces will get differing multiplicity count.
-		n = s.∞+intersections(ray, s, first(l))
+		n = intersections(ray, s, first(l))
 		println("regular component $i = $l has multiplicity $n")
 		multiplicity[i] = n
 	end
@@ -3424,9 +3668,9 @@ function (S::Type{<:AbstractSurface})(s::AffineTransform, parameters...)
 	b = sign(s.data)
 	@assert b ≠ 0 "Only invertible linear transforms are supported (for now)"
 	if b > 0
-		return (typeof(g))(s.data.(vertices(g)), faces(g), g.∞)
+		return (typeof(g))(s.data.(vertices(g)), faces(g))
 	else
-		return (typeof(g))(s.data.(vertices(g)), reverse.(faces(g)), g.∞)
+		return (typeof(g))(s.data.(vertices(g)), reverse.(faces(g)))
 	end
 end
 @inline (S::Type{<:AbstractSurface})(s::SetParameters, parameters...) =
@@ -3445,7 +3689,7 @@ function (S::Type{<:AbstractSurface})(s::CSGInter{3}, parameters...)
 end
 function (S::Type{<:AbstractSurface})(s::CSGComplement{3}, parameters...)
 	t = S(s.children[1], parameters...)
-	return (typeof(t))(vertices(t), reverse.(faces(t)), 1-t.∞)
+	return (typeof(t))(vertices(t), reverse.(faces(t)))
 end
 function (S::Type{<:AbstractSurface})(s::CSGDiff{3}, parameters...)
 	return S(intersect(s.children[1], complement(s.children[2])),
