@@ -1,5 +1,10 @@
 # Immediate work
- - do something smart for triangle intersections
+ - a common name for meshing objects (either `Mesh` or `elements` ?)
+   => **realize**
+ - try 2 strategies for n-ary intersection/union:
+   - merge all structures and compute multiplicity with ray-shooting,
+	 - or reduce with binary op
+ + do something smart for triangle intersections
    and on-the-fly retriangulation
  - check using vs. import
  - populate export list
@@ -10,19 +15,6 @@
  - use `Meshes.jl`
   - make it work with `Makie` and `MeshIO`
   - and suggest a few upstream PR.
- + clarify complements:
-  + (if everything bounded) ∞ has multiplicity 1
-	+ add a “m∞” field in TriangulatedSurface to count this?
- + intersection and union: ray-shooting (it is possible even within the
-	 merged structure)
-   + force-remove opposite faces (neither ∪ nor ∩)
-	 + check if it works for complement
- - a common name for meshing objects (either `Mesh` or `elements` ?)
-   => **realize**
- - ensure that ray-shooting never hits edges
- - try 2 strategies for n-ary intersection/union:
-   - merge all structures and compute multiplicity with ray-shooting,
-	 - or reduce with binary op
  * test suite
  - what to do for polygons with holes?
    - look in `Makie`

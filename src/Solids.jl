@@ -225,18 +225,6 @@ function findextrema(itr; lt=isless)
   return (min=(m, mi), max=(M, Mi))
 end
 
-# RowIterator««2
-struct RowIterator{T,M,V} <: AbstractVector{V}
-  mat::M
-end
-@inline RowIterator{T,M}(A::Matrix) where{T,M} = RowIterator{T,M,Vector{T}}(A)
-@inline RowIterator(A::AbstractMatrix) = RowIterator{eltype(A),typeof(A)}(A)
-@inline RowIterator{T,M}(A::SMatrix) where{T,M} =
-	RowIterator{T,M,SVector{Size(A)[1],T}}(A)
-@inline rows(A::AbstractMatrix) = RowIterator(A)
-@inline getindex(r::RowIterator, i::Integer) = view(r.mat,i,:)
-@inline size(r::RowIterator) = (size(r.mat, 1),)
-
 # small determinants««2
 
 # 2-dimensional determinant, useful for computing orientation
@@ -2001,22 +1989,27 @@ evaluates to a true value. Points are renamed.
 """
 function select_faces(list::AbstractVector{<:Integer}, s::AbstractSurface)
 	renum = fill(0, eachindex(vertices(s)))
-	newfaces = Int[]
+	newfaces = SVector{3,Int}[]
 	newpoints = similar(vertices(s))
 	n = 0
 	for i in list
-		for p in faces(s)[i]
+		if i > 0
+			f = faces(s)[i]
+		else
+			f = reverse(faces(s)[-i])
+		end
+		for p in f
 			if renum[p] == 0
 				renum[p] = (n+= 1)
 				newpoints[n] = vertices(s)[p]
 			end
 		end
-		push!(newfaces, i)
+		push!(newfaces, renum[f])
 	end
 	resize!(newpoints, n)
 	return (typeof(s))(
 		newpoints,
-		[renum[faces(s)[f]] for f in newfaces])
+		remove_opposite_faces(newfaces))
 end
 @inline select_faces(test::Function, s::AbstractSurface) =
 	select_faces(filter(test,eachindex(faces(s))), s)
@@ -2966,6 +2959,7 @@ end
 # 3d union and intersection««1
 # After [Zhou, Grinspun, Zorin, Jacobson](https://dl.acm.org/doi/abs/10.1145/2897824.2925901)
 # Self-intersection««2
+# TODO: move all intersection computations to clean little functions
 """
     self_intersect(s::AbstractTriangulatedSurface)
 
@@ -3141,6 +3135,19 @@ end
 # Sub-triangulation««2
 # FIXME: after [ZGZJ], this should be done in *clusters* of coplanar
 # faces, so as to ensure compatible triangulation in exceptional cases.
+
+function remove_opposite_faces(flist)
+	keep = trues(length(flist))
+	for (i, f) in pairs(flist), j in 1:i-1
+		g = flist[j]
+		if ((g[1] == f[1] && g[2] == f[3] && g[3] == f[2])
+		  ||(g[2] == f[2] && g[1] == f[3] && g[3] == f[1])
+			||(g[3] == f[3] && g[1] == f[2] && g[2] == f[1]))
+			keep[i] = keep[j] = false
+		end
+	end
+	return flist[keep]
+end
 """
     subtriangulate(s::AbstractTriangulatedSurface)
 
@@ -3190,27 +3197,21 @@ function subtriangulate(s::AbstractTriangulatedSurface)
 # 		println("triangulation = $tri")
 		push!(newfaces, tri...)
 	end
-	# remove opposite faces:
-	keep = trues(length(newfaces))
-	for (i, f) in pairs(newfaces), j in 1:i-1
-		g = newfaces[j]
-		if ((g[1] == f[1] && g[2] == f[3] && g[3] == f[2])
-		  ||(g[2] == f[2] && g[1] == f[3] && g[3] == f[1])
-			||(g[3] == f[3] && g[1] == f[2] && g[2] == f[1]))
-			keep[i] = keep[j] = false
-		end
-	end
-	newfaces = newfaces[keep]
+
+	newfaces = remove_opposite_faces(newfaces)
 	return TriangulatedSurface(newpoints, newfaces)
 end
 
-# Splitting into cells««2
+# Splitting into regular components««2
 """
     edgewise_connected_components(s)
 
 Returns a tuple `(components, label)`.
  - `components[c]` is the list of face indexes in `c`-th connected comp.
  - `label[i] = c` is the component to which faced `i` belongs.
+
+Not used. (Working on the global structure allows us to completely
+dispense from ray tracing).
 """
 function edgewise_connected_components(s::TriangulatedSurface,
 		conn = incidence(s))
@@ -3303,6 +3304,7 @@ function regular_components(s::TriangulatedSurface,
 	return (components=components, label=label, adjacency=adjacency)
 end
 
+# Arranging into cells««2
 """
     faces_around_edge(s, edge, incidence)
 
@@ -3347,22 +3349,57 @@ function faces_around_edge(s::AbstractTriangulatedSurface,
 	return flist[reorder]
 end
 
+# Computing multiplicities««2
 """
-    adjacency_cell_graph(adj, reg)
+    cell_multiplicities(cells, boundary)
 
-Given the adjacency matrix `m` of regular components,
-returns the bipartite graph of cells and regular components.
-## Input
- - `reg` structure of regular components.
-
-## Output
- - `cells`: for each regular component, the pair (cell above, cell below).
- - `boundary`: for each cell, a list of regular components located
- either above or below this cell
- (this information is encoded in the sign of the component).
+Given the incidence graph between cells and regular components,
+compute the multiplicity of each cell.
 """
-function cell_graph(s::AbstractTriangulatedSurface, reg,
-		conn = incidence(s))
+function cell_multiplicities(cells, boundary)
+	multiplicity = [ typemin(0) for _ in boundary ]
+	multiplicity[1] = 0; visit = [1]
+	min_mul = max_mul = multiplicity[1]
+	while !isempty(visit)
+		i = pop!(visit)
+		for c in boundary[i] # boundary components
+# 			println(" from cell $i visiting component $c")
+			if c > 0 # outgoing from i
+				j = cells[c,2]
+				if multiplicity[j] == typemin(0)
+					multiplicity[j] = multiplicity[i] - 1
+					(multiplicity[j] < min_mul) && (min_mul = multiplicity[j])
+					push!(visit, j)
+				end
+			else
+				j = cells[-c,1]
+				if multiplicity[j] == typemin(0)
+					multiplicity[j] = multiplicity[i] + 1
+					(multiplicity[j] > max_mul) && (max_mul = multiplicity[j])
+					push!(visit, j)
+				end
+			end
+		end
+	end
+	return (multiplicity .- min_mul, max_mul .- min_mul)
+end
+
+"""
+    multiplicity_levels(s)
+
+Given a triangulated surface `s`,
+returns the set of level surfaces enclosing each multiplicity component
+of `s`.
+"""
+function multiplicity_levels(s::AbstractTriangulatedSurface)
+	conn = incidence(s)
+	reg = regular_components(s, conn)
+	# The two next variables encode the bipartite graph of cells and
+	# regular components:
+	#  - `cells`: for each regular component, the pair (cell above, cell below)
+	#  - `boundary`: for each cell, a list of regular components located
+	#  either above or below this cell
+	#  (this information is encoded in the sign of the component).
 	cells = zeros(Int, length(reg.components), 2)
 	boundary = Set{Int}[]
 	# if face f has no cell attached: attach it (and return c)
@@ -3414,157 +3451,56 @@ function cell_graph(s::AbstractTriangulatedSurface, reg,
 		end
 # 		i1 >= 3 && return (cells=cells, boundary=boundary)
 	end
-	return (cells=cells, boundary=boundary)
+
+	(multiplicity, max_mul) = cell_multiplicities(cells, boundary)
+
+	# cell_idx[i] = indices of cells forming region i
+	cell_idx = [ filter(i->multiplicity[i] == m, eachindex(boundary))
+		for m in 0:max_mul ]
+	# comp_idx[i] = indices of (oriented) regular components bounding
+	# region i
+	comp_idx = [ collect(union(boundary[x]...)) for x in cell_idx]
+	# face_idx[i] = indices of (oriented) faces bounding region i
+	face_idx = [ union([ c > 0 ? reg.components[c] : .-reg.components[-c]
+		for c in comp ]...) for comp in comp_idx ]
+	global G = (
+		components = reg.components,
+		cells = cells,
+		boundary = boundary,
+		multiplicity = multiplicity,
+		comp_idx = comp_idx,
+		face_idx = face_idx,
+	)
+
+	return face_idx
+end
+# Binary union and intersection««2
+function extract_components(fn, face_idx)
+	kept = [ fn(m-1) for m in eachindex(face_idx) ]
+	regc = Int[]
+	for m in 1:length(kept)-1
+		if kept[m] && !kept[m+1]
+			# e.g. xor: 1 kept, 2 not kept
+			# we add *inverted* components of m
+			push!(regc, filter(x->x < 0, face_idx[m])...)
+		elseif !kept[m] && kept[m+1]
+			# e.g. union: 1 not kept, 2 kept
+			# we add *direct* components of multiplicity m+1
+			push!(regc, filter(x->x > 0, face_idx[m+1])...)
+		end
+	end
+	return regc
+	# faces outer-bounding
+	# cells[i] = [cell inside patch i, cell outside patch i]
 end
 
-# # Multiplicity marking««2
-# function multiplicities(s::TriangulatedSurface)
-# 	inc = incidence(s; vf=false) # vf, ef, ff
-# 	# compute regular components: multiplicity is constant on these
-# 	cc = regular_components(s; edge_faces=inc.edge_faces)
-# 	face_cc = Vector{Int}(undef, nfaces(s))
-# # 	for (i, l) in pairs(cc), j in l face_cc[j] = i; end
-# 	T = real_type(coordtype(s))
-# 
-# 	multiplicity = Vector{Int}(undef, length(cc))
-# 	for (i, l) in pairs(cc)
-# 		# pick first face, shoot ray
-# 		f = faces(s)[first(l)]
-# 		println("using face $f")
-# 		origin = barycenter(vertices(s)[f]...)
-# 		direction = face_normal(vertices(s)[f])
-# 		direction+= norm(direction)*convert.(T, randn(SVector{3}))/2
-# 		ray = AffineRay(origin, direction)
-# 		# this ray is pointing outward, so we need to count the face
-# 		# dirty hack: we count only those faces with number ≥ index of this
-# 		# one, so that identical faces will get differing multiplicity count.
-# 		n = intersections(ray, s, first(l))
-# 		println("regular component $i = $l has multiplicity $n")
-# 		multiplicity[i] = n
-# 	end
-# 	return (components=cc, multiplicity=multiplicity)
-# end
-# function select_multiplicity(f::Function, s::TriangulatedSurface...)
-# 	t = subtriangulate(merge(s...))
-# 	(cc, m) = multiplicities(t)
-# 	flist = vcat(cc[f.(m)]...)
-# 	return select_faces(flist, t)
-# end
-# # # mark_multiplicity««
-# # """
-# #     mark_multiplicity(s1::TriangulatedSurface, s2::TriangulatedSurface)
-# # 
-# # After [Barki, Guennebaud, Foufou] https://hal.archives-ouvertes.fr/hal-01203173/
-# # """
-# # function mark_multiplicity(s1::TriangulatedSurface, s2::TriangulatedSurface)
-# # 	s = subtriangulate(merge(s1, s2))
-# # 	global G=s; explain(s, "/tmp/s.scad", scale=10)
-# # 	# since ∪ and ∩ are commutative, we don't need to know the origin of
-# # 	# the faces, and merging the two triangulations at this stage will make
-# # 	# indexing much simpler (e.g. no need to renumber vertices, etc.).
-# # 	# Note that this does not remove duplicate faces; this is on purpose
-# # 	# (the inside of a duplicate face is automatically ∩):
-# # # 	println("merged: $(nvertices(s1)) + $(nvertices(s2)) => $(nvertices(s))")
-# # 	inc = incidence(s; vf=false) # vf, ef, ff
-# # 
-# # 	# mark[f] holds the type of face f, coded as: -1=unknown;
-# # 	# 0 = to be removed; 1=union; 2=inter; etc.
-# # 	mark = fill(-1, nfaces(s))
-# # 	nmarked = 0
-# # 	@inline setmark!(c, k) = begin#««
-# # 		if mark[c] == -1 
-# # 		println("    \e[32mmarking face($c)$(faces(s)[c]) = $k\e[m")
-# # 			nmarked+= 1
-# # 			mark[c] = k
-# # 			end
-# # 	end#»»
-# #   # mark faces around each edge««
-# # 	for (e, flist) in pairs(inc.edge_faces)
-# # 		println("examining $e = $flist $(faces(s)[abs.(flist)])")
-# # 		# e is a pair of indices in vertices(s),
-# # 		# flist a vector of faces touching this edge
-# # 		# we look only for edges where the two surfaces intersect:
-# # 		if length(flist) ≤ 2; continue; end
-# # 
-# # 		# for each adjacent face, compute a (3d) vector which, together with
-# # 		# the edge, generates the face (and pointing from the edge to the face):
-# # 		face_vec3 = begin
-# # 			face_pt3 = [sum(faces(s)[abs(f)]) - sum(e) for f in flist]
-# # 			pt = vertices(s)
-# # 		[ pt[i] - pt[e[2]] for i in face_pt3 ]
-# # 		end
-# # 		# we project these faces on the plane perpendicular to edge e;
-# # 		# the eye is at position e[2] looking towards e[1].
-# # 		face_vec2 = begin # 2d projection of face_vec3 (preserving orientation)
-# # 			dir3 = vertices(s)[e[2]]-vertices(s)[e[1]]
-# # 			(proj, k) = project_2d(dir3, Val(true))
-# # 			dir2 = dir3[proj]
-# # 			dir2scaled = dir2/norm2(dir3)
-# # 		[ v[proj] - (v ⋅ dir3)*dir2scaled for v in face_vec3 ]
-# # 		end
-# # 		reorder = sort(eachindex(flist); by=i->face_vec2[i], lt=circular_lt)
-# # 
-# # 		println("\e[1medge $e:\e[m")
-# # 		for i in eachindex(flist)
-# # 			f = abs(flist[i])
-# # 			println("  face $(flist[i]) = $(faces(s)[f])")
-# # 			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
-# # 		end
-# # 		println("  reorder=$reorder to $(flist[reorder])")
-# # 
-# # 		for (i, r1) in pairs(reorder)
-# # 			r2 = reorder[mod1(i+1, length(reorder))] # next face
-# # 			(f1, f2) = flist[[r1, r2]] # two consecutive face numbers
-# # 			if f1 > 0 && f2 > 0
-# # 				setmark!(f1, 2); setmark!(f2, 1)
-# # 			end
-# # 			if f1 < 0 && f2 < 0
-# # 				setmark!(-f1, 1); setmark!(-f2, 2)
-# # 			end
-# # 		end
-# # 	end
-# # 	#»»
-# # 	# propagate marks on adjacent faces««
-# # 	function propagate!(data, mat)
-# # 		c = nmarked
-# # 		for (f, adj) in pairs(mat), g in adj
-# # 			if(data[f] != -1)
-# # 				setmark!(g, data[f])
-# # 			end
-# # 		end
-# # 		return nmarked - c
-# # 	end
-# # 
-# # 	while(propagate!(mark, inc.faces) > 0); end#»»
-# # 	# ray-shooting to finish««
-# # 	while nmarked < nfaces(s)
-# # 		unmarked = 0
-# # 		# find unmarked face
-# # 		for i in eachindex(faces(s))
-# # 			if mark[i] == -1 unmarked = i; break; end
-# # 		end
-# # 		# center of mass
-# # 		@assert unmarked > 0
-# # 		f = faces(s)[unmarked]
-# # # 		println("found unmarked face $unmarked = $f")
-# # # 		println("  triangle is $(vertices(s)[f])")
-# # 		T = real_type(coordtype(s))
-# # 		c = barycenter(vertices(s)[f]...)
-# # # 		println("  center of mass is $c")
-# # 		# and direction of ray
-# # 		# we take the outer normal vector
-# # 		# and perturbate it to avoid edges
-# # 		v = face_normal(vertices(s)[f])
-# # 		v+= norm(v)* convert.(T, randn(SVector{3}))/2
-# # # 		println("  direction of ray: $v")
-# # 		ray = AffineRay(c, v)
-# # 		# FIXME: this should abort if we encounter any *edge*
-# # 		setmark!(unmarked, 1 + intersections(ray, s))
-# # 		while propagate!(mark, inc.faces) > 0; end
-# # 	end#»»
-# # 
-# # 	return (triangulation = s, mark = mark)
-# # end#»»
+function select_multiplicity(fn, s::AbstractTriangulatedSurface...)
+	t = subtriangulate(merge(s...))
+	face_idx = multiplicity_levels(t)
+	newfaces = extract_components(fn, face_idx)
+	return select_faces(newfaces, t)
+end
+
 # Extrusion ««1
 # Path extrusion ««2
 # triangulate_between: triangulate between two parallel paths««
@@ -3867,17 +3803,17 @@ translate($scale*$(p.coords)) {
 	color("black", .8) linear_extrude(1) text(\"$i\", size=5);
 }""")
 	end
-	println(io, "color(\"cyan\", .5) polyhedron([")
+	println(io, "color(\"gray\", .7) polyhedron([")
 	b = false
 	for p in Solids.vertices(s)
-		println(io, b ? "," : ""); b = true
+		print(io, b ? "," : ""); b = true
 		print(io, " $scale*",Vector{Float64}(coordinates(p)))
 	end
 	println(io, "],[")
 	b = false
 	for f in Solids.faces(s)
-		println(io, b ? "," : ""); b = true
-		println(io, " ", Vector{Int}(f) .- 1)
+		print(io, b ? "," : ""); b = true
+		println(io, " ", Vector{Int}(f) .- 1, " //", Vector{Int}(f))
 	end
 	println(io, "]); }")
 end
