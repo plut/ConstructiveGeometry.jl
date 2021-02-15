@@ -8,6 +8,7 @@ using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers
 using SparseArrays
+using Dictionaries
 
 module AbstractMeshes
 	using Meshes
@@ -248,37 +249,6 @@ end
 	det3(p2-p1, p3-p1, p4-p1)
 # @inline det3(v1, v2, v3) = det([v1 v2 v3])
 # @inline det3(p1, p2, p3, p4) = det3(p2-p1, p3-p1, p4-p1)
-# IndexedView««2
-# Dictionary does not cut it: no dict[SA[1,2,3]]
-# Nor does Iterators.Pairs: collect() returns set of pairs
-struct IndexedView{T,X,Y}
-	array::X # <: AbstractArray{T}
-	keys::Y # <: AbstractArray{?,N}
-end
-@inline eltype(a::IndexedView) = eltype(a.array)
-@inline ndims(a::IndexedView) = ndims(keys(a))
-@inline Base.keys(a::IndexedView) = a.keys
-@inline Base.length(a::IndexedView) = length(keys(a))
-@inline function Base.getindex(a::IndexedView, i)
-	@assert all(x->x ∈ keys(a), i)
-	return getindex(a.array, i)
-end
-@inline function Base.setindex!(a::IndexedView, x, i)
-	@assert all(x->x ∈ keys(a), i)
-	return setindex!(a.array, x, i)
-end
-@inline function iterate(a::IndexedView, args...)
-	t = iterate(a.keys, args...)
-	t == nothing && return t
-	return (a.array[t[1]], t[2])
-end
-@inline Base.pairs(a::IndexedView) =Iterators.Pairs(a.array, a.keys)
-@inline indexedview(a, indices) =
-	IndexedView{eltype(a),typeof(a),typeof(indices)}(a, indices)
-# idempotence:
-@inline indexedview(a::IndexedView, indices) = indexedview(a.array, indices)
-	
-
 # Geometry ««1
 # Some reasons not to use `GeometryBasics.jl`:
 # - (as of 2021-01-14) not documented
@@ -2784,6 +2754,23 @@ Circular comparison of vectors, sorted according to their angle in
 	end
 	return det2(p, q) > 0
 end
+"""
+    circular_sign(u,v)
+
+Let `α` and `β` be the angles of `u`,`v` in ]-π, π].
+This function returns a number <0 iff `α` < `β`, >0 iff `α` > `β`,
+and `0` iff `α` == `β`.
+"""
+@inline function circular_sign(u, v)
+	if u[2] < 0
+		v[2] ≥ 0 && return -1
+	else
+		v[2] < 0 && return 1
+	end
+	return det2(u, v)
+end
+
+
 
 # Using a Box as a bounding box««2
 @inline ∈(x::AbstractVector, b::Box) = all(b.min.coords .≤ x .≤ b.max.coords)
@@ -3279,7 +3266,7 @@ function regular_components(s::TriangulatedSurface,
 	visit = Int[]
 	adjacency = zeros(SVector{2,Int},0,0)
 	@inline function mark_face(i, n)
-		println("   (marking face $i=$(faces(s)[i]) as $n)")
+# 		println("   (marking face $i=$(faces(s)[i]) as $n)")
 		label[i] = n; push!(components[n], i)
 		push!(visit, i)
 	end
@@ -3295,11 +3282,11 @@ function regular_components(s::TriangulatedSurface,
 		mark_face(i₀, n)
 		while !isempty(visit)
 			i = pop!(visit); f = faces(s)[i]
-			println(collect(face_edges(f)))
+# 			println(collect(face_edges(f)))
 			for e in face_edges(f)
-				println("  adjacent edge $e")
+# 				println("  adjacent edge $e")
 				adj = filter(!isequal(i), abs.(conn.edge_faces[e]))
-				println("  faces = $adj")
+# 				println("  faces = $adj")
 				if length(adj) == 1
 					# regular edge: 2 adjacent faces. One is f, mark the other.
 					iszero(label[adj[1]]) && mark_face(adj[1], n)
@@ -3315,154 +3302,269 @@ function regular_components(s::TriangulatedSurface,
 	end
 	return (components=components, label=label, adjacency=adjacency)
 end
-# Multiplicity marking««2
-function multiplicities(s::TriangulatedSurface)
-	inc = incidence(s; vf=false) # vf, ef, ff
-	# compute regular components: multiplicity is constant on these
-	cc = regular_components(s; edge_faces=inc.edge_faces)
-	face_cc = Vector{Int}(undef, nfaces(s))
-# 	for (i, l) in pairs(cc), j in l face_cc[j] = i; end
-	T = real_type(coordtype(s))
 
-	multiplicity = Vector{Int}(undef, length(cc))
-	for (i, l) in pairs(cc)
-		# pick first face, shoot ray
-		f = faces(s)[first(l)]
-		println("using face $f")
-		origin = barycenter(vertices(s)[f]...)
-		direction = face_normal(vertices(s)[f])
-		direction+= norm(direction)*convert.(T, randn(SVector{3}))/2
-		ray = AffineRay(origin, direction)
-		# this ray is pointing outward, so we need to count the face
-		# dirty hack: we count only those faces with number ≥ index of this
-		# one, so that identical faces will get differing multiplicity count.
-		n = intersections(ray, s, first(l))
-		println("regular component $i = $l has multiplicity $n")
-		multiplicity[i] = n
+"""
+    faces_around_edge(s, edge, incidence)
+
+Returns a cyclically ordered list of all faces of `s` around edge `e`,
+with sign indicating the orientation of the face. (The list starts at an arbitrary index).
+"""
+function faces_around_edge(s::AbstractTriangulatedSurface,
+	edge, conn = incidence(s))
+	# we project the faces on the plane perpendicular to edge e;
+	# the eye is at position e[2] looking towards e[1].
+	dir3 = vertices(s)[edge[2]]-vertices(s)[edge[1]]
+	(proj, k) = project_2d(dir3, Val(true))
+	dir2 = dir3[proj]
+	dir2scaled = dir2/norm2(dir3)
+	flist = conn.edge_faces[edge]
+	# for each adjacent face, compute a (3d) vector which, together with
+	# the edge, generates the face (and pointing from the edge to the face):
+	# 2d projection of face_vec3 (preserving orientation)
+	face_vec2 = begin
+		face_pt3 = [sum(faces(s)[abs(f)]) - sum(edge) for f in flist]
+		face_vec3 = [ vertices(s)[p] - vertices(s)[edge[2]] for p in face_pt3 ]
+		[ v[proj] - (v ⋅ dir3)*dir2scaled for v in face_vec3 ]
 	end
-	return (components=cc, multiplicity=multiplicity)
+	reorder = sort(eachindex(flist);
+		lt=(i, j) -> let b = circular_sign(face_vec2[i], face_vec2[j])
+			if !iszero(b) return (b > 0)
+			# the use of **signed** face numbers guarantees consistent ordering
+			# even if two faces are adjacent on two edges with reversed
+			# orientations
+			else return flist[i] < flist[j]
+			end end)
+
+# 	println("\e[1medge $edge:\e[m proj=$proj")
+# 	for i in eachindex(flist)
+# 		f = abs(flist[i])
+# 		println("  face $(flist[i]) = $(faces(s)[f]), vec=$(face_vec2[i])")
+# # 		println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
+# 	end
+# 	for (i, f) in pairs(flist[reorder])
+# 		println("  $i: face $f = $(faces(s)[abs(f)])")
+# 	end
+	return flist[reorder]
 end
-function select_multiplicity(f::Function, s::TriangulatedSurface...)
-	t = subtriangulate(merge(s...))
-	(cc, m) = multiplicities(t)
-	flist = vcat(cc[f.(m)]...)
-	return select_faces(flist, t)
+
+"""
+    adjacency_cell_graph(adj, reg)
+
+Given the adjacency matrix `m` of regular components,
+returns the bipartite graph of cells and regular components.
+## Input
+ - `reg` structure of regular components.
+
+## Output
+ - `cells`: for each regular component, the pair (cell above, cell below).
+ - `boundary`: for each cell, a list of regular components located
+ either above or below this cell
+ (this information is encoded in the sign of the component).
+"""
+function cell_graph(s::AbstractTriangulatedSurface, reg,
+		conn = incidence(s))
+	cells = zeros(Int, length(reg.components), 2)
+	boundary = Set{Int}[]
+	# if face f has no cell attached: attach it (and return c)
+	# otherwise: merges cell c with already-attached cell (return its id)
+	@inline function attach_cell_face(c, f)
+		comp = reg.label[abs(f)] # ID of regular component
+		u = f > 0 ? 1 : 2
+# 		println("attaching cell $c to face $f=$(faces(s)[abs(f)]), component $comp")
+# 		println("  there exists currently $(length(boundary)) cells")
+# 		println("  current boundary of component: $(cells[comp,:])")
+		if iszero(cells[comp,u]) || cells[comp,u] == c
+			cells[comp,u] = c
+		else
+			(c, n) = minmax(c, cells[comp,u])
+# 			println("    merging cell $n =$(boundary[n]) into cell $c = $(boundary[c])")
+			boundary[c] = union(boundary[c], boundary[n])
+			replace!(cells, n => c)
+			deleteat!(boundary, n)
+		end
+		@assert cells[comp,1] != cells[comp,2]
+# 		println("    now cells[$comp] = $(cells[comp,:])")
+# 		println("    attaching component $(sign(f)*comp) to cell $c")
+# 		println("before: $(boundary[1])")
+		push!(boundary[c], sign(f) * comp)
+# 		c == 1 && print("\e[31;1m")
+# 		println("    boundary[$c] = $(boundary[c])")
+# 		c==1 && print("\e[m")
+# 		println("\e[36m# $(boundary[1])\e[m")
+		return c
+	end
+	for (i1, r1) in pairs(reg.components)
+# 		println("** component ($i1, $r1)")
+		for i2 in 1:i1-1
+		edge = reg.adjacency[i1,i2]
+# 		println("\e[1;4medge = $edge\e[m")
+		iszero(edge) && continue
+		r2 = reg.components[i2]
+# 		println("regular components $i1=$r1 and $i2=$r2 meet at edge $edge")
+		flist = faces_around_edge(s, edge, conn)
+# 		println("   ordered faces at this edge: $flist, vertices=$([sum(faces(s)[abs.(f)])-sum(edge) for f in flist])")
+		for (j, f) in pairs(flist)
+			j1 = mod1(j+1, length(flist)); f1 = flist[j1]
+			# create cell between faces f and f1
+			push!(boundary, Set{Int}()); c = length(boundary)
+			c = attach_cell_face(c, -f)
+			c = attach_cell_face(c, f1)
+# 			println("\e[32m$(cells[1,:])\e[m")
+		end
+		end
+# 		i1 >= 3 && return (cells=cells, boundary=boundary)
+	end
+	return (cells=cells, boundary=boundary)
 end
-# # mark_multiplicity««
-# """
-#     mark_multiplicity(s1::TriangulatedSurface, s2::TriangulatedSurface)
-# 
-# After [Barki, Guennebaud, Foufou] https://hal.archives-ouvertes.fr/hal-01203173/
-# """
-# function mark_multiplicity(s1::TriangulatedSurface, s2::TriangulatedSurface)
-# 	s = subtriangulate(merge(s1, s2))
-# 	global G=s; explain(s, "/tmp/s.scad", scale=10)
-# 	# since ∪ and ∩ are commutative, we don't need to know the origin of
-# 	# the faces, and merging the two triangulations at this stage will make
-# 	# indexing much simpler (e.g. no need to renumber vertices, etc.).
-# 	# Note that this does not remove duplicate faces; this is on purpose
-# 	# (the inside of a duplicate face is automatically ∩):
-# # 	println("merged: $(nvertices(s1)) + $(nvertices(s2)) => $(nvertices(s))")
+
+# # Multiplicity marking««2
+# function multiplicities(s::TriangulatedSurface)
 # 	inc = incidence(s; vf=false) # vf, ef, ff
+# 	# compute regular components: multiplicity is constant on these
+# 	cc = regular_components(s; edge_faces=inc.edge_faces)
+# 	face_cc = Vector{Int}(undef, nfaces(s))
+# # 	for (i, l) in pairs(cc), j in l face_cc[j] = i; end
+# 	T = real_type(coordtype(s))
 # 
-# 	# mark[f] holds the type of face f, coded as: -1=unknown;
-# 	# 0 = to be removed; 1=union; 2=inter; etc.
-# 	mark = fill(-1, nfaces(s))
-# 	nmarked = 0
-# 	@inline setmark!(c, k) = begin#««
-# 		if mark[c] == -1 
-# 		println("    \e[32mmarking face($c)$(faces(s)[c]) = $k\e[m")
-# 			nmarked+= 1
-# 			mark[c] = k
-# 			end
-# 	end#»»
-#   # mark faces around each edge««
-# 	for (e, flist) in pairs(inc.edge_faces)
-# 		println("examining $e = $flist $(faces(s)[abs.(flist)])")
-# 		# e is a pair of indices in vertices(s),
-# 		# flist a vector of faces touching this edge
-# 		# we look only for edges where the two surfaces intersect:
-# 		if length(flist) ≤ 2; continue; end
-# 
-# 		# for each adjacent face, compute a (3d) vector which, together with
-# 		# the edge, generates the face (and pointing from the edge to the face):
-# 		face_vec3 = begin
-# 			face_pt3 = [sum(faces(s)[abs(f)]) - sum(e) for f in flist]
-# 			pt = vertices(s)
-# 		[ pt[i] - pt[e[2]] for i in face_pt3 ]
-# 		end
-# 		# we project these faces on the plane perpendicular to edge e;
-# 		# the eye is at position e[2] looking towards e[1].
-# 		face_vec2 = begin # 2d projection of face_vec3 (preserving orientation)
-# 			dir3 = vertices(s)[e[2]]-vertices(s)[e[1]]
-# 			(proj, k) = project_2d(dir3, Val(true))
-# 			dir2 = dir3[proj]
-# 			dir2scaled = dir2/norm2(dir3)
-# 		[ v[proj] - (v ⋅ dir3)*dir2scaled for v in face_vec3 ]
-# 		end
-# 		reorder = sort(eachindex(flist); by=i->face_vec2[i], lt=circular_lt)
-# 
-# 		println("\e[1medge $e:\e[m")
-# 		for i in eachindex(flist)
-# 			f = abs(flist[i])
-# 			println("  face $(flist[i]) = $(faces(s)[f])")
-# 			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
-# 		end
-# 		println("  reorder=$reorder to $(flist[reorder])")
-# 
-# 		for (i, r1) in pairs(reorder)
-# 			r2 = reorder[mod1(i+1, length(reorder))] # next face
-# 			(f1, f2) = flist[[r1, r2]] # two consecutive face numbers
-# 			if f1 > 0 && f2 > 0
-# 				setmark!(f1, 2); setmark!(f2, 1)
-# 			end
-# 			if f1 < 0 && f2 < 0
-# 				setmark!(-f1, 1); setmark!(-f2, 2)
-# 			end
-# 		end
+# 	multiplicity = Vector{Int}(undef, length(cc))
+# 	for (i, l) in pairs(cc)
+# 		# pick first face, shoot ray
+# 		f = faces(s)[first(l)]
+# 		println("using face $f")
+# 		origin = barycenter(vertices(s)[f]...)
+# 		direction = face_normal(vertices(s)[f])
+# 		direction+= norm(direction)*convert.(T, randn(SVector{3}))/2
+# 		ray = AffineRay(origin, direction)
+# 		# this ray is pointing outward, so we need to count the face
+# 		# dirty hack: we count only those faces with number ≥ index of this
+# 		# one, so that identical faces will get differing multiplicity count.
+# 		n = intersections(ray, s, first(l))
+# 		println("regular component $i = $l has multiplicity $n")
+# 		multiplicity[i] = n
 # 	end
-# 	#»»
-# 	# propagate marks on adjacent faces««
-# 	function propagate!(data, mat)
-# 		c = nmarked
-# 		for (f, adj) in pairs(mat), g in adj
-# 			if(data[f] != -1)
-# 				setmark!(g, data[f])
-# 			end
-# 		end
-# 		return nmarked - c
-# 	end
-# 
-# 	while(propagate!(mark, inc.faces) > 0); end#»»
-# 	# ray-shooting to finish««
-# 	while nmarked < nfaces(s)
-# 		unmarked = 0
-# 		# find unmarked face
-# 		for i in eachindex(faces(s))
-# 			if mark[i] == -1 unmarked = i; break; end
-# 		end
-# 		# center of mass
-# 		@assert unmarked > 0
-# 		f = faces(s)[unmarked]
-# # 		println("found unmarked face $unmarked = $f")
-# # 		println("  triangle is $(vertices(s)[f])")
-# 		T = real_type(coordtype(s))
-# 		c = barycenter(vertices(s)[f]...)
-# # 		println("  center of mass is $c")
-# 		# and direction of ray
-# 		# we take the outer normal vector
-# 		# and perturbate it to avoid edges
-# 		v = face_normal(vertices(s)[f])
-# 		v+= norm(v)* convert.(T, randn(SVector{3}))/2
-# # 		println("  direction of ray: $v")
-# 		ray = AffineRay(c, v)
-# 		# FIXME: this should abort if we encounter any *edge*
-# 		setmark!(unmarked, 1 + intersections(ray, s))
-# 		while propagate!(mark, inc.faces) > 0; end
-# 	end#»»
-# 
-# 	return (triangulation = s, mark = mark)
-# end#»»
+# 	return (components=cc, multiplicity=multiplicity)
+# end
+# function select_multiplicity(f::Function, s::TriangulatedSurface...)
+# 	t = subtriangulate(merge(s...))
+# 	(cc, m) = multiplicities(t)
+# 	flist = vcat(cc[f.(m)]...)
+# 	return select_faces(flist, t)
+# end
+# # # mark_multiplicity««
+# # """
+# #     mark_multiplicity(s1::TriangulatedSurface, s2::TriangulatedSurface)
+# # 
+# # After [Barki, Guennebaud, Foufou] https://hal.archives-ouvertes.fr/hal-01203173/
+# # """
+# # function mark_multiplicity(s1::TriangulatedSurface, s2::TriangulatedSurface)
+# # 	s = subtriangulate(merge(s1, s2))
+# # 	global G=s; explain(s, "/tmp/s.scad", scale=10)
+# # 	# since ∪ and ∩ are commutative, we don't need to know the origin of
+# # 	# the faces, and merging the two triangulations at this stage will make
+# # 	# indexing much simpler (e.g. no need to renumber vertices, etc.).
+# # 	# Note that this does not remove duplicate faces; this is on purpose
+# # 	# (the inside of a duplicate face is automatically ∩):
+# # # 	println("merged: $(nvertices(s1)) + $(nvertices(s2)) => $(nvertices(s))")
+# # 	inc = incidence(s; vf=false) # vf, ef, ff
+# # 
+# # 	# mark[f] holds the type of face f, coded as: -1=unknown;
+# # 	# 0 = to be removed; 1=union; 2=inter; etc.
+# # 	mark = fill(-1, nfaces(s))
+# # 	nmarked = 0
+# # 	@inline setmark!(c, k) = begin#««
+# # 		if mark[c] == -1 
+# # 		println("    \e[32mmarking face($c)$(faces(s)[c]) = $k\e[m")
+# # 			nmarked+= 1
+# # 			mark[c] = k
+# # 			end
+# # 	end#»»
+# #   # mark faces around each edge««
+# # 	for (e, flist) in pairs(inc.edge_faces)
+# # 		println("examining $e = $flist $(faces(s)[abs.(flist)])")
+# # 		# e is a pair of indices in vertices(s),
+# # 		# flist a vector of faces touching this edge
+# # 		# we look only for edges where the two surfaces intersect:
+# # 		if length(flist) ≤ 2; continue; end
+# # 
+# # 		# for each adjacent face, compute a (3d) vector which, together with
+# # 		# the edge, generates the face (and pointing from the edge to the face):
+# # 		face_vec3 = begin
+# # 			face_pt3 = [sum(faces(s)[abs(f)]) - sum(e) for f in flist]
+# # 			pt = vertices(s)
+# # 		[ pt[i] - pt[e[2]] for i in face_pt3 ]
+# # 		end
+# # 		# we project these faces on the plane perpendicular to edge e;
+# # 		# the eye is at position e[2] looking towards e[1].
+# # 		face_vec2 = begin # 2d projection of face_vec3 (preserving orientation)
+# # 			dir3 = vertices(s)[e[2]]-vertices(s)[e[1]]
+# # 			(proj, k) = project_2d(dir3, Val(true))
+# # 			dir2 = dir3[proj]
+# # 			dir2scaled = dir2/norm2(dir3)
+# # 		[ v[proj] - (v ⋅ dir3)*dir2scaled for v in face_vec3 ]
+# # 		end
+# # 		reorder = sort(eachindex(flist); by=i->face_vec2[i], lt=circular_lt)
+# # 
+# # 		println("\e[1medge $e:\e[m")
+# # 		for i in eachindex(flist)
+# # 			f = abs(flist[i])
+# # 			println("  face $(flist[i]) = $(faces(s)[f])")
+# # 			println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
+# # 		end
+# # 		println("  reorder=$reorder to $(flist[reorder])")
+# # 
+# # 		for (i, r1) in pairs(reorder)
+# # 			r2 = reorder[mod1(i+1, length(reorder))] # next face
+# # 			(f1, f2) = flist[[r1, r2]] # two consecutive face numbers
+# # 			if f1 > 0 && f2 > 0
+# # 				setmark!(f1, 2); setmark!(f2, 1)
+# # 			end
+# # 			if f1 < 0 && f2 < 0
+# # 				setmark!(-f1, 1); setmark!(-f2, 2)
+# # 			end
+# # 		end
+# # 	end
+# # 	#»»
+# # 	# propagate marks on adjacent faces««
+# # 	function propagate!(data, mat)
+# # 		c = nmarked
+# # 		for (f, adj) in pairs(mat), g in adj
+# # 			if(data[f] != -1)
+# # 				setmark!(g, data[f])
+# # 			end
+# # 		end
+# # 		return nmarked - c
+# # 	end
+# # 
+# # 	while(propagate!(mark, inc.faces) > 0); end#»»
+# # 	# ray-shooting to finish««
+# # 	while nmarked < nfaces(s)
+# # 		unmarked = 0
+# # 		# find unmarked face
+# # 		for i in eachindex(faces(s))
+# # 			if mark[i] == -1 unmarked = i; break; end
+# # 		end
+# # 		# center of mass
+# # 		@assert unmarked > 0
+# # 		f = faces(s)[unmarked]
+# # # 		println("found unmarked face $unmarked = $f")
+# # # 		println("  triangle is $(vertices(s)[f])")
+# # 		T = real_type(coordtype(s))
+# # 		c = barycenter(vertices(s)[f]...)
+# # # 		println("  center of mass is $c")
+# # 		# and direction of ray
+# # 		# we take the outer normal vector
+# # 		# and perturbate it to avoid edges
+# # 		v = face_normal(vertices(s)[f])
+# # 		v+= norm(v)* convert.(T, randn(SVector{3}))/2
+# # # 		println("  direction of ray: $v")
+# # 		ray = AffineRay(c, v)
+# # 		# FIXME: this should abort if we encounter any *edge*
+# # 		setmark!(unmarked, 1 + intersections(ray, s))
+# # 		while propagate!(mark, inc.faces) > 0; end
+# # 	end#»»
+# # 
+# # 	return (triangulation = s, mark = mark)
+# # end#»»
 # Extrusion ««1
 # Path extrusion ««2
 # triangulate_between: triangulate between two parallel paths««
