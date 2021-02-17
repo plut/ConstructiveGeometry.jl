@@ -1,9 +1,9 @@
 using Test, StaticArrays, Colors
 
 # push!(LOAD_PATH, "./src", "src")
-using Solids
-import Solids: _FIXED, Vec, Path, Point
-import Solids: from_clipper, to_clipper
+using ConstructiveGeometry
+import ConstructiveGeometry: _FIXED, Vec, Path, Point
+import ConstructiveGeometry: from_clipper, to_clipper
 
 function test_from_to(T, x)
 	return @test from_clipper(T, to_clipper(T, x)) == x
@@ -26,10 +26,10 @@ end
 end
 
 @testset "Handling of objects" begin #<<<1
-using Solids: Square, Circle
-using Solids: children
-using Solids: mult_matrix, translate, scale
-using Solids: color
+using ConstructiveGeometry: Square, Circle
+using ConstructiveGeometry: children
+using ConstructiveGeometry: mult_matrix, translate, scale
+using ConstructiveGeometry: color
 s = Square(1)
 @testset "Primitives" begin #<<<2
 @test s == Square([1,1])
@@ -50,19 +50,19 @@ s = Square(1)
 # FIXME
 end
 @testset "Extrusion" begin #<<<1
-using Solids: path_extrude, points
+using ConstructiveGeometry: path_extrude, points
 C = points(Circle(3.),(precision=.01,accuracy=1))
 c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
 @test (path_extrude(c, C)) != 0
 end
 @testset "Convex hull" begin #<<<1
-using Solids: convex_hull, convex_hull_list
+using ConstructiveGeometry: convex_hull, convex_hull_list
 P(x...) = Point(Float64.(x)...)
 CH = convex_hull([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),P(1,1,1),P(1,0,0),])
 @test Set(CH[1]) == Set([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),])
 @test length(CH[2]) ==4
 @test convex_hull_list([ P(0., 0), P(1., 1), P(-1., 1), P(.2, 2.), P(0, .8), P(-.2, .8), ]) == [1,2,4,3]
-# @test convex_hull_list(Solids.rows(SA[0. 0;1. 1;-1. 1;.2 2.;0 .8;-.2 .8])) == [1,2,4,3]
+# @test convex_hull_list(ConstructiveGeometry.rows(SA[0. 0;1. 1;-1. 1;.2 2.;0 .8;-.2 .8])) == [1,2,4,3]
 @test convex_hull_list([
 	P(-2.627798062316817, 1.075268817204301),
 	P(-0.5030257403564974, -1.720430107526882),
@@ -80,17 +80,17 @@ CH = convex_hull([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),P(1,1,1),P(1,0,0),])
 	])== [2,5,3,6,1]
 end
 @testset "Surfaces" begin #<<<1
-using Solids: connected_components, Surface, merge, select_faces
-using Solids: nvertices, nfaces
+using ConstructiveGeometry: connected_components, Surface, merge, select_faces
+using ConstructiveGeometry: nvertices, nfaces
 v=[[0,-1],[1,0],[0,1],[-1,0]]
 for j in eachindex(v), i in 1:j-1
-	@test Solids.circular_lt(v[i], v[j])
+	@test ConstructiveGeometry.circular_lt(v[i], v[j])
 end
 @test connected_components([:a, :b, :c, :d, :e], [[1,2],[1,3],[4,5]]) ==
 	[([:a, :b, :c], [[1,2],[1,3]]),
 	 ([:d, :e], [[1,2]]) ]
 function pyramid(t=[0,0,0], n=0)
-	points = Solids.Point{3}.([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
+	points = ConstructiveGeometry.Point{3}.([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
 	faces = [[4,3,2],[2,3,1],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
 	faces1 = [ f .+ n for f in faces ]
 	return Surface(points, faces1)

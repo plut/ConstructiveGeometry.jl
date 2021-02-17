@@ -1,19 +1,19 @@
 # Ideal objects
 ```@meta
-CurrentModule = Solids
+CurrentModule = ConstructiveGeometry
 ```
 
 ## Primitive solids
 
 ```@docs
-Solids.Square
-Solids.Circle
-Solids.Cube
-Solids.Cylinder
-Solids.Sphere
-Solids.Polygon
-Solids.Surface
-Solids.NeutralSolid
+ConstructiveGeometry.Square
+ConstructiveGeometry.Circle
+ConstructiveGeometry.Cube
+ConstructiveGeometry.Cylinder
+ConstructiveGeometry.Sphere
+ConstructiveGeometry.Polygon
+ConstructiveGeometry.Surface
+ConstructiveGeometry.NeutralSolid
 ```
 
 ## Transformations
@@ -28,27 +28,27 @@ The second, multiplicative form allows easy chaining of transformations:
     transform1(param1) * transform2(param2) * solid
 ```
 This form may also be applied to several solids by either wrapping them in a
-`union`, or equivalently, by applying it to a `Vector` of Solids:
+`union`, or equivalently, by applying it to a `Vector` of ConstructiveGeometry:
 ```julia
     transform(parameters) * [ solid1, solid2, ... ]
 ```
 
 ### Affine transformations
 ```@docs
-Solids.mult_matrix
-Solids.translate
-Solids.scale
-Solids.rotate
-Solids.mirror
+ConstructiveGeometry.mult_matrix
+ConstructiveGeometry.translate
+ConstructiveGeometry.scale
+ConstructiveGeometry.rotate
+ConstructiveGeometry.mirror
 ```
 
-TODO: `Solids.project`, `Solids.cut`.
+TODO: `ConstructiveGeometry.project`, `ConstructiveGeometry.cut`.
 
 ### Extrusion
 ```@docs
-Solids.linear_extrude
-Solids.rotate_extrude
-Solids.path_extrude
+ConstructiveGeometry.linear_extrude
+ConstructiveGeometry.rotate_extrude
+ConstructiveGeometry.path_extrude
 ```
 
 ### Inserting metadata
@@ -60,17 +60,17 @@ i.e. either as `transform(parameters, s...)`
 or as a product `transform(parameters) * s`.
 
 ```@docs
-Solids.color
-Solids.set_parameters
+ConstructiveGeometry.color
+ConstructiveGeometry.set_parameters
 ```
 
 ### Defining a custom transformation
 
 ## Operations
 ```@docs
-Solids.union
-Solids.intersect
-Solids.difference
-Solids.hull
-Solids.minkowski
+ConstructiveGeometry.union
+ConstructiveGeometry.intersect
+ConstructiveGeometry.difference
+ConstructiveGeometry.hull
+ConstructiveGeometry.minkowski
 ```

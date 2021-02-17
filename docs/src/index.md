@@ -1,4 +1,4 @@
-# Solids.jl Documentation
+# ConstructiveGeometry.jl Documentation
 
 !!! warning
 
@@ -13,7 +13,7 @@ This includes both geometry functions
 and a syntax describing constructive geometry.
 This syntax is inspired by OpenSCAD, but is actual Julia code:
 ```julia
-using Solids
+using ConstructiveGeometry
 
 Square(20)
 
@@ -45,8 +45,8 @@ Other planned output formats include:
 
 ## Basic example
 ```julia
-using Solids
-import Solids: Square, Circle, Surface, mult_matrix, translate, scale, color
+using ConstructiveGeometry
+import ConstructiveGeometry: Square, Circle, Surface, mult_matrix, translate, scale, color
 
 s1 = union(
   color("pink")*
@@ -65,6 +65,6 @@ Surface(s1)
 ## I/O
 
 ```@docs
-Solids.include
-Solids.scad
+ConstructiveGeometry.include
+ConstructiveGeometry.scad
 ```

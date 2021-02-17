@@ -1,4 +1,4 @@
-module Solids
+module ConstructiveGeometry
 # BUG: SA[1 2; 3 4]*HybridArray{Tuple{2,StaticArrays.Dynamic()}}[1 2; 3 4]
 # is a (dynamic) Matrix
 #
@@ -46,13 +46,13 @@ import Base: *, +, -, ∈, inv, sign, iszero
 # Numeric types ««2
 
 """
-    Solids._FIXED
+    ConstructiveGeometry._FIXED
 The type used whenever a fixed-precision real number is needed (e.g.
 when interfacing with `Clipper.jl`).
 """
 const _FIXED = Fixed{Int64,16}
 """
-    Solids._REAL
+    ConstructiveGeometry._REAL
 
 The default type used for computing coordinates (i.e. the type to which
 integers are converted). Defaults to a `Fixed` type (fixed-precision
@@ -245,19 +245,19 @@ end
 # FIXME: replace Main by caller module?
 # FIXME: add some blob to represent function arguments
 """
-		Solids.include(file::AbstractString, f::Function)
+		ConstructiveGeometry.include(file::AbstractString, f::Function)
 
-Reads given `file` and returns the union of all top-level `Solids` objects
-(except the results of assignments) found in the file.
+Reads given `file` and returns the union of all top-level `AbstractGeometry`
+objects (except the results of assignments) found in the file.
 
 ```
 #### Example: contents of file `example.jl`
-C=Solids.Cube(1)
-S=Solids.Square(1)
-Solids.Circle(3)
+C=ConstructiveGeometry.Cube(1)
+S=ConstructiveGeometry.Square(1)
+ConstructiveGeometry.Circle(3)
 S
 
-julia> Solids.include("example.jl")
+julia> ConstructiveGeometry.include("example.jl")
 union() {
  circle(radius=3.0);
  square(size=[1.0, 1.0], center=false);
@@ -285,7 +285,7 @@ Appends `x` to the global list of returned objects if `x` is a `AbstractGeometry
 """
 		expr_filter(E)
 
-Read top-level expression `E` and decides if a Solids object is returned.
+Read top-level expression `E` and decides if a ConstructiveGeometry object is returned.
 
 The function `expr_filter` transforms top-level expressions by wrapping
 each non-assignment expression inside a call to function `obj_filter`,
@@ -560,7 +560,7 @@ struct NeutralSolid{D,T} <: AbstractGeometry{D,T} end
 
 macro define_neutral(op, what, result)
 	W = QuoteNode(what)
-	F=:(Solids.$op)
+	F=:(ConstructiveGeometry.$op)
 	quote
 	@inline $F(neutral::AbstractGeometry, absorb::NeutralSolid{$W}) = $result
 	@inline $F(absorb::NeutralSolid{$W}, neutral::AbstractGeometry) = $result
@@ -689,7 +689,7 @@ symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
 
 # minus operator is binary:
 """
-    Solids.difference(s1, s2)
+    ConstructiveGeometry.difference(s1, s2)
 
 Represents the difference `s1 ∖ s2`.
 """
@@ -3836,7 +3836,7 @@ end
 function explain(s::AbstractSurface, io::IO = stdout; scale=1,
 		offset=[0.,0.,0.])
 	println(io, "translate($offset) {")
-	for (i, p) in pairs(Solids.vertices(s))
+	for (i, p) in pairs(ConstructiveGeometry.vertices(s))
 		println(io, """
 translate($scale*$(Vector{Float64}(p)) {
 	color("red") sphere(1);
@@ -3845,13 +3845,13 @@ translate($scale*$(Vector{Float64}(p)) {
 	end
 	println(io, "color(\"gray\", .7) polyhedron([")
 	b = false
-	for p in Solids.vertices(s)
+	for p in ConstructiveGeometry.vertices(s)
 		print(io, b ? "," : ""); b = true
 		print(io, " $scale*",Vector{Float64}(coordinates(p)))
 	end
 	println(io, "],[")
 	b = false
-	for f in Solids.faces(s)
+	for f in ConstructiveGeometry.faces(s)
 		print(io, b ? "," : ""); b = true
 		println(io, " ", Vector{Int}(f) .- 1, " //", Vector{Int}(f))
 	end

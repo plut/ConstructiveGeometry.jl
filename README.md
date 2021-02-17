@@ -1,7 +1,7 @@
-# Solids
+# ConstructiveGeometry
 
 
-[![Documentation|Dev](https://img.shields.io/badge/docs-latest-blue.svg)](https://plut.github.io/Solids.jl/dev/)
+[![Documentation|Dev](https://img.shields.io/badge/docs-latest-blue.svg)](https://plut.github.io/ConstructiveGeometry.jl/dev/)
 
 A module providing a syntax and tool
 to define CAD objects directly as Julia scripts.

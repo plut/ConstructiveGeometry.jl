@@ -1,8 +1,8 @@
 push!(LOAD_PATH, "src/")
 push!(LOAD_PATH, "../src/")
-using Documenter, Solids
-makedocs(sitename="Solids.jl")
+using Documenter, ConstructiveGeometry
+makedocs(sitename="ConstructiveGeometry.jl")
 
 deploydocs(
-    repo = "github.com/plut/Solids.jl.git",
+    repo = "github.com/plut/ConstructiveGeometry.jl.git",
 )
