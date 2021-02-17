@@ -1,10 +1,12 @@
-# ConstructiveGeometry.jl Documentation
+# `ConstructiveGeometry.jl` Documentation
 
 !!! warning
 
     This package is very much a work-in-progress. Right now only very basic
     functionality is available (describing geometries, and some cases for
-    meshing). The code is absolutely not stable, and any contributions are welcome.
+    meshing).
+    Neither interface nor code are stable for now.
+    Any contributions are welcome!
 
 
 This package provides tools for describing 3d objects
@@ -36,8 +38,8 @@ As of 2021-01, the only useable output format is an OpenSCAD file.
 
 Other planned output formats include:
  - (**TODO**) represented graphically using one of the Julia plotting packages;
- - (**TODO**) converted to either a mesh or a signed distance field;
- - (**IN PROGRESS**) directly exported as a 2d (`.svg`)
+ - (**IN PROGRESS**) converted to a mesh;
+ - (**TODO**) directly exported as a 2d (`.svg`)
  or 3d file (`.stl` or `.ply`).
 
 

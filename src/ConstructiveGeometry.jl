@@ -1,8 +1,5 @@
 module ConstructiveGeometry
-# BUG: SA[1 2; 3 4]*HybridArray{Tuple{2,StaticArrays.Dynamic()}}[1 2; 3 4]
-# is a (dynamic) Matrix
-#
-
+# Module imports««1
 # using Printf
 using LinearAlgebra
 using StaticArrays
@@ -217,96 +214,8 @@ end
 	det3(p2-p1, p3-p1, p4-p1)
 # @inline det3(v1, v2, v3) = det([v1 v2 v3])
 # @inline det3(p1, p2, p3, p4) = det3(p2-p1, p3-p1, p4-p1)
-# Geometry ««1
-# the Geometry type««2
-# """
-# 		Geometry{D,T}
-# 
-# Abstract supertype for all solids.
-# `D` is the dimension and `T` the type used for coordinates.
-# A `Geometry{D,T}` object may contain, as children,
-# objects with other coordinate types;
-# such coordinates will be converted to type `T` when rendering.
-# """
-# abstract type Geometry{D,T} end
-# 
-# """
-# 		dim(x::Geometry)
-# 
-# Returns the *a priori* dimension of `x`, i.e. 2 if `x` is built purely
-# out of planar objects, and 3 otherwise.
-# """
-# @inline dim(::Geometry{D}) where{D} = D
-# @inline eltype(::Type{<:Geometry{D,T}}) where{D,T} = T
-
-# Return top-level objects from included file««1
-
-# FIXME: replace Main by caller module?
-# FIXME: add some blob to represent function arguments
-"""
-		ConstructiveGeometry.include(file::AbstractString, f::Function)
-
-Reads given `file` and returns the union of all top-level `AbstractGeometry`
-objects (except the results of assignments) found in the file.
-
-```
-#### Example: contents of file `example.jl`
-C=ConstructiveGeometry.Cube(1)
-S=ConstructiveGeometry.Square(1)
-ConstructiveGeometry.Circle(3)
-S
-
-julia> ConstructiveGeometry.include("example.jl")
-union() {
- circle(radius=3.0);
- square(size=[1.0, 1.0], center=false);
-}
-```
-
-"""
-function include(file::AbstractString)
-	global toplevel_objs = AbstractGeometry[]
-	Base.include(x->expr_filter(obj_filter, x), Main, file)
-	return union(toplevel_objs...)
-end
-# # TODO: somehow attach a comment indicating the origin of these objects
-# # last_linenumber holds the last LineNumberNode value encountered before
-# # printing this object; we use this to insert relevant comments in the
-"""
-    obj_filter(x)
-
-Appends `x` to the global list of returned objects if `x` is a `AbstractGeometry`.
-"""
-@inline obj_filter(x) = x
-@inline obj_filter(x::AbstractGeometry) =
-	(global toplevel_objs; push!(toplevel_objs, x); return x)
-
-"""
-		expr_filter(E)
-
-Read top-level expression `E` and decides if a ConstructiveGeometry object is returned.
-
-The function `expr_filter` transforms top-level expressions by wrapping
-each non-assignment expression inside a call to function `obj_filter`,
-which can then dispatch on the type of the expression.
-"""
-# Numeric values, LineNumber expressions etc. will never be useful to us:
-expr_filter(f::Function, e::Any) = e
-# expr_filter(e::LineNumberNode) = (global last_linenumber = e)
-# A Symbol might be an AbstractGeometry variable name, so we add it:
-expr_filter(f::Function, e::Symbol) = :($f($e))
-
-# we add any top-level expressions, except assignments:
-expr_filter(f::Function, e::Expr) = expr_filter(f, Val(e.head), e)
-expr_filter(f::Function, ::Val, e::Expr) = :($f($e))
-expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
-
-# if several expressions are semicolon-chained, we pass this down
-expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
-	Expr(:toplevel, expr_filter.(f, x.args)...)
-
 # Primitive solids««1
-# Generic code««2
+# Base type««2
 """
     PrimitiveSolid{S,D,T,X}
 
@@ -342,13 +251,10 @@ end
 # --mesh
 @inline Rect{D}(p1::AbstractVector, p2::AbstractVector) where{D} =
 	Rect{D,promote_type(eltype.((p1,p2))...)}(Point{D}(p1), Point{D}(p2))
-@inline function Rect{D}(v::AbstractVector;
-		origin=zero(v), center=false) where{D}
-	p1 = center ? origin - one_half(v) : origin
-	return Rect{D}(p1, p1+v)
-end
+@inline Rect{D}(v::AbstractVector; origin=zero(v), center=false) where{D} =
+	Rect{D}(center ? origin - one_half(v) : origin, v)
 @inline Rect{D}(a::Number; kwargs...) where{D} =
-	Rect{D}(Vec{D}(a for _ in 1:D); kwargs...)
+	Rect{D}(Vec{D}(a); kwargs...)
 
 """
     Square(size; origin, center=false)
@@ -381,29 +287,28 @@ A sphere. Discretization is done via the `accuracy` and `precision`
 parameters.
 """
 Sphere
+
+# Cylinder ««2
+"""
+    Cylinder(h, r1, r2 [, center=false])
+    Cylinder(h, (r1, r2) [, center=false])
+    Cylinder(h, r [, center=false])
+
+**Warning:** `Cylinder(h,r)` is interpreted as `Cylinder(h,r,r)`,
+not `(h,r,0)` as in OpenSCAD.
+"""
 struct Cylinder{T} <: GeometryBasics.GeometryPrimitive{3,T}
 	origin::Point{3,T}
-	radius::T
 	height::T
+	r1::T
+	r2::T
 end
-# Cylinder ««2
-# """
-#     Cylinder(h, r1, r2 [, center=false])
-#     Cylinder(h, (r1, r2) [, center=false])
-#     Cylinder(h, r [, center=false])
-# 
-# **Warning:** `Cylinder(h,r)` is interpreted as `Cylinder(h,r,r)`,
-# not `(h,r,0)` as in OpenSCAD.
-# """
-# Cylinder{T} = PrimitiveSolid{:cylinder,3,T,
-# 	@NamedTuple{r1::T,r2::T,h::T,center::Bool}}
-# @inline _infer_type(::Type{<:Cylinder}; h,r1,r2,center) = real_type(h, r1, r2)
-# @inline (H::Type{<:Cylinder})(h, r1,r2; center=false) =
-# 	H(r1=r1, r2=r2, h=h, center=center)
-# @inline (H::Type{<:Cylinder})(h, r; kwargs...) = H(h, r, r; kwargs...)
-# @inline (H::Type{<:Cylinder})(h, r::Union{AbstractVector, Tuple}; kwargs...) =
-# 	H(h, r...; kwargs...)
-# 
+@inline Cylinder{T}(h, r1, r2; center=false, origin=zero(Point{3,T})) where{T} =
+	Cylinder{T}(center ? origin-SA[0,0,one_half(h)] : origin, h, r1, r2)
+@inline Cylinder(args...; kwargs...) =
+	Cylinder{real_type(args...)}(args...; kwargs...)
+@inline Cylinder(h, r; kwargs...) = Cylinder(h, r, r; kwargs...)
+
 # Polygon ««2
 """
     Polygon{T}
@@ -467,6 +372,10 @@ end
 struct Mesh{Dim,T<:Number,Element<:Polytope{Dim,T},V<:AbstractVector{Element}} <: AbstractMesh{Element}
 const FaceMesh{Dim,T,Element} = Mesh{Dim,T,Element,<:FaceView{Element}}
 """
+# abstract type AbstractSurface{T} <: AbstractGeometry{3,T} end
+# struct Surface{T,M} <: AbstractSurface{T}
+# 	mesh::M
+# end
 AbstractSurface = GeometryBasics.PlainMesh
 surface(points::AbstractVector{<:Point{3}},
 	faces::AbstractVector{<:AbstractVector{<:Integer}}) =
@@ -478,7 +387,7 @@ vertices(s::GeometryBasics.AbstractMesh) = GeometryBasics.coordinates(s)
 nvertices(s::AbstractSurface) = length(vertices(s))
 faces(s::AbstractSurface) = GeometryBasics.faces(s)
 nfaces(s::AbstractSurface) = length(faces(s))
-@inline facetype(s::AbstractSurface{T,F}) where{T,F} = F
+# @inline facetype(s::AbstractSurface{T,F}) where{T,F} = F
 
 AbstractTriangulatedSurface{T} =
 	GeometryBasics.AbstractMesh{<:GeometryBasics.TriangleP{3,T}}
@@ -770,8 +679,9 @@ end
 @inline children(f::Transform) = [f.child]
 @inline scad_name(f::Transform{S}) where{S} = S
 @inline parameters(f::Transform) = f.data
-@inline (T::Type{Transform{S}})(f, s::AbstractGeometry...) where{S} =
-	T(f, union(s...))
+@inline (T::Type{Transform{S}})(f, s1::AbstractGeometry,
+		s2::AbstractGeometry, tail::AbstractGeometry...) where{S} =
+		T(f, union(s, s2, tail...))
 @inline (T::Type{Transform{S}})(f, s::Vector{<:AbstractGeometry}) where{S} =
 	T(f, s...)
 @inline (T::Type{Transform{S}})(f) where{S} = Curry{S}((s...)->T(f, s...))
@@ -1117,21 +1027,24 @@ end
 @inline scad_name(::Cube) = :cube
 @inline scad_name(::Circle) = :circle
 @inline scad_name(::Sphere) = :sphere
+@inline scad_name(::Cylinder) = :cylinder
 @inline scad_name(::Polygon) = :polygon
 
 @inline scad_parameters(s::AbstractGeometry) = parameters(s)
-@inline scad_parameters(s::Rect) = (size=Vector{Float64}(s.max - s.min),)
+@inline scad_parameters(s::Rect) = (size=Vector{Float64}(s.widths),)
 @inline scad_parameters(s::HyperSphere) = (r=s.radius,)
+@inline scad_parameters(s::Cylinder) = (h=s.height, r1=s.r1, r2=s.r2,)
 @inline scad_parameters(p::Polygon) = (points=p.points,)
 
 @inline scad_transform(s::AbstractGeometry) = ""
-@inline scad_transform(s::Rect) = scad_translate(s.min)
-@inline scad_transform(s::HyperSphere) = scad_translate(s.center)
-@inline scad_translate(p::Point) =
-	iszero(coordinates(p)) ? "" : string("translate", to_scad(p), ")")
+@inline scad_transform(s::Rect) = scad_origin(s.origin)
+@inline scad_transform(s::HyperSphere) = scad_origin(s.center)
+@inline scad_transform(s::Cylinder) = scad_origin(s.origin)
+@inline scad_origin(p::Point) =
+	iszero(p) ? "" : string("translate(", to_scad(p), ")")
 
 @inline to_scad(x) = x
-@inline to_scad(p::Point) = Vector{Float64}(coordinates(p))
+@inline to_scad(p::Union{Point,Vec}) = Vector{Float64}(p)
 # kill any SVector{...} appearing in output:
 @inline to_scad(v::AbstractVector) = Vector(to_scad.(v))
 @inline to_scad(c::Colors.Colorant) = round.(Float64.([
@@ -1165,286 +1078,7 @@ function scad(io::IO, s::SetParameters)
 	indent(io); println(io, "} // SetParameters")
 end
 
-# # Attachments««1
-# # Anchor system««2
-# """
-# 		find_anchor(x::AbstractGeometry, name)
-# 
-# Returns the anchor (an affine rotation) found for the given `name` for
-# the solid `x`.
-# 
-# Some types of `name` that can be used include:
-#  - a symbol: either one of the six standard directions (`:left`, `:right`,
-# 	 `:front`, `:back`, `:top`, `:bottom`, `:center`)
-# 	 or a custom-defined label (TODO);
-# 	 (*Note:* for 2-dimensional solids, `:bottom` is equivalent to `:front`
-# 	 and `:top` is equivalent to `:back`)
-#  - a list (tuple) of symbols, which is interpreted as the sum of the
-# 	 corresponding directions;
-#  - for standard convex bodies, a vector of the same dimension as `x` is
-# 	 normalized to a point at the boundary of `x` (see below);
-#  - a way to designate a point at the boundary of `x` (see below).
-# """
-# @inline find_anchor(x::AbstractGeometry, labels::NTuple{N,Symbol}) where{N} =
-# 	find_anchor(x, sum([ labeled_anchor(x, l) for l in labels]))
-# @inline function find_anchor(x::AbstractGeometry, label::Symbol)
-# 	y = labeled_anchor(x, label)
-# 	y isa Missing && error("No anchor named '$label' found in $(scad_name(x))")
-# 	return find_anchor(x, y)
-# end
-# 
-# default_positions = (
-# 	left  = SA[-1,0,0],
-# 	right = SA[+1,0,0],
-# 	front = SA[0,-1,0],
-# 	back  = SA[0,+1,0],
-# 	bot	  = SA[0,0,-1],
-# 	bottom= SA[0,0,-1],
-# 	top	  = SA[0,0,+1],
-# 	center= SA[0,0,0],
-# )
-# @inline labeled_anchor(x::AbstractGeometry{3}, label::Symbol) =
-# 	get(default_positions, label, missing)
-# @inline labeled_anchor(x::AbstractGeometry{2}, label::Symbol) =
-# 	_labeled_anchor_3to2(get(default_positions, label, missing))
-# @inline _labeled_anchor_3to2(::Missing) = missing
-# @inline _labeled_anchor_3to2(v::StaticVector{3}) =
-# # for 2d objects, allow (:left..:right, :bot..:top) as anchor names:
-# 	(v[1] == 0 && v[2] == 0 && v[3] != 0) ? SA[v[1], v[3]] : SA[v[1], v[2]]
-# # Define named anchors ««2
-# # first column is translation, second (if existing) rotation,
-# # spin is angle in 2d
-# struct AnchorData{D,T,R}
-# 	origin::Vec{D,T}
-# 	direction::R
-# 	spin::T
-# 	@inline AnchorData{3,T}(o::AnyVec{3}, r::AnyVec{3}, s::Real) where{T} =
-# 		new{3,T,Vec{3,T}}(o, r, s)
-# 	@inline AnchorData{2,T}(o::AnyVec{2}, s::Real) where{T} =
-# 		new{2,T,Nothing}(o, nothing, s)
-# end
-# 
-# @inline AnchorData{3,T}(v::AnyVec{3}) where{T} =
-# 	AnchorData{3,T}(v,SA[0,0,1], zero(T))
-# @inline AnchorData{3,T}(data::Tuple{<:AnyVec{3},<:AnyVec{3}}) where{T} =
-# 	AnchorData{3,T}(data[1], data[2], zero(T))
-# @inline AnchorData{3,T}(data::Tuple{<:AnyVec{3},<:AnyVec{3},<:Real}) where{T} =
-# 	AnchorData{3,T}(data[1], data[2], T(radians(data[3])))
-# @inline text(x::AnchorData{3}) =
-# 	"origin=$(Float64.(x.origin)) direction=$(Float64.(x.direction)) spin=$(Float64(x.spin))"
-# 
-# @inline AnchorData{2,T}(v::AnyVec{2}) where{T} =
-# 	AnchorData{2,T}(v, zero(T))
-# @inline AnchorData{2,T}(data::Tuple{<:AnyVec{2},<:Real}) where{T} =
-# 	AnchorData{2,T}(data[1], T(radians(data[2])))
-# @inline text(x::AnchorData{2}) =
-# 	"origin=$(Float64.(x.origin)) angle=$(Float64(x.spin))"
-# 
-# @inline affine(x::AnchorData) = AffineMap(linear(x), x.origin)
-# @inline linear(x::AnchorData{3}) =
-# 	rotation_between(SA[0,0,1], x.direction) * RotZ(x.spin)
-# @inline rotation(x::AnchorData{2}) = Angle2d(x.spin)
-# 
-# 
-# """
-# 		struct NamedAnchors
-# 
-# Wraps an object, adding symbolic anchors to it.
-# """
-# struct NamedAnchors{D,T} <: AbstractGeometry{D,T}
-# 	child::AbstractGeometry{D,T}
-# 	anchors::Dict{Symbol, AnchorData{D,T}}
-# end
-# """
-# 		named_anchors(x, label=>anchor...)
-# 
-# Adds symbolic anchors to an object. `anchor` may be either
-# 
-#  - a vector: the associated anchor is a translation.
-#  - a pair (origin, direction): the associated anchor is the affine
-# 	 rotation to given direction.
-#  - a triple (origin, direction, spin).
-#  - (in 2d) a pair (origin, angle).
-# """
-# @inline named_anchors(x::AbstractGeometry{D,T},
-# 	a::Pair{Symbol}...) where{D,T} =
-# 	NamedAnchors{D,T}(x, Dict(k => AnchorData{D,T}(v) for (k,v) in a))
-# 
-# function scad(io::IO, x::NamedAnchors, spaces::AbstractString = "")
-# 	println(io, spaces, "// Object with named anchors:")
-# 	for (label, anchor) in x.anchors
-# 		println(io, spaces, "// $label: $(text(anchor))")
-# 	end
-# 	scad(io, x.child, spaces)
-# end
-# 
-# function labeled_anchor(x::NamedAnchors, label::Symbol)
-# 	y = get(x.anchors, label, missing)
-# 	if y isa Missing
-# 		return get(default_anchors, label, missing)
-# 	end
-# end
-# # Anchors for convex bodies ««2
-# """
-# 		find_anchor(x::Square, position::SVector{2})
-# 		find_anchor(x::Circle, position::SVector{2})
-# 		find_anchor(x::Cube, position::SVector{3})
-# 		find_anchor(x::Cylinder, position::SVector{3})
-# 		find_anchor(x::Sphere, position::SVector{3})
-# 
-# For a convex body, the anchor corresponding to `position` has its origin
-# at the surface fo the body and maps the unit vector `[0,1]` (resp.
-# `[0,0,1]` in dimension 3) to the normal vector at this position.
-# 
-# If `position` is zero, then the translation to the center of the body is
-# returned.
-# 
-# The rotation is computed using `Rotations.rotation_between`. This returns
-# a well-defined result even for the rotation mapping `[0,0,1]` to
-# `[0,0,-1]`.
-# """
-# function find_anchor(x::Ortho{D}, pos::Vec{D,<:Real}) where{D}
-# 	center = ~x.center*one_half(x.size) # the center of the square/cube
-# 	if iszero(pos) return Translation(center) end
-# 	maxc = findmax(abs.(pos))[2] # max abs value of a coordinate
-# 	v = sum(pos[abs.(pos) .= maxc]), # sum of coordinates with max abs value
-# 
-# 	# we don't need to normalize v since `rotation_between` does it for us:
-# 	AffineMap(rotation_between(SA[0,0,1], v), center + v .* x.size)
-# end
-# 
-# function find_anchor(x::Circle, pos::Vec{2,<:Real})
-# 	if iszero(pos) return Translation(SA[0,0]) end
-# 	p1 = pos / sqrt(pos[1]^2+pos[2]^2)
-# 	AffineMap(SA[p1[2] p1[1]; -p1[1] p1[2]], radius(x)*p1)
-# end
-# 
-# function find_anchor(x::Sphere, pos::Vec{3,<:Real})
-# 	if iszero(pos) return Translation(SA[0,0,0]) end
-# 	return AffineMap(rotation_between(SA[0,0,1], pos), pos*x.radius / norm(pos))
-# end
-# 
-# function find_anchor(x::Cylinder, pos::Vec{3,<:Real})
-# 	center = ~x.center*one_half(x.h)
-# 	if iszero(pos) return Translation(center) end
-# 	r = sqrt(pos[1]*pos[1]+pos[2]*pos[2]) # convert to cylindrical coords
-# 	if pos[3]*x.r2 > r # top face: normalize to pos[3]==1
-# 		return Translation(SA[pos[1]/pos[3], pos[2]/pos[3], center+one_half(x.h)])
-# 	elseif pos[3]*x.r1 < -r # bottom face: normalize to pos[3]==-1
-# 		return AffineMap(rotation_between(SA[0,0,1], SA[0,0,-1]),
-# 			SA[-pos[1]/pos[3], -pos[2]/pos[3], center-one_half(x.h)])
-# 	end
-# 	# the line equation is 2r = (r2-r1) z + (r1+r2)
-# 	r3 = one_half(x.r1+x.r2+pos[3]*(x.r2-x.r1)) # radius at given z
-# 	# in cyl coordinates, the contact point is (r=r3, z=pos[3]*h/2+center)
-# 	p = SA[pos[1]*r3/r, pos[2]*r3/r, center + one_half(x.h)*pos[3]]
-# 	# normal vector is 2 dr = (r2-r1) dz
-# 	n = SA[2*pos[1]/r, 2*pos[2]/r, x.r2-x.r1]
-# 	AffineMap(rotation_between(SA[0,0,1], n), p)
-# end
-# 
-# # Coordinates on circle & sphere ««2
-# """
-# 		find_anchor(x::Circle, angle::Real)
-# Returns anchor at point `(-sin(angle), cos(angle))` (trig. orientation,
-# starting at top of circle; angle in **degrees**) with outwards normal vector
-# (the start at top guarantees that angle 0 preserves upwards-pointing
-# vector).
-# """
-# function find_anchor(x::Circle{T}, angle::Real) where{T}
-# # 	a = T(radians(angle))
-# 	(s, c) = T.(sincosd(a))
-# 	AffineMap(SA[c -s;s c], SA[-radius(x)*s, radius(x)*c])
-# end
-# """
-# 		find_anchor(x::Sphere, (latitude, longitude))
-# 
-# Returns normal vector to sphere at this position (angles in **degrees**).
-# """
-# function find_anchor(x::Sphere{T}, angle::AnyVec{2,<:Real}) where{T}
-# # 	(lat, lon) = T.(radians.(angle))
-# 	(s1, c1) = T.(sincosd(lat))
-# 	(s2, c2) = T.(sincosd(lon))
-# 	r = x.radius
-# 	AffineMap(SA[s1*c2 -s2 c1*c2;s1*s2 c2 c1*s2; -c1 0 s1],
-# 						SA[r*c1*c2, r*c1*s2, r*s1])
-# end
-# 
-# 
-# # attach ««2
-# """
-# 		attach(parent, {:label => child}...)
-# 
-# Moves (by rotations) all children so that their anchor matches the
-# anchors of `parent` defined by the given labels.
-# """
-# function attach(parent::AbstractGeometry, list::Pair{<:Any,<:AbstractGeometry}...)
-# 	union(parent, [ attach_at(parent, pos, child) for (pos,child) in list]...)
-# end
-# function attach_at(parent::AbstractGeometry{D}, label, child::AbstractGeometry) where{D}
-# 	m = find_anchor(parent, label)
-# 	mult_matrix(m, child)
-# end
-# 
-# # anchor ««2
-# """
-# 		half_turn(q::UnitQuaternion)
-# 
-# Returns the half-turn rotation with same axis as `q`.
-# """
-# @inline half_turn(q::Rotations.UnitQuaternion) =
-# 	Rotations.UnitQuaternion(0, q.x, q.y, q.z) # the constructor normalizes this
-# """
-# 		half_turn_complement(q::Rotation{3})
-# 
-# Returns the unique rotation `r` such that `qr=rq` is a half-turn.
-# """
-# @inline half_turn_complement(q::Rotations.Rotation{3}) =
-# 	inv(q)*half_turn(q)
-# 
-# """
-# 		anchor(solid, label)
-# 
-# Translates the solid so that the anchor with name `label` is at origin
-# and the corresponding anchor vector points inward.
-# """
-# function anchor(x::AbstractGeometry, label)
-# # Ax + B maps [0,0,0] to anchor point p, and e_z=[0,0,1] to anchor vec v
-# # namely: A e_z = v, B = p
-# # we want to map p to [0,0,0] and -v to e_z
-# # i.e. A' v = - e_z and A' p + B' = 0, or B' = -A' p = -A' B
-# #
-# 
-# 	m = find_anchor(x, label)
-# 	a1= half_turn_complement(linear(m))
-# # ⚠ -a1*m is interpreted as (-a1)*m, and a1 is a quaternion ⇒ -a1≡a1 (as
-# # a rotation)
-# 	mult_matrix(AffineMap(a1, a1*-translation(m)), x)
-# end
-# 
-# # Reduction of mult_matrix operations ««1
-# @inline affine_reduce(m::AbstractAffineMap, x::AbstractGeometry) =
-# 	mult_matrix(m, x)
-# @inline affine_reduce(u::LinearMap{<:Diagonal}, x::Square) =
-# 	Square([ u.linear.diag[i] * @inbounds x.size[i] for i in 1:2 ], x.center)
-# @inline affine_reduce(u::LinearMap{<:Union{UniformScaling,Diagonal}},
-# 	x::Union{Square,Cube}) = (typeof(x))(linear(u) * x.size, x.center)
-# @inline affine_reduce(u::LinearMap{<:UniformScaling},
-# 	x::Union{Circle,Sphere}) =
-# 	(typeof(x))(linear(u) * x.r, x.frag)
-# @inline affine_reduce(u::AbstractAffineMap, x::Polygon) =
-# 	Polygon(apply(u, vertices(x)), x.path, x.convexity)
-# @inline affine_reduce(u::AbstractAffineMap, x::Surface) =
-# 	Surface(apply(u, vertices(x)), x.faces, x.convexity)
-# @inline affine_reduce(m::AbstractAffineMap, x::T) where{T<:ConstructedSolid} =
-# 	T([ affine_reduce(m, y) for y in children(x) ])
-# function affine_reduce(m1::AbstractAffineMap, m2::MultMatrix)
-# 	m3 = compose(m1, m2.m)
-# 	union((affine_reduce(m3, x) for x in children(m2))...)
-# 	# TODO
-# end
-# affine_reduce(x::AbstractGeometry) = affine_reduce(LinearMap(I), x)
-#————————————————————— Meshing —————————————————————————————— ««1
+#————————————————————— Meshing (2d) —————————————————————————————— ««1
 #»»1
 # Converting circles to polygons««1
 # Accuracy is the absolute deviation allowed.
@@ -1715,7 +1349,8 @@ Polygon is assumed not self-intersecting.
 	path::AnyPath{2,T}) where{T}
 	return Clipper.pointinpolygon(to_clipper(T, point), to_clipper(T, path))
 end
-# Polyhedra interface««1
+# Polyhedra interface and intersections««1
+# Polyhedra types««2
 @inline polyhedra_lib(T::Type{<:Real}) =
 	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
 
@@ -1746,6 +1381,7 @@ end
 @inline convert(T::Type{<:Polyhedra.HRepElement}, h::Polyhedra.HRepElement) =
 	T(h.a, h.β)
 
+# Intersections (2d)««2
 # we need a couple of functions in the particular case of simplexes.
 # `Polyhedra.jl` is a bit slow for these simple cases, so we write them
 # here:
@@ -1854,6 +1490,523 @@ function inter(s1::Segment{2}, s2::Segment{2})
 	if c ∈ boundingbox(s1) return c; end
 	return nothing
 end
+#Convex hull««1
+# 2d convex hull ««2
+
+# """
+#     convex_hull([vector of 2d points])
+# 
+# Returns the convex hull (as a vector of 2d points).
+# """
+# function convex_hull(points::Union{AbstractVector{<:Vec{2}},
+# 	AbstractMatrix{<:Number}})
+# # M is a matrix with the points as *columns*, hence the transpose
+# # below:
+# 	PH = Polyhedra
+# 	poly = vpoly(points)
+# 	PH.removevredundancy!(poly)
+# 	return Vec{2}.(collect(PH.points(poly)))
+# end
+
+"""
+    convex_hull_list(points)
+
+Returns the convex hull of the points, as a list of indexes (in direct
+order, starting at a reproducible index in the list of points).
+"""
+function convex_hull_list(points)
+  # Uses Graham scan
+  # In practice this is faster than using `Polyhedra.jl`.
+#   println("points=$points, length=$(length(points))")
+  i0 = findextrema(points;
+    lt=(p,q)->(p[2]<q[2])|| (p[2]==q[2] && p[1]>q[1])).min[2]
+  @inline detp2(i,j,k) = det2(points[[i,j,k]]...)
+	# 1024 is an arbitrary value for detecting “aligned” points (i.e. up to
+	# representation errors), which should be fast for both Float and Fixed
+	# division
+  @inline function are_aligned(i,j,k)
+    v1 = points[j]-points[i]
+    v2 = points[k]-points[j]
+    d = det2(v1, v2)
+    c = v1 ⋅ v2
+    return abs(d) < abs(c)/1024
+  end
+  scan = sort(filter(!isequal(i0), eachindex(points)),
+    lt=(p,q)->detp2(i0,p,q) > 0)
+#   println("i0=$i0, scan=$scan")
+  stack = [i0, scan[1]]
+  for h in scan[2:end]
+#     println("scanning: $stack + $h")
+    v1 = points[stack[end]] - points[stack[end-1]]
+    v2 = points[h] - points[stack[end]]
+    s = det2(v1, v2)
+    c = v1 ⋅ v2
+    if abs(s) < abs(c)/1024 && c < 0 # points are aligned and backwards
+			# here we know that we can insert at (end)
+			# look for an insertion point i:
+			i = length(stack)
+			while i > 2
+# 				println(" try to insert at $i")
+				v1 = points[stack[i]] - points[stack[i-1]]
+				v2 = points[h] - points[stack[i]]
+				s = det2(v1, v2)
+				c = v1 ⋅ v2
+				if s < -1e-3*abs(c)
+# 					println(" break at $i")
+					break
+				end
+				i -= 1
+			end
+# 			println("  inserting at $i")
+			insert!(stack, i, h)
+			continue
+# 			println("  now stack=$stack")
+    end
+    while detp2(last(stack), h, stack[end-1]) < 0
+      pop!(stack)
+    end
+    push!(stack, h)
+  end
+  return stack
+end
+
+"""
+    convex_hull([vector of 2d points])
+
+Returns the convex hull (as a vector of 2d points, ordered in direct
+order).
+"""
+@inline convex_hull(points::AbstractVector{<:Point{2}}) =
+	points[convex_hull_list(points)]
+
+
+# this is the version using MiniQhull: #««
+# convex_hull(points::AbstractVector{<:AnyVec(2)}) =
+#		# Delaunay triangulation:
+#		let T = MiniQhull.delaunay([p[i] for i in 1:2, p in points]),
+#				N = length(points),
+#				M = zeros(Bool, N, N) # ⚠ memory O(N²)
+#		# mark all edges:
+#		for (a,b,c) in eachcol(T)
+#			b1 = points[b] - points[a]
+#			c1 = points[c] - points[a]
+#			d = b1[1]*c1[2] - b1[2]*c1[1] # determinant === orientation of triangle
+#			if d < 0
+#				M[a,b] = M[b,c] = M[c,a] = true
+#			else
+#				M[b,a] = M[c,b] = M[a,c] = true
+#			end
+#		end
+#		# list of remaining edges (retrograde oriented)
+#		L= sort([(i,j) for i in 1:N, j in 1:N if M[i,j] && ! M[j,i]], by=v->v[1])
+#		next(i) = L[searchsorted(L, i, by=y->y[1])][1][2]
+#		R = zeros(Int, length(L))
+#		R[1:2] .= L[1] # initialize with first edge
+#		for i in 3:length(R)
+#			R[i] = next(R[i-1])
+#		end
+#		# returns in retrograde ordering (OpenSCAD convention):
+#		points[R]
+# end#»»
+# 3d convex hull ««2
+
+"""
+    convex_hull(x::AbstractGeometry{3}...)
+
+Returns the convex hull of the union of all the given solids, as a
+pair `(points, faces)`. `faces` is a list of triangles.
+"""
+@inline convex_hull(x::AbstractGeometry{3}) =
+	convex_hull(vcat([vertices(y) for y in x]...))
+
+"""
+    convex_hull(vector of 3d points)
+
+Returns the convex hull of these points, as a pair `(points, faces)`.
+All the faces are triangles.
+"""
+function convex_hull(p::AbstractVector{<:Point{3,T}}) where{T}
+	M = hcat(Vector.(coordinates.(p))...)
+	PH = Polyhedra
+	poly = PH.polyhedron(PH.vrep(transpose(M)), polyhedra_lib(T))
+	R = PH.removevredundancy!(poly)
+	V = Point{3,T}.(collect(PH.points(poly)))
+
+	triangles = Vec{3,Int}[]
+	for i in PH.eachindex(PH.halfspaces(poly)) # index of halfspace
+		h = PH.get(poly, i)
+		pts = PH.incidentpointindices(poly, i) # vector of indices of points
+		for t in triangulate_face(
+				[Point(PH.get(poly, j)) for j in pts];
+				direction = h.a,
+				map = [j.value for j in pts],
+				convex = Val(true))
+			(a,b,c) = (V[j] for j in t)
+			k = det([b-a c-a h.a])
+			push!(triangles, (k > 0) ? t : SA[t[1], t[3], t[2]])
+		end
+	end
+	return (points=V, faces=triangles)
+end
+
+
+# 2d Minkowski sum««1
+# Convolution of polygons««2
+# http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
+"""
+    circularcmp(v1, v2, v3, [Val(:offset)])
+
+Circular comparison predicate; returns true iff directions of vectors
+`v1`, `v2`, `v3` are arranged in a trigonometric ordering along the unit
+circle.
+
+If `Val(:offset)` is passed then `v1`, `v3` are infinitesimally rotated
+in the positive direction compared to `v2`.
+"""
+function circularcmp(v1, v2, v3)
+	d1 = v2[1]*v3[2] ≥ v2[2]*v3[1]
+	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
+	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
+	return (d1+d2+d3) ≥ 2
+end
+function circularcmp(v1, v2, v3, ::Val{:offset})
+	d1 = v2[1]*v3[2] > v2[2]*v3[1]
+	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
+	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
+	return (d1+d2+d3) ≥ 2
+end
+
+function convolution(p::AnyPath{2}, q::AnyPath{2})
+	(np, nq) = (length(p), length(q))
+	ep = [p[cyclindex(i, p)]-p[i] for i in eachindex(p)] # edges of p
+	eq = [q[cyclindex(i, q)]-q[i] for i in eachindex(q)]
+	j0 = 0
+	newpoly = similar(p, 0)
+	for ip in eachindex(p)
+		for iq in eachindex(q)
+			iq0 = cyclindex(iq, q, -1)
+			if circularcmp(eq[iq0], ep[ip], eq[iq], Val(:offset))
+				push!(newpoly, p[ip]+q[iq])
+				push!(newpoly, p[cyclindex(ip, p)]+q[iq])
+			end
+		end
+	end
+	newpoly
+end
+p⋆q = convolution(p, q)
+# Minkowski sum of polygons and their unions ««2
+function minkowski(p::AnyPath{2}, q::AnyPath{2})
+	r = convolution(p, q)
+	return simplify([r]; fill=:nonzero)
+end
+function minkowski(vp::Vector{<:AnyPath{2}}, vq::Vector{<:AnyPath{2}})
+	vr = vec([convolution(p, q) for p in vp, q in vq])
+	return simplify(vr; fill=:nonzero)
+end
+
+# TODO: 3d Minkowski««2
+
+# 2d subsystem««1
+# PolyUnion««2
+# type and constructors from points««
+"""
+		PolyUnion
+
+Represents a union of polygons. Each polygon is assumed to be simple and
+ordered in trigonometric ordering.
+"""
+struct PolyUnion{T} <: AbstractGeometry{2,T}
+	poly::Vector{Path{2,T}}
+	@inline PolyUnion{T}(p::AbstractVector{<:AnyPath{2,T}}) where{T} =
+		new{T}(Path{2,T}.(p))
+end
+@inline (U::Type{PolyUnion})(p::AbstractVector{<:AnyPath{2,T}}) where{T} =
+		U{real_type(eltype.(eltype.(p))...)}(p)
+
+@inline (U::Type{<:PolyUnion})(path::AnyPath{2}...) = U([path...])
+
+@inline vertices(u::PolyUnion) = vcat(u.poly...)
+
+# this is used to broadcast conversion for recursive conversion to PolyUnion:
+@inline _convert(U::Type{<:PolyUnion}, l, parameters) =
+	[ U(s, parameters) for s in l ]
+
+# »»
+# I/O««
+function scad(io::IO, u::PolyUnion{S}, spaces::AbstractString) where{S}
+	print(io, spaces, "// union of $(length(u.poly)) polygon(s):\n")
+	length(u.poly) != 1 && print(io, spaces, "union() {\n")
+	for p in u.poly
+		print(io, spaces, " polygon([")
+		join(io, convert.(Vec{2,Float64}, p), ",")
+		print(io, "]);\n")
+	end
+	length(u.poly) != 1 && print(io, spaces, "}\n")
+end
+#»»
+# Conversion from leaf 2d types««2
+@inline PolyUnion(l::AbstractGeometry{2}; kwargs...) =
+	PolyUnion{real_type(eltype(l))}(l, merge(_DEFAULT_PARAMETERS, kwargs.data))
+
+@inline (U::Type{<:PolyUnion})(x::Square, parameters) =
+	U(Vec{2}.(vertices(x)))
+@inline (U::Type{<:PolyUnion})(x::Circle, parameters) =
+	U(Vec{2}.(vertices(x, parameters)))
+@inline (U::Type{<:PolyUnion})(x::Polygon, parameters) =
+# FIXME: simplify and define orientation
+	U(Vec{2}.(vertices(x)))
+
+@inline function (U::Type{<:PolyUnion})(f::AffineTransform{2}, parameters)
+	child = U(f.child, parameters)
+	return U([ f.data.(path) for path in child.poly ])
+end
+@inline (U::Type{<:PolyUnion})(s::SetParameters{2}, parameters) =
+	U(s.child, merge(parameters, s.data))
+# fall-back case (`color`, etc.):
+@inline (U::Type{<:PolyUnion})(s::Transform{S,2}, parameters) where{S} =
+	U(s.child, parameters)
+
+function vertices(s::Square)
+	# in trigonometric order:
+	(u, v) = s.size
+	return Point{2}.([
+		SA[u[1],u[2]],
+		SA[v[1],u[2]],
+		SA[v[1],v[2]],
+		SA[u[1],v[2]]])
+end
+@inline vertices(c::Circle, parameters) =
+	Point{2}.(unit_n_gon(c.radius, parameters))
+# Reduction of CSG operations««2
+@inline (clip(op, u::U...)::U) where{U<:PolyUnion} =
+	reduce((a,b)->U(clip(op, a.poly, b.poly)), u)
+
+# Set-wise operations:
+@inline (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:union}, parameters) =
+	clip(:union, _convert(U, s.children, parameters)...)
+
+@inline (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:intersection}, parameters) =
+	clip(:intersection, _convert(U, s.children, parameters)...)
+
+function ((U::Type{<: PolyUnion})(s::ConstructedSolid{2,:difference}, parameters)::U)
+	length(s.children) == 1 && return U(s.children[1], parameters)
+	L = _convert(U, s.children, parameters)
+	r2= clip(:union, view(L,2:length(L))...)
+	clip(:difference, L[1], r2)
+end
+
+# Convex hull:
+function (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:hull}, parameters)
+	pts = points.(_convert(U, s.children, parameters))
+	U(convex_hull([pts...;]))
+end
+
+# Minkowski sum:
+function (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:minkowski},
+	parameters)::U
+	reduce((a,b)->U(minkowski(a.poly, b.poly)),
+		_convert(U, s.children, parameters))
+end
+# function _combine2(::Val{:minkowski}, a::PolyUnion{T}, b::PolyUnion{T}) where{T}
+# 	# not implemented in Clipper.jl...
+# end
+
+
+# Offset ««2
+"""
+		offset(P::Polygon, u::Real; options...)
+
+Offsets polygon `P` by radius `u` (negative means inside the polygon,
+positive means outside). Options:
+
+ - `join_type`: :round | :square | :miter
+ - `miter_limit` (default 2.0)
+"""
+function offset(U::PolyUnion{T}, u::Real;
+		join_type = :round,
+		miter_limit::Float64 = 2.0,
+		precision::Real = 0.2) where{T}
+
+	c = ClipperOffset(miter_limit, clipper_float(clipper_type(T), precision))
+	add_paths!(c, U.poly, join_type, Clipper.EndTypeClosedPolygon)
+	PolyUnion(execute(T, c, u))
+end
+@inline offset(x::AbstractGeometry{2}, args...; kwargs...) =
+	offset(PolyUnion(x), args...; kwargs...)
+
+# Draw ««2
+"""
+    draw(path, width; kwargs...)
+
+    ends=:round|:square|:butt|:closed
+    join=:round|:miter|:square
+"""
+function draw(path::Path{2,T}, width::Real;
+		ends::Symbol = :round, join::Symbol = :round,
+		miter_limit::Float64 = 2.0, precision::Real = 0.2) where{T}
+	CT = clipper_type(T)
+	RT = clipper_rettype(T)
+	c = ClipperOffset(miter_limit, clipper_float(CT, precision))
+	println("join=$join, round=$round")
+	Clipper.add_path!(c, clipper_path(path),
+		JoinType(Val(join)), EndType(Val(ends)))
+	println("$(clipper_type(T)) $(CT(1.)); prec=$(Float64(CT(precision)))")
+	ret = clipper_unpath.(RT, Clipper.execute(c, clipper_float(CT, width)/2))
+	return PolyUnion(ret)
+end
+
+# Convex hull««2
+# """
+# 		convex_hull(x::AbstractGeometry{2}...)
+# 
+# Returns the convex hull of the union of all the given solids, as a
+# `PolyUnion` structure.
+# """
+@inline convex_hull(x::AbstractGeometry{2}...; params=_DEFAULT_PARAMETERS) =
+	convex_hull(PolyUnion(union(x...), params))
+
+@inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(vertices(u)))
+
+#————————————————————— Meshing (3d) —————————————————————————————— ««1
+#»»1
+# Basic 3d geometry««1
+# Low-level functions««2
+norm²(v::Vec) = sum(v .* v)
+distance²(p::Point, q::Point) = norm²(p-q)
+
+function face_normal(points)
+	@assert length(points) >= 3
+	return cross(points[2]-points[1], points[3]-points[1])
+end
+"""
+    supporting_plane(t::Triangle)
+
+Returns an equation (`a*x = b`) of the supporting plane, with `a`
+pointing *outwards*.
+"""
+function supporting_plane(t::Triangle)
+	(p1, p2, p3) = t
+	c = cross(p2-p1, p3-p1)
+	b = dot(c, p1)
+	return Polyhedra.HyperPlane(c, b)
+end
+
+"""
+    circular_lt
+
+Circular comparison of vectors, sorted according to their angle in
+]-π,π]. Implemented with only integral arithmetic (no `atan2`, `√` or `/`).
+"""
+@inline function circular_lt(p,q)
+	if p[2] < 0
+		if q[2] ≥ 0 return true; end
+	else # p[2] ≥ 0
+		if q[2] < 0 return false; end
+		if p[2] == 0 && q[2] == 0 return p[1] > q[1]; end
+	end
+	return det2(p, q) > 0
+end
+"""
+    circular_sign(u,v)
+
+Let `α` and `β` be the angles of `u`,`v` in ]-π, π].
+This function returns a number <0 iff `α` < `β`, >0 iff `α` > `β`,
+and `0` iff `α` == `β`.
+"""
+@inline function circular_sign(u, v)
+	if u[2] < 0
+		v[2] ≥ 0 && return -1
+	else
+		v[2] < 0 && return 1
+	end
+	return det2(u, v)
+end
+
+
+
+# Using a Box as a bounding box««2
+struct Box{D,T} <: GeometryBasics.GeometryPrimitive{D,T}
+	min::Point{D,T}
+	max::Point{D,T}
+end
+@inline ∈(x::AbstractVector, b::Box) = all(b.min .≤ x .≤ b.max)
+# @inline ∈(x::Point, b::Box) = x.coords ∈ b
+@inline isempty(b::Box) = any(b.min .> b.max)
+@inline intersect(a::Box, b::Box) =
+	Box(Point(max.(a.min, b.min)), Point(min.(a.max, b.max)))
+boundingbox(points::Point{D,T}...) where{D,T} =
+	Box{D,T}(min.(points...), max.(points...))
+boundingbox(g::AbstractGeometry) = boundingbox(GeometryBasics.coordinates(g)...)
+
+# 3d -> 2d projections««2
+const plus1mod3 = SA[2,3,1]
+const plus2mod3 = SA[3,1,2]
+@inline function project_2d(direction::AbstractVector, index::Val = Val(false))
+	# we inline the 'findmax' call since we know the length is 3:
+	# (doing this about halves the running time of this function. Besides,
+	# since the value 'e' only takes three possible values, it enables the
+	# compiler to propagate constants.)
+	a1 = abs(direction[1]); a2=abs(direction[2]); a3=abs(direction[3])
+	k = (a1 < a2) ? ((a2 < a3) ? 3 : 2) : ((a1 < a3) ? 3 : 1)
+	v = direction[k]
+	@inbounds p = (v > 0) ? SA[plus1mod3[k], plus2mod3[k]] :
+		SA[plus2mod3[k], plus1mod3[k]]
+	return _project_2d(index, p, k)
+end
+# @inline function project_2d1(direction::AnyVec{3}, index::Val = Val(false))
+# 	# we inline the 'findmax' call since we know the length is 3:
+# 	# (doing this about halves the running time of this function)
+# 	a1 = abs(direction[1]); a2=abs(direction[2]); a3=abs(direction[3])
+# 	# this part does not do any speed-up (constant propagation):
+# 	if a1 < a2
+# 		if a2 < a3 @goto max3; end
+# 		if direction[2] > 0
+# 			return _project_2d(index, SA[3,1], 2)
+# 		else
+# 			return _project_2d(index, SA[1,3], 2)
+# 		end
+# 	elseif a1 < a3
+# 		@label max3
+# 		if direction[3] > 0
+# 			return _project_2d(index, SA[1,2], 3)
+# 		else
+# 			return _project_2d(index, SA[2,1], 3)
+# 		end
+# 	else
+# 		if direction[1] > 0
+# 			return _project_2d(index, SA[2,3], 1)
+# 		else
+# 			return _project_2d(index, SA[3,2], 1)
+# 		end
+# 	end
+# end
+@inline _project_2d(::Val{false}, p, _) = p
+@inline _project_2d(::Val{true}, p, e) = (p, e)
+
+"""
+    project_2d(plane::Polyhedra.HyperPlane)
+
+Returns a (named) tuple `(coordinates, linear, origin)` where
+ - `coordinates` is the set of coordinates to keep for projection,
+ - `linear`*x+`origin` is an affine section.
+"""
+function project_2d(plane::Polyhedra.HyperPlane)
+	v = direction(plane)
+  (coords, k) = project_2d(v, Val(true))
+	f = inv(convert(real_type(eltype(v)), v[k]))
+		# e=1: proj=(2,3) sect=[-b/a -c/a;1 0;0 1]
+		# e=2: proj=(3,1) sect=[0 1;-a/b -c/b;1 0]
+		# e=3: proj=(1,2) sect=[1 0;0 1;-a/c -b/c]
+		# e=1: proj=(3,2) sect=[-c/a -b/a;0 1;1 0]
+		# e=2: proj=(1,3) sect=[1 0;-a/b -c/b;0 1]
+		# e=3: proj=(2,1) sect=[0 1;1 0;-b/c -a/c]
+	m = SMatrix{3,2}((i==k) ? -f*v[coords[j]] : (i == coords[j])
+			for i=1:3, j=1:2)
+	c = SVector{3}((i==k) ? plane.β*f : 0 for i in 1:3)
+	return (coordinates=coords, lift=Affine(m, c))
+end
+
+# Intersections (3d)««2
 function inter(s1::Segment{3}, s2::Segment{3})
 	(a1, b1) = vertices(s1)
 	(a2, b2) = vertices(s2)
@@ -1874,6 +2027,121 @@ function inter(s1::Segment{3}, s2::Segment{3})
 end
 
 
+# Rays««2
+"""
+    AffineRay
+
+An open ray, of the form `a + ]0,∞[ v`.
+"""
+struct AffineRay{D,T} <: AbstractGeometry{D,T}
+	origin::Point{D,T}
+	direction::Vec{D,T}
+end
+
+@inline direction(a::AffineRay) = a.direction
+@inline origin(a::AffineRay) = a.origin
+@inline AffineRay(origin::SVector{D}, direction::SVector{D}) where{D} =
+	AffineRay{D,promote_type(eltype.((origin,direction))...)}(origin, direction)
+
+"""
+    intersects(a::AffineRay{3}, t::Triangle)
+
+Returns 1 iff ray intersects triangle in given order,
+-1 if it intersects in opposite order, otherwise 0.
+
+Algorithm is inspired by Segura-Feito[1]:
+after translating everything so that the ray starts at the origin,
+we apply the linear transformation
+x ↦ (⟨x,v2,v3⟩,⟨v1,x,v3⟩,⟨v1,v2,x⟩)  (⟨⟩ is the determinant)
+This maps the three points of the triangle to
+(δ,0,0), (0,δ,0), (0,0,δ), where δ=⟨v1,v2,v3⟩.
+The sign of δ gives the position of the origin w.r.t the triangle: δ⟩0
+iff the origin is *inside* the triangle.
+
+Once the vertices of the triangle are aligned to the axes, the ray
+intersects the triangle iff the 3 coordinates of its direction `u` are >0.
+This means that ⟨u,v2,v3⟩, ⟨v2,u,v3⟩, ⟨v1,v2,u⟩ > 0.
+
+[1] https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.2.2084&rep=rep1&type=pdf
+
+"""
+function intersects(a::AffineRay, t::Triangle, strict = false)
+	u = a.direction
+	(v1, v2, v3) = [x-a.origin for x ∈ vertices(t)]
+	d = det3(v1, v2, v3)
+	# FIXME: could be make slightly faster (but less readable)
+	# by precomputing u∧v2
+	if strict
+		if (d > 0 && det3(u, v2, v3) > 0
+			&& det3(v1, u, v3) > 0 && det3(v1, v2, u) > 0)
+			return 1
+		elseif (d < 0 && det3(u, v2, v3) < 0
+			&& det3(v1, u, v3) < 0 && det3(v1, v2, u) < 0)
+			return -1
+		end
+	else
+		if (d ≥ 0 && det3(u, v2, v3) ≥ 0
+			&& det3(v1, u, v3) ≥ 0 && det3(v1, v2, u) ≥ 0)
+			return 1
+		elseif (d ≤ 0 && det3(u, v2, v3) ≤ 0
+			&& det3(v1, u, v3) ≤ 0 && det3(v1, v2, u) ≤ 0)
+			return -1
+		end
+	end
+	return 0
+end
+
+
+struct AffineRayInv{D,T} <: AbstractGeometry{D,T}
+	origin::Vec{D,T}
+	direction::Vec{D,T}
+	inv_dir::Vec{D,T}
+end
+_inv0(x::Real) = iszero(x) ? zero(real_type(x)) : inv(to_real(x))
+@inline inv(a::AffineRay{D,T}) where{D,T} =
+	AffineRayInv{D,real_type(T)}(a.origin, a.direction, _inv0.(a.direction))
+
+"""
+    intersects(a::AffineRay{3}, b::Box)
+
+https://tavianator.com/2011/ray_box.html
+"""
+function intersects(a::AffineRayInv{3}, b::Box; strict=false)
+	tmin = zero(eltype(a.direction))
+	tmax = typemax(eltype(a.direction))
+	for i in 1:3
+		# position = x + t*z, hence t = (position-x)*z1
+		x = a.origin[i]; z = a.direction[i]; z1 = a.inv_dir[i]
+		u = b.proj[i]
+		if iszero(z)
+			if x < u.low || x > u.high return false; end
+		else
+			# if z > 0 then p_min = x+tmin*z, p_max = x+tmax*z
+			#   (thus tmin = (pmin-x)*z1, tmax = (pmax-x)*z1)
+			# else tmin, tmax are swapped
+			@inline f(v) = (v-x)*z1
+			if z > 0
+				tmax = min(tmax, f(u.high))
+				tmin = min(tmin, f(u.low))
+			else
+				tmax = min(tmax, f(u.low))
+				tmin = min(tmin, f(u.high))
+			end
+			if strict
+				if tmin ≥ tmax return false; end
+			else
+				if tmin > tmax return false; end # early abort
+			end
+		end
+	end
+	return true
+end
+
+function intersections(a::AffineRay, s::TriangulatedSurface,
+		minface = 0)
+	return sum(intersects(a, Triangle(s,i), i>minface )
+		for i in eachindex(faces(s)))
+end
 # Operations on simplicial complexes««1
 # Incidence and adjacency««2
 """
@@ -2268,635 +2536,6 @@ end
 # 	set!(xa, a, ax); set!(new_ad, d, da); set!(dx, x, xd)
 # 	return m # or x...
 # end
-#Convex hull««1
-# 2d convex hull ««2
-
-# """
-#     convex_hull([vector of 2d points])
-# 
-# Returns the convex hull (as a vector of 2d points).
-# """
-# function convex_hull(points::Union{AbstractVector{<:Vec{2}},
-# 	AbstractMatrix{<:Number}})
-# # M is a matrix with the points as *columns*, hence the transpose
-# # below:
-# 	PH = Polyhedra
-# 	poly = vpoly(points)
-# 	PH.removevredundancy!(poly)
-# 	return Vec{2}.(collect(PH.points(poly)))
-# end
-
-"""
-    convex_hull_list(points)
-
-Returns the convex hull of the points, as a list of indexes (in direct
-order, starting at a reproducible index in the list of points).
-"""
-function convex_hull_list(points)
-  # Uses Graham scan
-  # In practice this is faster than using `Polyhedra.jl`.
-#   println("points=$points, length=$(length(points))")
-  i0 = findextrema(points;
-    lt=(p,q)->(p[2]<q[2])|| (p[2]==q[2] && p[1]>q[1])).min[2]
-  @inline detp2(i,j,k) = det2(points[[i,j,k]]...)
-	# 1024 is an arbitrary value for detecting “aligned” points (i.e. up to
-	# representation errors), which should be fast for both Float and Fixed
-	# division
-  @inline function are_aligned(i,j,k)
-    v1 = points[j]-points[i]
-    v2 = points[k]-points[j]
-    d = det2(v1, v2)
-    c = v1 ⋅ v2
-    return abs(d) < abs(c)/1024
-  end
-  scan = sort(filter(!isequal(i0), eachindex(points)),
-    lt=(p,q)->detp2(i0,p,q) > 0)
-#   println("i0=$i0, scan=$scan")
-  stack = [i0, scan[1]]
-  for h in scan[2:end]
-#     println("scanning: $stack + $h")
-    v1 = points[stack[end]] - points[stack[end-1]]
-    v2 = points[h] - points[stack[end]]
-    s = det2(v1, v2)
-    c = v1 ⋅ v2
-    if abs(s) < abs(c)/1024 && c < 0 # points are aligned and backwards
-			# here we know that we can insert at (end)
-			# look for an insertion point i:
-			i = length(stack)
-			while i > 2
-# 				println(" try to insert at $i")
-				v1 = points[stack[i]] - points[stack[i-1]]
-				v2 = points[h] - points[stack[i]]
-				s = det2(v1, v2)
-				c = v1 ⋅ v2
-				if s < -1e-3*abs(c)
-# 					println(" break at $i")
-					break
-				end
-				i -= 1
-			end
-# 			println("  inserting at $i")
-			insert!(stack, i, h)
-			continue
-# 			println("  now stack=$stack")
-    end
-    while detp2(last(stack), h, stack[end-1]) < 0
-      pop!(stack)
-    end
-    push!(stack, h)
-  end
-  return stack
-end
-
-"""
-    convex_hull([vector of 2d points])
-
-Returns the convex hull (as a vector of 2d points, ordered in direct
-order).
-"""
-@inline convex_hull(points::AbstractVector{<:Vec{2}}) =
-	points[convex_hull_list(points)]
-
-
-# this is the version using MiniQhull: #««
-# convex_hull(points::AbstractVector{<:AnyVec(2)}) =
-#		# Delaunay triangulation:
-#		let T = MiniQhull.delaunay([p[i] for i in 1:2, p in points]),
-#				N = length(points),
-#				M = zeros(Bool, N, N) # ⚠ memory O(N²)
-#		# mark all edges:
-#		for (a,b,c) in eachcol(T)
-#			b1 = points[b] - points[a]
-#			c1 = points[c] - points[a]
-#			d = b1[1]*c1[2] - b1[2]*c1[1] # determinant === orientation of triangle
-#			if d < 0
-#				M[a,b] = M[b,c] = M[c,a] = true
-#			else
-#				M[b,a] = M[c,b] = M[a,c] = true
-#			end
-#		end
-#		# list of remaining edges (retrograde oriented)
-#		L= sort([(i,j) for i in 1:N, j in 1:N if M[i,j] && ! M[j,i]], by=v->v[1])
-#		next(i) = L[searchsorted(L, i, by=y->y[1])][1][2]
-#		R = zeros(Int, length(L))
-#		R[1:2] .= L[1] # initialize with first edge
-#		for i in 3:length(R)
-#			R[i] = next(R[i-1])
-#		end
-#		# returns in retrograde ordering (OpenSCAD convention):
-#		points[R]
-# end#»»
-# 3d convex hull ««2
-
-"""
-    convex_hull(x::AbstractGeometry{3}...)
-
-Returns the convex hull of the union of all the given solids, as a
-pair `(points, faces)`. `faces` is a list of triangles.
-"""
-@inline convex_hull(x::AbstractGeometry{3}) =
-	convex_hull(vcat([vertices(y) for y in x]...))
-
-"""
-    convex_hull(vector of 3d points)
-
-Returns the convex hull of these points, as a pair `(points, faces)`.
-All the faces are triangles.
-"""
-function convex_hull(p::AbstractVector{<:Point{3,T}}) where{T}
-	M = hcat(Vector.(coordinates.(p))...)
-	PH = Polyhedra
-	poly = PH.polyhedron(PH.vrep(transpose(M)), polyhedra_lib(T))
-	R = PH.removevredundancy!(poly)
-	V = Point{3,T}.(collect(PH.points(poly)))
-
-	triangles = Vec{3,Int}[]
-	for i in PH.eachindex(PH.halfspaces(poly)) # index of halfspace
-		h = PH.get(poly, i)
-		pts = PH.incidentpointindices(poly, i) # vector of indices of points
-		for t in triangulate_face(
-				[Point(PH.get(poly, j)) for j in pts];
-				direction = h.a,
-				map = [j.value for j in pts],
-				convex = Val(true))
-			(a,b,c) = (V[j] for j in t)
-			k = det([b-a c-a h.a])
-			push!(triangles, (k > 0) ? t : SA[t[1], t[3], t[2]])
-		end
-	end
-	return (points=V, faces=triangles)
-end
-
-
-# 2d Minkowski sum««1
-# Convolution of polygons««2
-# http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
-"""
-    circularcmp(v1, v2, v3, [Val(:offset)])
-
-Circular comparison predicate; returns true iff directions of vectors
-`v1`, `v2`, `v3` are arranged in a trigonometric ordering along the unit
-circle.
-
-If `Val(:offset)` is passed then `v1`, `v3` are infinitesimally rotated
-in the positive direction compared to `v2`.
-"""
-function circularcmp(v1, v2, v3)
-	d1 = v2[1]*v3[2] ≥ v2[2]*v3[1]
-	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
-	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
-	return (d1+d2+d3) ≥ 2
-end
-function circularcmp(v1, v2, v3, ::Val{:offset})
-	d1 = v2[1]*v3[2] > v2[2]*v3[1]
-	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
-	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
-	return (d1+d2+d3) ≥ 2
-end
-
-function convolution(p::AnyPath{2}, q::AnyPath{2})
-	(np, nq) = (length(p), length(q))
-	ep = [p[cyclindex(i, p)]-p[i] for i in eachindex(p)] # edges of p
-	eq = [q[cyclindex(i, q)]-q[i] for i in eachindex(q)]
-	j0 = 0
-	newpoly = similar(p, 0)
-	for ip in eachindex(p)
-		for iq in eachindex(q)
-			iq0 = cyclindex(iq, q, -1)
-			if circularcmp(eq[iq0], ep[ip], eq[iq], Val(:offset))
-				push!(newpoly, p[ip]+q[iq])
-				push!(newpoly, p[cyclindex(ip, p)]+q[iq])
-			end
-		end
-	end
-	newpoly
-end
-p⋆q = convolution(p, q)
-# Minkowski sum of polygons and their unions ««2
-function minkowski(p::AnyPath{2}, q::AnyPath{2})
-	r = convolution(p, q)
-	return simplify([r]; fill=:nonzero)
-end
-function minkowski(vp::Vector{<:AnyPath{2}}, vq::Vector{<:AnyPath{2}})
-	vr = vec([convolution(p, q) for p in vp, q in vq])
-	return simplify(vr; fill=:nonzero)
-end
-
-# TODO: 3d Minkowski««2
-
-# 2d subsystem««1
-# PolyUnion««2
-# type and constructors from points««
-"""
-		PolyUnion
-
-Represents a union of polygons. Each polygon is assumed to be simple and
-ordered in trigonometric ordering.
-"""
-struct PolyUnion{T} <: AbstractGeometry{2,T}
-	poly::Vector{Path{2,T}}
-	@inline PolyUnion{T}(p::AbstractVector{<:AnyPath{2,T}}) where{T} =
-		new{T}(Path{2,T}.(p))
-end
-@inline (U::Type{PolyUnion})(p::AbstractVector{<:AnyPath{2,T}}) where{T} =
-		U{real_type(eltype.(eltype.(p))...)}(p)
-
-@inline (U::Type{<:PolyUnion})(path::AnyPath{2}...) = U([path...])
-
-@inline vertices(u::PolyUnion) = vcat(u.poly...)
-
-# this is used to broadcast conversion for recursive conversion to PolyUnion:
-@inline _convert(U::Type{<:PolyUnion}, l, parameters) =
-	[ U(s, parameters) for s in l ]
-
-# »»
-# I/O««
-function scad(io::IO, u::PolyUnion{S}, spaces::AbstractString) where{S}
-	print(io, spaces, "// union of $(length(u.poly)) polygon(s):\n")
-	length(u.poly) != 1 && print(io, spaces, "union() {\n")
-	for p in u.poly
-		print(io, spaces, " polygon([")
-		join(io, convert.(Vec{2,Float64}, p), ",")
-		print(io, "]);\n")
-	end
-	length(u.poly) != 1 && print(io, spaces, "}\n")
-end
-#»»
-# Conversion from leaf 2d types««2
-@inline PolyUnion(l::AbstractGeometry{2}; kwargs...) =
-	PolyUnion{real_type(eltype(l))}(l, merge(_DEFAULT_PARAMETERS, kwargs.data))
-
-@inline (U::Type{<:PolyUnion})(x::Square, parameters) =
-	U(Vec{2}.(vertices(x)))
-@inline (U::Type{<:PolyUnion})(x::Circle, parameters) =
-	U(Vec{2}.(vertices(x, parameters)))
-@inline (U::Type{<:PolyUnion})(x::Polygon, parameters) =
-# FIXME: simplify and define orientation
-	U(Vec{2}.(vertices(x)))
-
-@inline function (U::Type{<:PolyUnion})(f::AffineTransform{2}, parameters)
-	child = U(f.child, parameters)
-	return U([ f.data.(path) for path in child.poly ])
-end
-@inline (U::Type{<:PolyUnion})(s::SetParameters{2}, parameters) =
-	U(s.child, merge(parameters, s.data))
-# fall-back case (`color`, etc.):
-@inline (U::Type{<:PolyUnion})(s::Transform{S,2}, parameters) where{S} =
-	U(s.child, parameters)
-
-function vertices(s::Square)
-	# in trigonometric order:
-	(u, v) = s.size
-	return Point{2}.([
-		SA[u[1],u[2]],
-		SA[v[1],u[2]],
-		SA[v[1],v[2]],
-		SA[u[1],v[2]]])
-end
-@inline vertices(c::Circle, parameters) =
-	Point{2}.(unit_n_gon(c.radius, parameters))
-# Reduction of CSG operations««2
-@inline (clip(op, u::U...)::U) where{U<:PolyUnion} =
-	reduce((a,b)->U(clip(op, a.poly, b.poly)), u)
-
-# Set-wise operations:
-@inline (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:union}, parameters) =
-	clip(:union, _convert(U, s.children, parameters)...)
-
-@inline (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:intersection}, parameters) =
-	clip(:intersection, _convert(U, s.children, parameters)...)
-
-function ((U::Type{<: PolyUnion})(s::ConstructedSolid{2,:difference}, parameters)::U)
-	length(s.children) == 1 && return U(s.children[1], parameters)
-	L = _convert(U, s.children, parameters)
-	r2= clip(:union, view(L,2:length(L))...)
-	clip(:difference, L[1], r2)
-end
-
-# Convex hull:
-function (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:hull}, parameters)
-	pts = points.(_convert(U, s.children, parameters))
-	U(convex_hull([pts...;]))
-end
-
-# Minkowski sum:
-function (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:minkowski},
-	parameters)::U
-	reduce((a,b)->U(minkowski(a.poly, b.poly)),
-		_convert(U, s.children, parameters))
-end
-# function _combine2(::Val{:minkowski}, a::PolyUnion{T}, b::PolyUnion{T}) where{T}
-# 	# not implemented in Clipper.jl...
-# end
-
-
-# Offset ««2
-"""
-		offset(P::Polygon, u::Real; options...)
-
-Offsets polygon `P` by radius `u` (negative means inside the polygon,
-positive means outside). Options:
-
- - `join_type`: :round | :square | :miter
- - `miter_limit` (default 2.0)
-"""
-function offset(U::PolyUnion{T}, u::Real;
-		join_type = :round,
-		miter_limit::Float64 = 2.0,
-		precision::Real = 0.2) where{T}
-
-	c = ClipperOffset(miter_limit, clipper_float(clipper_type(T), precision))
-	add_paths!(c, U.poly, join_type, Clipper.EndTypeClosedPolygon)
-	PolyUnion(execute(T, c, u))
-end
-@inline offset(x::AbstractGeometry{2}, args...; kwargs...) =
-	offset(PolyUnion(x), args...; kwargs...)
-
-# Draw ««2
-"""
-    draw(path, width; kwargs...)
-
-    ends=:round|:square|:butt|:closed
-    join=:round|:miter|:square
-"""
-function draw(path::Path{2,T}, width::Real;
-		ends::Symbol = :round, join::Symbol = :round,
-		miter_limit::Float64 = 2.0, precision::Real = 0.2) where{T}
-	CT = clipper_type(T)
-	RT = clipper_rettype(T)
-	c = ClipperOffset(miter_limit, clipper_float(CT, precision))
-	println("join=$join, round=$round")
-	Clipper.add_path!(c, clipper_path(path),
-		JoinType(Val(join)), EndType(Val(ends)))
-	println("$(clipper_type(T)) $(CT(1.)); prec=$(Float64(CT(precision)))")
-	ret = clipper_unpath.(RT, Clipper.execute(c, clipper_float(CT, width)/2))
-	return PolyUnion(ret)
-end
-
-# Convex hull««2
-# """
-# 		convex_hull(x::AbstractGeometry{2}...)
-# 
-# Returns the convex hull of the union of all the given solids, as a
-# `PolyUnion` structure.
-# """
-@inline convex_hull(x::AbstractGeometry{2}...; params=_DEFAULT_PARAMETERS) =
-	convex_hull(PolyUnion(union(x...), params))
-
-@inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(vertices(u)))
-
-# Basic 3d geometry««1
-# Low-level functions««2
-norm²(v::Vec) = sum(v .* v)
-distance²(p::Point, q::Point) = norm²(p-q)
-
-function face_normal(points)
-	@assert length(points) >= 3
-	return cross(points[2]-points[1], points[3]-points[1])
-end
-"""
-    supporting_plane(t::Triangle)
-
-Returns an equation (`a*x = b`) of the supporting plane, with `a`
-pointing *outwards*.
-"""
-function supporting_plane(t::Triangle)
-	(p1, p2, p3) = t
-	c = cross(p2-p1, p3-p1)
-	b = dot(c, p1)
-	return Polyhedra.HyperPlane(c, b)
-end
-
-"""
-    circular_lt
-
-Circular comparison of vectors, sorted according to their angle in
-]-π,π]. Implemented with only integral arithmetic (no `atan2`, `√` or `/`).
-"""
-@inline function circular_lt(p,q)
-	if p[2] < 0
-		if q[2] ≥ 0 return true; end
-	else # p[2] ≥ 0
-		if q[2] < 0 return false; end
-		if p[2] == 0 && q[2] == 0 return p[1] > q[1]; end
-	end
-	return det2(p, q) > 0
-end
-"""
-    circular_sign(u,v)
-
-Let `α` and `β` be the angles of `u`,`v` in ]-π, π].
-This function returns a number <0 iff `α` < `β`, >0 iff `α` > `β`,
-and `0` iff `α` == `β`.
-"""
-@inline function circular_sign(u, v)
-	if u[2] < 0
-		v[2] ≥ 0 && return -1
-	else
-		v[2] < 0 && return 1
-	end
-	return det2(u, v)
-end
-
-
-
-# Using a Box as a bounding box««2
-struct Box{D,T} <: GeometryBasics.GeometryPrimitive{D,T}
-	min::Point{D,T}
-	max::Point{D,T}
-end
-@inline ∈(x::AbstractVector, b::Box) = all(b.min .≤ x .≤ b.max)
-# @inline ∈(x::Point, b::Box) = x.coords ∈ b
-@inline isempty(b::Box) = any(b.min .> b.max)
-@inline intersect(a::Box, b::Box) =
-	Box(Point(max.(a.min, b.min)), Point(min.(a.max, b.max)))
-boundingbox(points::Point{D,T}...) where{D,T} =
-	Box{D,T}(min.(points...), max.(points...))
-boundingbox(g::AbstractGeometry) = boundingbox(GeometryBasics.coordinates(g)...)
-
-# 3d -> 2d projections««2
-const plus1mod3 = SA[2,3,1]
-const plus2mod3 = SA[3,1,2]
-@inline function project_2d(direction::AbstractVector, index::Val = Val(false))
-	# we inline the 'findmax' call since we know the length is 3:
-	# (doing this about halves the running time of this function. Besides,
-	# since the value 'e' only takes three possible values, it enables the
-	# compiler to propagate constants.)
-	a1 = abs(direction[1]); a2=abs(direction[2]); a3=abs(direction[3])
-	k = (a1 < a2) ? ((a2 < a3) ? 3 : 2) : ((a1 < a3) ? 3 : 1)
-	v = direction[k]
-	@inbounds p = (v > 0) ? SA[plus1mod3[k], plus2mod3[k]] :
-		SA[plus2mod3[k], plus1mod3[k]]
-	return _project_2d(index, p, k)
-end
-# @inline function project_2d1(direction::AnyVec{3}, index::Val = Val(false))
-# 	# we inline the 'findmax' call since we know the length is 3:
-# 	# (doing this about halves the running time of this function)
-# 	a1 = abs(direction[1]); a2=abs(direction[2]); a3=abs(direction[3])
-# 	# this part does not do any speed-up (constant propagation):
-# 	if a1 < a2
-# 		if a2 < a3 @goto max3; end
-# 		if direction[2] > 0
-# 			return _project_2d(index, SA[3,1], 2)
-# 		else
-# 			return _project_2d(index, SA[1,3], 2)
-# 		end
-# 	elseif a1 < a3
-# 		@label max3
-# 		if direction[3] > 0
-# 			return _project_2d(index, SA[1,2], 3)
-# 		else
-# 			return _project_2d(index, SA[2,1], 3)
-# 		end
-# 	else
-# 		if direction[1] > 0
-# 			return _project_2d(index, SA[2,3], 1)
-# 		else
-# 			return _project_2d(index, SA[3,2], 1)
-# 		end
-# 	end
-# end
-@inline _project_2d(::Val{false}, p, _) = p
-@inline _project_2d(::Val{true}, p, e) = (p, e)
-
-"""
-    project_2d(plane::Polyhedra.HyperPlane)
-
-Returns a (named) tuple `(coordinates, linear, origin)` where
- - `coordinates` is the set of coordinates to keep for projection,
- - `linear`*x+`origin` is an affine section.
-"""
-function project_2d(plane::Polyhedra.HyperPlane)
-	v = direction(plane)
-  (coords, k) = project_2d(v, Val(true))
-	f = inv(convert(real_type(eltype(v)), v[k]))
-		# e=1: proj=(2,3) sect=[-b/a -c/a;1 0;0 1]
-		# e=2: proj=(3,1) sect=[0 1;-a/b -c/b;1 0]
-		# e=3: proj=(1,2) sect=[1 0;0 1;-a/c -b/c]
-		# e=1: proj=(3,2) sect=[-c/a -b/a;0 1;1 0]
-		# e=2: proj=(1,3) sect=[1 0;-a/b -c/b;0 1]
-		# e=3: proj=(2,1) sect=[0 1;1 0;-b/c -a/c]
-	m = SMatrix{3,2}((i==k) ? -f*v[coords[j]] : (i == coords[j])
-			for i=1:3, j=1:2)
-	c = SVector{3}((i==k) ? plane.β*f : 0 for i in 1:3)
-	return (coordinates=coords, lift=Affine(m, c))
-end
-
-# Rays««2
-"""
-    AffineRay
-
-An open ray, of the form `a + ]0,∞[ v`.
-"""
-struct AffineRay{D,T} <: AbstractGeometry{D,T}
-	origin::Point{D,T}
-	direction::Vec{D,T}
-end
-
-@inline direction(a::AffineRay) = a.direction
-@inline origin(a::AffineRay) = a.origin
-@inline AffineRay(origin::SVector{D}, direction::SVector{D}) where{D} =
-	AffineRay{D,promote_type(eltype.((origin,direction))...)}(origin, direction)
-
-"""
-    intersects(a::AffineRay{3}, t::Triangle)
-
-Returns 1 iff ray intersects triangle in given order,
--1 if it intersects in opposite order, otherwise 0.
-
-Algorithm is inspired by Segura-Feito[1]:
-after translating everything so that the ray starts at the origin,
-we apply the linear transformation
-x ↦ (⟨x,v2,v3⟩,⟨v1,x,v3⟩,⟨v1,v2,x⟩)  (⟨⟩ is the determinant)
-This maps the three points of the triangle to
-(δ,0,0), (0,δ,0), (0,0,δ), where δ=⟨v1,v2,v3⟩.
-The sign of δ gives the position of the origin w.r.t the triangle: δ⟩0
-iff the origin is *inside* the triangle.
-
-Once the vertices of the triangle are aligned to the axes, the ray
-intersects the triangle iff the 3 coordinates of its direction `u` are >0.
-This means that ⟨u,v2,v3⟩, ⟨v2,u,v3⟩, ⟨v1,v2,u⟩ > 0.
-
-[1] https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.2.2084&rep=rep1&type=pdf
-
-"""
-function intersects(a::AffineRay, t::Triangle, strict = false)
-	u = a.direction
-	(v1, v2, v3) = [x-a.origin for x ∈ vertices(t)]
-	d = det3(v1, v2, v3)
-	# FIXME: could be make slightly faster (but less readable)
-	# by precomputing u∧v2
-	if strict
-		if (d > 0 && det3(u, v2, v3) > 0
-			&& det3(v1, u, v3) > 0 && det3(v1, v2, u) > 0)
-			return 1
-		elseif (d < 0 && det3(u, v2, v3) < 0
-			&& det3(v1, u, v3) < 0 && det3(v1, v2, u) < 0)
-			return -1
-		end
-	else
-		if (d ≥ 0 && det3(u, v2, v3) ≥ 0
-			&& det3(v1, u, v3) ≥ 0 && det3(v1, v2, u) ≥ 0)
-			return 1
-		elseif (d ≤ 0 && det3(u, v2, v3) ≤ 0
-			&& det3(v1, u, v3) ≤ 0 && det3(v1, v2, u) ≤ 0)
-			return -1
-		end
-	end
-	return 0
-end
-
-
-struct AffineRayInv{D,T} <: AbstractGeometry{D,T}
-	origin::Vec{D,T}
-	direction::Vec{D,T}
-	inv_dir::Vec{D,T}
-end
-_inv0(x::Real) = iszero(x) ? zero(real_type(x)) : inv(to_real(x))
-@inline inv(a::AffineRay{D,T}) where{D,T} =
-	AffineRayInv{D,real_type(T)}(a.origin, a.direction, _inv0.(a.direction))
-
-"""
-    intersects(a::AffineRay{3}, b::Box)
-
-https://tavianator.com/2011/ray_box.html
-"""
-function intersects(a::AffineRayInv{3}, b::Box; strict=false)
-	tmin = zero(eltype(a.direction))
-	tmax = typemax(eltype(a.direction))
-	for i in 1:3
-		# position = x + t*z, hence t = (position-x)*z1
-		x = a.origin[i]; z = a.direction[i]; z1 = a.inv_dir[i]
-		u = b.proj[i]
-		if iszero(z)
-			if x < u.low || x > u.high return false; end
-		else
-			# if z > 0 then p_min = x+tmin*z, p_max = x+tmax*z
-			#   (thus tmin = (pmin-x)*z1, tmax = (pmax-x)*z1)
-			# else tmin, tmax are swapped
-			@inline f(v) = (v-x)*z1
-			if z > 0
-				tmax = min(tmax, f(u.high))
-				tmin = min(tmin, f(u.low))
-			else
-				tmax = min(tmax, f(u.low))
-				tmin = min(tmin, f(u.high))
-			end
-			if strict
-				if tmin ≥ tmax return false; end
-			else
-				if tmin > tmax return false; end # early abort
-			end
-		end
-	end
-	return true
-end
-
-function intersections(a::AffineRay, s::TriangulatedSurface,
-		minface = 0)
-	return sum(intersects(a, Triangle(s,i), i>minface )
-		for i in eachindex(faces(s)))
-end
 # Triangulations««1
 # 2d triangulation««2
 """
@@ -3775,6 +3414,331 @@ function (S::Type{<:AbstractSurface})(s::CSGHull{3}, parameters...)
 	(pts, faces) = convex_hull(vcat(vertices.(l)...))
 	return S(pts, faces, 0)
 end
+#————————————————————— Extra tools —————————————————————————————— ««1
+#»»1
+# # Return top-level objects from included file««1
+# 
+# # FIXME: replace Main by caller module?
+# # FIXME: add some blob to represent function arguments
+# """
+# 		ConstructiveGeometry.include(file::AbstractString, f::Function)
+# 
+# Reads given `file` and returns the union of all top-level `AbstractGeometry`
+# objects (except the results of assignments) found in the file.
+# 
+# ```
+# #### Example: contents of file `example.jl`
+# C=ConstructiveGeometry.Cube(1)
+# S=ConstructiveGeometry.Square(1)
+# ConstructiveGeometry.Circle(3)
+# S
+# 
+# julia> ConstructiveGeometry.include("example.jl")
+# union() {
+#  circle(radius=3.0);
+#  square(size=[1.0, 1.0], center=false);
+# }
+# ```
+# 
+# """
+# function include(file::AbstractString)
+# 	global toplevel_objs = AbstractGeometry[]
+# 	Base.include(x->expr_filter(obj_filter, x), Main, file)
+# 	return union(toplevel_objs...)
+# end
+# # # TODO: somehow attach a comment indicating the origin of these objects
+# # # last_linenumber holds the last LineNumberNode value encountered before
+# # # printing this object; we use this to insert relevant comments in the
+# """
+#     obj_filter(x)
+# 
+# Appends `x` to the global list of returned objects if `x` is a `AbstractGeometry`.
+# """
+# @inline obj_filter(x) = x
+# @inline obj_filter(x::AbstractGeometry) =
+# 	(global toplevel_objs; push!(toplevel_objs, x); return x)
+# 
+# """
+# 		expr_filter(E)
+# 
+# Read top-level expression `E` and decides if a ConstructiveGeometry object is returned.
+# 
+# The function `expr_filter` transforms top-level expressions by wrapping
+# each non-assignment expression inside a call to function `obj_filter`,
+# which can then dispatch on the type of the expression.
+# """
+# # Numeric values, LineNumber expressions etc. will never be useful to us:
+# expr_filter(f::Function, e::Any) = e
+# # expr_filter(e::LineNumberNode) = (global last_linenumber = e)
+# # A Symbol might be an AbstractGeometry variable name, so we add it:
+# expr_filter(f::Function, e::Symbol) = :($f($e))
+# 
+# # we add any top-level expressions, except assignments:
+# expr_filter(f::Function, e::Expr) = expr_filter(f, Val(e.head), e)
+# expr_filter(f::Function, ::Val, e::Expr) = :($f($e))
+# expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
+# 
+# # if several expressions are semicolon-chained, we pass this down
+# expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
+# 	Expr(:toplevel, expr_filter.(f, x.args)...)
+# 
+# # Attachments««1
+# # Anchor system««2
+# """
+# 		find_anchor(x::AbstractGeometry, name)
+# 
+# Returns the anchor (an affine rotation) found for the given `name` for
+# the solid `x`.
+# 
+# Some types of `name` that can be used include:
+#  - a symbol: either one of the six standard directions (`:left`, `:right`,
+# 	 `:front`, `:back`, `:top`, `:bottom`, `:center`)
+# 	 or a custom-defined label (TODO);
+# 	 (*Note:* for 2-dimensional solids, `:bottom` is equivalent to `:front`
+# 	 and `:top` is equivalent to `:back`)
+#  - a list (tuple) of symbols, which is interpreted as the sum of the
+# 	 corresponding directions;
+#  - for standard convex bodies, a vector of the same dimension as `x` is
+# 	 normalized to a point at the boundary of `x` (see below);
+#  - a way to designate a point at the boundary of `x` (see below).
+# """
+# @inline find_anchor(x::AbstractGeometry, labels::NTuple{N,Symbol}) where{N} =
+# 	find_anchor(x, sum([ labeled_anchor(x, l) for l in labels]))
+# @inline function find_anchor(x::AbstractGeometry, label::Symbol)
+# 	y = labeled_anchor(x, label)
+# 	y isa Missing && error("No anchor named '$label' found in $(scad_name(x))")
+# 	return find_anchor(x, y)
+# end
+# 
+# default_positions = (
+# 	left  = SA[-1,0,0],
+# 	right = SA[+1,0,0],
+# 	front = SA[0,-1,0],
+# 	back  = SA[0,+1,0],
+# 	bot	  = SA[0,0,-1],
+# 	bottom= SA[0,0,-1],
+# 	top	  = SA[0,0,+1],
+# 	center= SA[0,0,0],
+# )
+# @inline labeled_anchor(x::AbstractGeometry{3}, label::Symbol) =
+# 	get(default_positions, label, missing)
+# @inline labeled_anchor(x::AbstractGeometry{2}, label::Symbol) =
+# 	_labeled_anchor_3to2(get(default_positions, label, missing))
+# @inline _labeled_anchor_3to2(::Missing) = missing
+# @inline _labeled_anchor_3to2(v::StaticVector{3}) =
+# # for 2d objects, allow (:left..:right, :bot..:top) as anchor names:
+# 	(v[1] == 0 && v[2] == 0 && v[3] != 0) ? SA[v[1], v[3]] : SA[v[1], v[2]]
+# # Define named anchors ««2
+# # first column is translation, second (if existing) rotation,
+# # spin is angle in 2d
+# struct AnchorData{D,T,R}
+# 	origin::Vec{D,T}
+# 	direction::R
+# 	spin::T
+# 	@inline AnchorData{3,T}(o::AnyVec{3}, r::AnyVec{3}, s::Real) where{T} =
+# 		new{3,T,Vec{3,T}}(o, r, s)
+# 	@inline AnchorData{2,T}(o::AnyVec{2}, s::Real) where{T} =
+# 		new{2,T,Nothing}(o, nothing, s)
+# end
+# 
+# @inline AnchorData{3,T}(v::AnyVec{3}) where{T} =
+# 	AnchorData{3,T}(v,SA[0,0,1], zero(T))
+# @inline AnchorData{3,T}(data::Tuple{<:AnyVec{3},<:AnyVec{3}}) where{T} =
+# 	AnchorData{3,T}(data[1], data[2], zero(T))
+# @inline AnchorData{3,T}(data::Tuple{<:AnyVec{3},<:AnyVec{3},<:Real}) where{T} =
+# 	AnchorData{3,T}(data[1], data[2], T(radians(data[3])))
+# @inline text(x::AnchorData{3}) =
+# 	"origin=$(Float64.(x.origin)) direction=$(Float64.(x.direction)) spin=$(Float64(x.spin))"
+# 
+# @inline AnchorData{2,T}(v::AnyVec{2}) where{T} =
+# 	AnchorData{2,T}(v, zero(T))
+# @inline AnchorData{2,T}(data::Tuple{<:AnyVec{2},<:Real}) where{T} =
+# 	AnchorData{2,T}(data[1], T(radians(data[2])))
+# @inline text(x::AnchorData{2}) =
+# 	"origin=$(Float64.(x.origin)) angle=$(Float64(x.spin))"
+# 
+# @inline affine(x::AnchorData) = AffineMap(linear(x), x.origin)
+# @inline linear(x::AnchorData{3}) =
+# 	rotation_between(SA[0,0,1], x.direction) * RotZ(x.spin)
+# @inline rotation(x::AnchorData{2}) = Angle2d(x.spin)
+# 
+# 
+# """
+# 		struct NamedAnchors
+# 
+# Wraps an object, adding symbolic anchors to it.
+# """
+# struct NamedAnchors{D,T} <: AbstractGeometry{D,T}
+# 	child::AbstractGeometry{D,T}
+# 	anchors::Dict{Symbol, AnchorData{D,T}}
+# end
+# """
+# 		named_anchors(x, label=>anchor...)
+# 
+# Adds symbolic anchors to an object. `anchor` may be either
+# 
+#  - a vector: the associated anchor is a translation.
+#  - a pair (origin, direction): the associated anchor is the affine
+# 	 rotation to given direction.
+#  - a triple (origin, direction, spin).
+#  - (in 2d) a pair (origin, angle).
+# """
+# @inline named_anchors(x::AbstractGeometry{D,T},
+# 	a::Pair{Symbol}...) where{D,T} =
+# 	NamedAnchors{D,T}(x, Dict(k => AnchorData{D,T}(v) for (k,v) in a))
+# 
+# function scad(io::IO, x::NamedAnchors, spaces::AbstractString = "")
+# 	println(io, spaces, "// Object with named anchors:")
+# 	for (label, anchor) in x.anchors
+# 		println(io, spaces, "// $label: $(text(anchor))")
+# 	end
+# 	scad(io, x.child, spaces)
+# end
+# 
+# function labeled_anchor(x::NamedAnchors, label::Symbol)
+# 	y = get(x.anchors, label, missing)
+# 	if y isa Missing
+# 		return get(default_anchors, label, missing)
+# 	end
+# end
+# # Anchors for convex bodies ««2
+# """
+# 		find_anchor(x::Square, position::SVector{2})
+# 		find_anchor(x::Circle, position::SVector{2})
+# 		find_anchor(x::Cube, position::SVector{3})
+# 		find_anchor(x::Cylinder, position::SVector{3})
+# 		find_anchor(x::Sphere, position::SVector{3})
+# 
+# For a convex body, the anchor corresponding to `position` has its origin
+# at the surface fo the body and maps the unit vector `[0,1]` (resp.
+# `[0,0,1]` in dimension 3) to the normal vector at this position.
+# 
+# If `position` is zero, then the translation to the center of the body is
+# returned.
+# 
+# The rotation is computed using `Rotations.rotation_between`. This returns
+# a well-defined result even for the rotation mapping `[0,0,1]` to
+# `[0,0,-1]`.
+# """
+# function find_anchor(x::Ortho{D}, pos::Vec{D,<:Real}) where{D}
+# 	center = ~x.center*one_half(x.size) # the center of the square/cube
+# 	if iszero(pos) return Translation(center) end
+# 	maxc = findmax(abs.(pos))[2] # max abs value of a coordinate
+# 	v = sum(pos[abs.(pos) .= maxc]), # sum of coordinates with max abs value
+# 
+# 	# we don't need to normalize v since `rotation_between` does it for us:
+# 	AffineMap(rotation_between(SA[0,0,1], v), center + v .* x.size)
+# end
+# 
+# function find_anchor(x::Circle, pos::Vec{2,<:Real})
+# 	if iszero(pos) return Translation(SA[0,0]) end
+# 	p1 = pos / sqrt(pos[1]^2+pos[2]^2)
+# 	AffineMap(SA[p1[2] p1[1]; -p1[1] p1[2]], radius(x)*p1)
+# end
+# 
+# function find_anchor(x::Sphere, pos::Vec{3,<:Real})
+# 	if iszero(pos) return Translation(SA[0,0,0]) end
+# 	return AffineMap(rotation_between(SA[0,0,1], pos), pos*x.radius / norm(pos))
+# end
+# 
+# function find_anchor(x::Cylinder, pos::Vec{3,<:Real})
+# 	center = ~x.center*one_half(x.h)
+# 	if iszero(pos) return Translation(center) end
+# 	r = sqrt(pos[1]*pos[1]+pos[2]*pos[2]) # convert to cylindrical coords
+# 	if pos[3]*x.r2 > r # top face: normalize to pos[3]==1
+# 		return Translation(SA[pos[1]/pos[3], pos[2]/pos[3], center+one_half(x.h)])
+# 	elseif pos[3]*x.r1 < -r # bottom face: normalize to pos[3]==-1
+# 		return AffineMap(rotation_between(SA[0,0,1], SA[0,0,-1]),
+# 			SA[-pos[1]/pos[3], -pos[2]/pos[3], center-one_half(x.h)])
+# 	end
+# 	# the line equation is 2r = (r2-r1) z + (r1+r2)
+# 	r3 = one_half(x.r1+x.r2+pos[3]*(x.r2-x.r1)) # radius at given z
+# 	# in cyl coordinates, the contact point is (r=r3, z=pos[3]*h/2+center)
+# 	p = SA[pos[1]*r3/r, pos[2]*r3/r, center + one_half(x.h)*pos[3]]
+# 	# normal vector is 2 dr = (r2-r1) dz
+# 	n = SA[2*pos[1]/r, 2*pos[2]/r, x.r2-x.r1]
+# 	AffineMap(rotation_between(SA[0,0,1], n), p)
+# end
+# 
+# # Coordinates on circle & sphere ««2
+# """
+# 		find_anchor(x::Circle, angle::Real)
+# Returns anchor at point `(-sin(angle), cos(angle))` (trig. orientation,
+# starting at top of circle; angle in **degrees**) with outwards normal vector
+# (the start at top guarantees that angle 0 preserves upwards-pointing
+# vector).
+# """
+# function find_anchor(x::Circle{T}, angle::Real) where{T}
+# # 	a = T(radians(angle))
+# 	(s, c) = T.(sincosd(a))
+# 	AffineMap(SA[c -s;s c], SA[-radius(x)*s, radius(x)*c])
+# end
+# """
+# 		find_anchor(x::Sphere, (latitude, longitude))
+# 
+# Returns normal vector to sphere at this position (angles in **degrees**).
+# """
+# function find_anchor(x::Sphere{T}, angle::AnyVec{2,<:Real}) where{T}
+# # 	(lat, lon) = T.(radians.(angle))
+# 	(s1, c1) = T.(sincosd(lat))
+# 	(s2, c2) = T.(sincosd(lon))
+# 	r = x.radius
+# 	AffineMap(SA[s1*c2 -s2 c1*c2;s1*s2 c2 c1*s2; -c1 0 s1],
+# 						SA[r*c1*c2, r*c1*s2, r*s1])
+# end
+# 
+# 
+# # attach ««2
+# """
+# 		attach(parent, {:label => child}...)
+# 
+# Moves (by rotations) all children so that their anchor matches the
+# anchors of `parent` defined by the given labels.
+# """
+# function attach(parent::AbstractGeometry, list::Pair{<:Any,<:AbstractGeometry}...)
+# 	union(parent, [ attach_at(parent, pos, child) for (pos,child) in list]...)
+# end
+# function attach_at(parent::AbstractGeometry{D}, label, child::AbstractGeometry) where{D}
+# 	m = find_anchor(parent, label)
+# 	mult_matrix(m, child)
+# end
+# 
+# # anchor ««2
+# """
+# 		half_turn(q::UnitQuaternion)
+# 
+# Returns the half-turn rotation with same axis as `q`.
+# """
+# @inline half_turn(q::Rotations.UnitQuaternion) =
+# 	Rotations.UnitQuaternion(0, q.x, q.y, q.z) # the constructor normalizes this
+# """
+# 		half_turn_complement(q::Rotation{3})
+# 
+# Returns the unique rotation `r` such that `qr=rq` is a half-turn.
+# """
+# @inline half_turn_complement(q::Rotations.Rotation{3}) =
+# 	inv(q)*half_turn(q)
+# 
+# """
+# 		anchor(solid, label)
+# 
+# Translates the solid so that the anchor with name `label` is at origin
+# and the corresponding anchor vector points inward.
+# """
+# function anchor(x::AbstractGeometry, label)
+# # Ax + B maps [0,0,0] to anchor point p, and e_z=[0,0,1] to anchor vec v
+# # namely: A e_z = v, B = p
+# # we want to map p to [0,0,0] and -v to e_z
+# # i.e. A' v = - e_z and A' p + B' = 0, or B' = -A' p = -A' B
+# #
+# 
+# 	m = find_anchor(x, label)
+# 	a1= half_turn_complement(linear(m))
+# # ⚠ -a1*m is interpreted as (-a1)*m, and a1 is a quaternion ⇒ -a1≡a1 (as
+# # a rotation)
+# 	mult_matrix(AffineMap(a1, a1*-translation(m)), x)
+# end
+# 
 # # # Annotations ««1
 # # abstract type AbstractAnnotation{D} end
 # # 

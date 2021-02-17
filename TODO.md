@@ -1,4 +1,5 @@
 # Immediate work
+ - reorganize inside the file
  - split in several files after all (will help in `include()` time)?
  - `AbstractMesh` is not a subtype of `AbstractGeometry`
    and hence `union(...)` etc will not work on it.
