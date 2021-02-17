@@ -10,34 +10,25 @@ using FixedPointNumbers
 using SparseArrays
 using Dictionaries
 
-module AbstractMeshes
-	using Meshes
-	export Geometry, coordtype, embeddim
-	AbstractMesh = Mesh
-	export AbstractMesh
-	export Point, Vec, boundingbox, coordinates, vertices
-	export Box, Ball, Cylinder, Segment, Triangle
-	export center, radius
-# names which are specifically **not** exported:
-# Sphere  (ours are strictly 3-dimensional)
-# Polygon/PolyArea (`Meshes` uselessly demands first==last)
-end; using .AbstractMeshes
-# extended functions:
-import .AbstractMeshes: coordtype, embeddim, vertices
+import GeometryBasics
+import GeometryBasics: AbstractGeometry, Point, Vec
+import GeometryBasics: HyperSphere, Sphere, Circle, Rect, Triangle
+import GeometryBasics: AbstractMesh
+@inline coordtype(::AbstractGeometry{N,T}) where{N,T} = T
 
-import Polyhedra
+import Polyhedra # for convex hull
 import GLPK
 # hide the Triangle module name so that we may use it for a type:
-module Triangulate
+module LibTriangle
 	import Triangle
 	import Triangle: basic_triangulation
 	function constrained_triangulation(args...)
-		# temporary: the libtriangle call tends to segfault whenever lines
+		# XXX temporary: the libtriangle call tends to segfault whenever lines
 		# cross, so we show what it is called with
 		println("constrained triangulation: ", args...)
 		return Triangle.constrained_triangulation(args...)
 	end
-end; import .Triangulate
+end; import .LibTriangle
 # using MiniQhull
 import Rotations
 import Colors
@@ -108,14 +99,11 @@ If `count` is provided, advance by `count` steps instead.
 	mod1(i+count, a.stop)
 
 # Static vectors and paths««2
-# --mesh
-@inline Point{D}(v::AbstractVector) where{D} = Point(SVector{D}(v))
-@inline getindex(p::Point, i) = p.coords[i]
-@inline iszero(p::Point) = iszero(p.coords)
+# Make point - point = vector
+Base.:-(p::Point, q::Point) = Vec(p.data .- q.data)
 @inline function barycenter(points::Point...)
-	T = promote_type(coordtype.(points)...)
-	return Point(sum([p.coords for p in points])/
-		convert(real_type(T), length(points)))
+	T = promote_type(eltype.(points)...)
+	return Point(sum(points) / convert(real_type(T), length(points)))
 end
 # """
 #     Vec{D,T}
@@ -128,14 +116,7 @@ end
 # Vec{2}((1,2))			Vec((1,2))
 # Vec{2}(1,2)				Vec(1,2)
 # Vec{2}([1,2])			- (needs explicit size) -
-"""
-    AnyVec{D, T}
 
-A supertype of all plausible user input for `D`-dimensional vectors of
-type `T`.
-"""
-const AnyVec{D,T<:Real} =
-Union{StaticVector{D,<:T},AbstractVector{<:T},NTuple{D,<:T}}
 # XXX: we might need an “embedding” function (maybe not a constructor though):
 # Vec{3,T}(x::AnyVec{2,T}, fill = zero(T)) where{T} = 
 #		Vec{3,T}(get(x, i, fill) for i in 1:3)
@@ -238,13 +219,6 @@ end
 # @inline det3(v1, v2, v3) = det([v1 v2 v3])
 # @inline det3(p1, p2, p3, p4) = det3(p2-p1, p3-p1, p4-p1)
 # Geometry ««1
-# Some reasons not to use `GeometryBasics.jl`:
-# - (as of 2021-01-14) not documented
-# - matrix × rectangle multiplication is incorrectly defined (it returns
-# a bounding box for the product)
-# - inconsistency between types (e.g. Rectangle is always parallel to
-# axes but Cylinder has an arbitrary orientation)
-# But we might yet use `Meshes.jl`
 # the Geometry type««2
 # """
 # 		Geometry{D,T}
@@ -292,7 +266,7 @@ union() {
 
 """
 function include(file::AbstractString)
-	global toplevel_objs = Geometry[]
+	global toplevel_objs = AbstractGeometry[]
 	Base.include(x->expr_filter(obj_filter, x), Main, file)
 	return union(toplevel_objs...)
 end
@@ -302,10 +276,10 @@ end
 """
     obj_filter(x)
 
-Appends `x` to the global list of returned objects if `x` is a `Geometry`.
+Appends `x` to the global list of returned objects if `x` is a `AbstractGeometry`.
 """
 @inline obj_filter(x) = x
-@inline obj_filter(x::Geometry) =
+@inline obj_filter(x::AbstractGeometry) =
 	(global toplevel_objs; push!(toplevel_objs, x); return x)
 
 """
@@ -320,7 +294,7 @@ which can then dispatch on the type of the expression.
 # Numeric values, LineNumber expressions etc. will never be useful to us:
 expr_filter(f::Function, e::Any) = e
 # expr_filter(e::LineNumberNode) = (global last_linenumber = e)
-# A Symbol might be an Geometry variable name, so we add it:
+# A Symbol might be an AbstractGeometry variable name, so we add it:
 expr_filter(f::Function, e::Symbol) = :($f($e))
 
 # we add any top-level expressions, except assignments:
@@ -350,7 +324,7 @@ From the info in `X` we can derive a default constructor
 The coordinate type `T` is guessed from the values of the tuple using the
 `_infer_type(H;kwargs...)` method.
 """
-struct PrimitiveSolid{S,D,T,X} <: Geometry{D,T}
+struct PrimitiveSolid{S,D,T,X} <: AbstractGeometry{D,T}
 	parameters::X
 	@inline PrimitiveSolid{S,D,T,X}(;kwargs...) where{S,D,T,X} =
 		new{S,D,T,X}(kwargs.data)
@@ -367,15 +341,15 @@ end
 
 # Glue for types imported from Meshes.jl: Square, Cube, Circle, Sphere««2
 # --mesh
-@inline Box{D}(p1::AbstractVector, p2::AbstractVector) where{D} =
-	Box{D,promote_type(eltype.((p1,p2))...)}(Point{D}(p1), Point{D}(p2))
-@inline function Box{D}(v::AbstractVector;
+@inline Rect{D}(p1::AbstractVector, p2::AbstractVector) where{D} =
+	Rect{D,promote_type(eltype.((p1,p2))...)}(Point{D}(p1), Point{D}(p2))
+@inline function Rect{D}(v::AbstractVector;
 		origin=zero(v), center=false) where{D}
 	p1 = center ? origin - one_half(v) : origin
-	return Box{D}(p1, p1+v)
+	return Rect{D}(p1, p1+v)
 end
-@inline Box{D}(a::Number; kwargs...) where{D} =
-	Box{D}(Vec{D}(a for _ in 1:D); kwargs...)
+@inline Rect{D}(a::Number; kwargs...) where{D} =
+	Rect{D}(Vec{D}(a for _ in 1:D); kwargs...)
 
 """
     Square(size; origin, center=false)
@@ -383,30 +357,36 @@ end
 An axis-parallel square or rectangle  with given `size`
 (scalar or vector of length 2).
 """
-Square = Box{2}
+Square = Rect{2}
 """
     Cube(size; origin, center=false)
 
 A cube or parallelepiped  with given `size`
 (scalar or vector of length 3).
 """
-Cube = Box{3}
+Cube = Rect{3}
 
-@inline Ball{D}(r::T) where{D,T} = Ball(Point(zero(SVector{D,T})), r)
+@inline HyperSphere{D}(r::T) where{D,T} =
+	HyperSphere(Point(zero(SVector{D,T})), r)
 """
     Circle(radius)
 
 A circle. Discretization is done via the `accuracy` and `precision`
 parameters.
 """
-Circle = Ball{2}
+Circle
 """
     Sphere(radius)
 
 A sphere. Discretization is done via the `accuracy` and `precision`
 parameters.
 """
-Sphere = Ball{3}
+Sphere
+struct Cylinder{T} <: GeometryBasics.GeometryPrimitive{3,T}
+	origin::Point{3,T}
+	radius::T
+	height::T
+end
 # Cylinder ««2
 # """
 #     Cylinder(h, r1, r2 [, center=false])
@@ -433,10 +413,10 @@ Sphere = Ball{3}
 
 A simple, closed polygon enclosed by the given vertices.
 """
-struct Polygon{T} <: Geometry{2,T}
+struct Polygon{T} <: AbstractGeometry{2,T}
 	points::Vector{Point{2,T}}
 	@inline Polygon(points::AbstractVector{<:Point{2}}) =
-		new{real_type(coordtype.(points)...)}(points)
+		new{real_type(eltype.(points)...)}(points)
 	@inline Polygon(points::AbstractVector{<:AbstractVector{<:Real}}) =
 		Polygon(Point.(points))
 	@inline Polygon(points::AbstractVector{<:Real}...) = Polygon([points...])
@@ -467,27 +447,81 @@ Parameters
 Interface
  - `vertices(s)`: `AbstractDictionary` of indices
  - `faces(s)`: `AbstractDictionary` of faces
-"""
-abstract type AbstractSurface{T,F} <: AbstractMesh{3,T} end
 
+Triangle{D,T}=TriangleP{D,T,Point{D,T}}= points::SVector{3,Point{4,T}}
+TriangleFace{T}=NGonFace{3,T}= data:: NTuple{3,T}
+PlainMesh{D,T}=TriangleMesh{D,T,Point{D,T}}=
+	AbstractMesh{Triangle{D,T}} has faces Triangle{D,T} **abstract**
+abstract type AbstractMesh{Element<:Polytope} <: AbstractVector{Element} end
+
+Mesh{3,T,Triangle{3,T}, faceview...} = simplices::V
+
+FaceView{E,P,F,PV,FV}~Vector{E} = elements::PV, faces::FV
+ici FaceView{Triangle{3,T},Point{3,T}, **Face**,
+	Vector{Point{3,T}},Vector{**Face**}
+ == SimpleFaceView{3,T,3,Int,Point{3,T},TriangleFace{T}}
+
+struct FaceView{Element,Point <: AbstractPoint,Face <: AbstractFace,P <: AbstractVector{Point},F <: AbstractVector{Face}} <: AbstractVector{Element}
+    elements::P
+    faces::F
+end
+struct Mesh{Dim,T<:Number,Element<:Polytope{Dim,T},V<:AbstractVector{Element}} <: AbstractMesh{Element}
+const FaceMesh{Dim,T,Element} = Mesh{Dim,T,Element,<:FaceView{Element}}
+"""
+AbstractSurface = GeometryBasics.PlainMesh
+surface(points::AbstractVector{<:Point{3}},
+	faces::AbstractVector{<:AbstractVector{<:Integer}}) =
+	GeometryBasics.Mesh(Point{3,real_type(eltype.(points)...)}.(points),
+		GeometryBasics.TriangleFace{Int}.(faces))
+
+vertices(s::AbstractGeometry) = GeometryBasics.coordinates(s)
+vertices(s::GeometryBasics.AbstractMesh) = GeometryBasics.coordinates(s)
+nvertices(s::AbstractSurface) = length(vertices(s))
+faces(s::AbstractSurface) = GeometryBasics.faces(s)
+nfaces(s::AbstractSurface) = length(faces(s))
+
+AbstractTriangulatedSurface{T} =
+	GeometryBasics.AbstractMesh{<:GeometryBasics.TriangleP{3,T}}
+# fieldnames(TriangulatedSurface):
+#   simplices::FaceView{...}
+# fieldnames(FaceView{...}):
+#   elements::Vector{Point{3,T}}
+#   faces::Vector{TriangleFace{Int}}
+# TriangleFace{Int}:
+#   data::NTuple{3,Int}
+
+# concrete type:
+# XXX is this even needed?
+TriangulatedSurface{T} = GeometryBasics.Mesh{3,T,Triangle{3,T},
+	GeometryBasics.SimpleFaceView{3,T,3,Int,Point{3,T},
+		GeometryBasics.TriangleFace{Int}}}
+Base.show(io::IO, ::Type{TriangulatedSurface{T}}) where{T<:Real} =
+	print(io, "TriangulatedSurface{$T}")
+TriangulatedSurface(
+		points::AbstractVector{<:Point},
+		faces::AbstractVector{<:Vector{Int}}) =
+	surface(points, faces)
+# fields are simplices.elements:: Vector{Point{3,T}}
+#            simplices.faces::Vector{TriangleFace{Int}}
+#            simplices.faces[1].data::NTuple{3,Int}
 @inline nvertices(s::AbstractSurface) = length(vertices(s))
 @inline nfaces(s::AbstractSurface) = length(faces(s))
 @inline facetype(s::AbstractSurface{T,F}) where{T,F} = F
 
-abstract type AbstractTriangulatedSurface{T} <:
-	AbstractSurface{T,SVector{3,Int}} end
+# abstract type AbstractTriangulatedSurface{T} <:
+# 	AbstractSurface{T,SVector{3,Int}} end
 
-@inline AbstractMeshes.Triangle(s::AbstractTriangulatedSurface, i) =
-	Triangle(vertices(s)[faces(s)[i]])
-
-struct TriangulatedSurface{T} <: AbstractTriangulatedSurface{T}
-	vertices::Vector{Point{3,T}}
-	faces::Vector{SVector{3,Int}}
-end
-@inline TriangulatedSurface(points, faces) =
-	TriangulatedSurface{real_type(coordtype.(points)...)}(points, faces)
-@inline faces(s::TriangulatedSurface) = s.faces
-@inline vertices(s::TriangulatedSurface) = s.vertices
+# @inline AbstractMeshes.Triangle(s::AbstractTriangulatedSurface, i) =
+# 	Triangle(vertices(s)[faces(s)[i]])
+# 
+# struct TriangulatedSurface{T} <: AbstractTriangulatedSurface{T}
+# 	vertices::Vector{Point{3,T}}
+# 	faces::Vector{SVector{3,Int}}
+# end
+# @inline TriangulatedSurface(points, faces) =
+# 	TriangulatedSurface{real_type(coordtype.(points)...)}(points, faces)
+# @inline faces(s::TriangulatedSurface) = s.faces
+# @inline vertices(s::TriangulatedSurface) = s.vertices
 
 struct SurfaceFacesView{T,F} <:
 	AbstractSurface{T,F}
@@ -520,7 +554,7 @@ this should have no influence on the dimension of a top-level object.
 
 The `T` type parameter is always `Bool`.
 """
-struct NeutralSolid{D,T} <: Geometry{D,T} end
+struct NeutralSolid{D,T} <: AbstractGeometry{D,T} end
 @inline scad_name(::NeutralSolid{D}) where{D} = D
 # @inline parameters(::IO, ::NeutralSolid) = nothing
 
@@ -528,8 +562,8 @@ macro define_neutral(op, what, result)
 	W = QuoteNode(what)
 	F=:(Solids.$op)
 	quote
-	@inline $F(neutral::Geometry, absorb::NeutralSolid{$W}) = $result
-	@inline $F(absorb::NeutralSolid{$W}, neutral::Geometry) = $result
+	@inline $F(neutral::AbstractGeometry, absorb::NeutralSolid{$W}) = $result
+	@inline $F(absorb::NeutralSolid{$W}, neutral::AbstractGeometry) = $result
 	@inline $F(x::NeutralSolid{$W}, ::NeutralSolid{$W}) = x
 	end
 end
@@ -573,8 +607,8 @@ function hull end
 A type representing CSG operations on solids. `D` is the dimension and
 `S` is a symbol representing the operation (union, intersection etc.)
 """
-struct ConstructedSolid{S,V,D,T} <: Geometry{D,T}
-	children::V # Vector{<:Geometry}, or tuple etc.
+struct ConstructedSolid{S,V,D,T} <: AbstractGeometry{D,T}
+	children::V # Vector{<:AbstractGeometry}, or tuple etc.
 	# passing a vector or tuple:
 	@inline ConstructedSolid{S,V,D,T}(v::V) where{S,V,D,T} = new{S,V,D,T}(v)
 end
@@ -583,11 +617,11 @@ end
 @inline children(s::ConstructedSolid) = s.children
 @inline scad_name(::ConstructedSolid{S}) where{S} = S
 
-ConstructedSolid(s::Symbol, T = Vector{<:Geometry}) = ConstructedSolid{s,T}
+ConstructedSolid(s::Symbol, T = Vector{<:AbstractGeometry}) = ConstructedSolid{s,T}
 CSGUnion = ConstructedSolid(:union)
 CSGInter = ConstructedSolid(:intersection)
-CSGDiff = ConstructedSolid(:difference,Tuple{<:Geometry,<:Geometry})
-CSGComplement = ConstructedSolid(:complement,Tuple{<:Geometry})
+CSGDiff = ConstructedSolid(:difference,Tuple{<:AbstractGeometry,<:AbstractGeometry})
+CSGComplement = ConstructedSolid(:complement,Tuple{<:AbstractGeometry})
 CSGHull = ConstructedSolid(:hull)
 CSGMinkowski = ConstructedSolid(:minkowski)
 # @inline scad_name(::ConstructedSolid{D, :intersection}) where{D} = :intersection
@@ -596,61 +630,61 @@ CSGMinkowski = ConstructedSolid(:minkowski)
 for op in (:union, :intersect, :minkowski, :hull)
 	Q=QuoteNode(op)
 	# union, intersection, minkowski are trivial on single objects:
-	op != :hull &&  @eval ($op)(a::Geometry) = a
+	op != :hull &&  @eval ($op)(a::AbstractGeometry) = a
 	@eval begin
 	# all of these are associative:
 	# we leave out the binary case, which will be defined on a case-by-case
 	# basis depending on the operators (see below).
-#		($op)(a::Geometry, b::Geometry) =
+#		($op)(a::AbstractGeometry, b::AbstractGeometry) =
 #			ConstructedSolid{$Q}([unroll(a, Val($Q)); unroll(b, Val($Q))])
-	($op)(a::Geometry, b::Geometry, c::Geometry, x...) =
+	($op)(a::AbstractGeometry, b::AbstractGeometry, c::AbstractGeometry, x...) =
 		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
 	end
 end
 
 """
-    union(s::Geometry...)
+    union(s::AbstractGeometry...)
     s1 ∪ s2
 
 Represents the union of given solids.
 """
-@inline union(a1::Geometry{D1}, a2::Geometry{D2}) where{D1, D2} =
+@inline union(a1::AbstractGeometry{D1}, a2::AbstractGeometry{D2}) where{D1, D2} =
 	CSGUnion{max(D1,D2)}(unroll2(a1, a2, Val(:union)))
 """
-    intersect(s::Geometry...)
+    intersect(s::AbstractGeometry...)
     s1 ∩ s2
 
 Represents the intersection of given solids.
 """
-@inline intersect(a1::Geometry{D1}, a2::Geometry{D2}) where{D1, D2} =
+@inline intersect(a1::AbstractGeometry{D1}, a2::AbstractGeometry{D2}) where{D1, D2} =
 	CSGInter{min(D1,D2)}(unroll2(a1, a2, Val(:intersection)))
 """
-    minkowski(s::Geometry...)
+    minkowski(s::AbstractGeometry...)
 
 Represents the Minkowski sum of given solids.
 """
-@inline minkowski(a1::Geometry{D1}, a2::Geometry{D2}) where{D1, D2} =
+@inline minkowski(a1::AbstractGeometry{D1}, a2::AbstractGeometry{D2}) where{D1, D2} =
 	CSGMinkowski{max(D1,D2)}(unroll2(a1, a2, Val(:minkowski)))
 """
-    hull(s::Geometry...)
+    hull(s::AbstractGeometry...)
 
 Represents the convex hull of given solids.
 """
-@inline hull(s::Geometry...) =
+@inline hull(s::AbstractGeometry...) =
 	CSGHull{maximum(embeddim.(s))}(
 		[unroll(t, Val.((:hull, :union))...) for t in s])
 
 """
-		unroll(x::Geometry, Val(sym1), Val(sym2)...)
+		unroll(x::AbstractGeometry, Val(sym1), Val(sym2)...)
 
 Returns either `[x]` or, if `x` is a `ConstructedSolid` matching one of the
 symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
 """
-@inline unroll(s::Geometry, ::Val, tail...) = unroll(s, tail...)
-@inline unroll(s::Geometry) = s
+@inline unroll(s::AbstractGeometry, ::Val, tail...) = unroll(s, tail...)
+@inline unroll(s::AbstractGeometry) = s
 @inline unroll(s::ConstructedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
 	children(s)
-@inline unroll2(s::Geometry, t::Geometry, tail...) =
+@inline unroll2(s::AbstractGeometry, t::AbstractGeometry, tail...) =
 	[unroll(s, tail...); unroll(t, tail...)]
 
 # minus operator is binary:
@@ -659,16 +693,16 @@ symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
 
 Represents the difference `s1 ∖ s2`.
 """
-@inline difference(x::Geometry{D1}, y::Geometry) where{D1} =
+@inline difference(x::AbstractGeometry{D1}, y::AbstractGeometry) where{D1} =
 	CSGDiff{embeddim(x)}((x, y))
 # 		[unroll(x, Val(:difference)); unroll.(y, Val(:union))...])
 # added interface: difference([x...], [y...])
-@inline difference(x::AbstractVector{<:Geometry},
-				y::AbstractVector{<:Geometry}) =
+@inline difference(x::AbstractVector{<:AbstractGeometry},
+				y::AbstractVector{<:AbstractGeometry}) =
 	difference(union(x...), union(y...))
 # 	ConstructedSolid{foldr(max,embeddim.(x);init=2),:difference}(union(x...), y...)
 
-@inline complement(x::Geometry{D}) where{D} =
+@inline complement(x::AbstractGeometry{D}) where{D} =
 	CSGComplement{embeddim(x)}((x,))
 
 # General transforms««1
@@ -728,10 +762,10 @@ example) is to define a type and a constructor:
     Frobnicate = Transform{:frobnicate}
 		frobnicate(x::real, s...) = Frobnicate((x=x,), s...)
 """
-struct Transform{S,D,T,X} <: Geometry{D,T}
-	child::Geometry{D,T}
+struct Transform{S,D,T,X} <: AbstractGeometry{D,T}
+	child::AbstractGeometry{D,T}
 	data::X
-	Transform{S}(data::X, child::Geometry{D,T}) where{S,X,D,T} =
+	Transform{S}(data::X, child::AbstractGeometry{D,T}) where{S,X,D,T} =
 		new{S,D,T,X}(child, data)
 end
 # default values for I/O:
@@ -739,9 +773,9 @@ end
 @inline children(f::Transform) = [f.child]
 @inline scad_name(f::Transform{S}) where{S} = S
 @inline parameters(f::Transform) = f.data
-@inline (T::Type{Transform{S}})(f, s::Geometry...) where{S} =
+@inline (T::Type{Transform{S}})(f, s::AbstractGeometry...) where{S} =
 	T(f, union(s...))
-@inline (T::Type{Transform{S}})(f, s::Vector{<:Geometry}) where{S} =
+@inline (T::Type{Transform{S}})(f, s::Vector{<:AbstractGeometry}) where{S} =
 	T(f, s...)
 @inline (T::Type{Transform{S}})(f) where{S} = Curry{S}((s...)->T(f, s...))
 # We can extract the `f` value from the above in the following way:
@@ -839,7 +873,7 @@ end
 # @inline Affine(a; center) = Affine(a, a*center - center)
 @inline Affine(a;center=Val(false)) = Affine(a, Val(false))
 
-@inline (f::Affine)(p::Point) = Point(f.a * p.coords + f.b)
+@inline (f::Affine)(p::Point) = Point(f.a * p + f.b)
 # @inline apply(f::Affine, p::Point) = Point(f.a * v.coords + f.b)
 # @inline apply(f::Affine, points::AbstractVector{<:Point}) =
 # 	[apply(f, p) for p in points]
@@ -880,9 +914,9 @@ end
 A type containing compressed information for an orthogonal reflection
 matrix. Inspired by the `Diagonal` type.
 """
-struct Reflection{D,T,V<:AbstractVector{T}} <: StaticMatrix{D,D,T}
+struct Reflection{D,T,V<:AbstractVector} <: AbstractMatrix{T}
 	axis::V
-	@inline Reflection{D,T,V}(v::V) where {D,T,V<:AnyVec{D,T}} =
+	@inline Reflection{D,T,V}(v::V) where {D,T,V<:AbstractVector{T}} =
 		new{D,T,V}(v)
 end
 # we use only static vectors in Reflections:
@@ -956,7 +990,7 @@ end
 
 Translates solids `s...` by vector `v`.
 """
-@inline translate(v::AnyVec, s...) = mult_matrix(1, v, s...)
+@inline translate(v::AbstractVector, s...) = mult_matrix(1, v, s...)
 """
     scale(a, s...; center=0)
     scale(a; center=0) * s
@@ -967,7 +1001,7 @@ the invariant point.
 the associated diagonal matrix.
 """
 @inline scale(a::Real, s...; kwargs...) = mult_matrix(a, s...; kwargs...)
-@inline scale(a::AnyVec, s...; kwargs...) =
+@inline scale(a::AbstractVector, s...; kwargs...) =
 	mult_matrix(Diagonal(a), s...; kwargs...)
 """
     mirror(v, s...; center=0)
@@ -977,7 +1011,7 @@ Reflection with axis given by the hyperplane normal to `v`.
 If `center` is given, then the affine hyperplane through this point will
 be used.
 """
-@inline mirror(v::AnyVec, s...; kwargs...) =
+@inline mirror(v::AbstractVector, s...; kwargs...) =
 	mult_matrix(Reflection(v), s...; kwargs...)
 
 @inline rotation(θ::AnyAngle; axis=SA[0,0,1], kwargs...) =
@@ -1002,18 +1036,18 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 	mult_matrix(rotation((θ,φ,ψ); kwargs...), s...)
 
 # Operators««2
-@inline +(v::AnyVec, x::Geometry) = translate(v,x)
-@inline +(x::Geometry, v::AnyVec) = translate(v,x)
+@inline +(v::AbstractVector, x::AbstractGeometry) = translate(v,x)
+@inline +(x::AbstractGeometry, v::AbstractVector) = translate(v,x)
 
-# this purposely does not define a method for -(x::Geometry).
-@inline Base.:-(x::Geometry, y::Geometry, tail...) =
+# this purposely does not define a method for -(x::AbstractGeometry).
+@inline Base.:-(x::AbstractGeometry, y::AbstractGeometry, tail...) =
 	difference(x, [y, tail...])
-@inline Base.:-(x::Geometry{D}) where{D} = difference(intersect(), x)
-@inline Base.:-(x::AbstractVector{<:Geometry},
-                y::AbstractVector{<:Geometry}) = difference(x, y)
+@inline Base.:-(x::AbstractGeometry{D}) where{D} = difference(intersect(), x)
+@inline Base.:-(x::AbstractVector{<:AbstractGeometry},
+                y::AbstractVector{<:AbstractGeometry}) = difference(x, y)
 
-# @inline *(f::AbstractAffineMap, x::Geometry) = mult_matrix(f, x)
-@inline *(s::Union{Real,AnyVec{3}}, x::Geometry) = scale(s,x)
+# @inline *(f::AbstractAffineMap, x::AbstractGeometry) = mult_matrix(f, x)
+@inline *(s::Union{Real,AbstractVector}, x::AbstractGeometry) = scale(s,x)
 
 ⋃ = Base.union
 ⋂ = Base.intersect
@@ -1022,18 +1056,18 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 @inline indent(io::IO) = print(io, " "^get(io, :indent, 0))
 @inline add_indent(io::IO, n=1) =
 	IOContext(io, :indent => get(io, :indent, 0)+1)
-@inline function Base.show(io::IO, l::Geometry...)
+@inline function Base.show(io::IO, l::AbstractGeometry...)
 	for s in l
 		indent(io); scad(io, s)
 	end
 end
 
-@inline children(::Geometry) = nothing
-@inline parameters(::Geometry) = NamedTuple()
+@inline children(::AbstractGeometry) = nothing
+@inline parameters(::AbstractGeometry) = NamedTuple()
 
 """
-    scad(filename::AbstractString, s::Geometry...)
-    scad(io::IO, s::Geometry)
+    scad(filename::AbstractString, s::AbstractGeometry...)
+    scad(io::IO, s::AbstractGeometry)
 
 Prints an OpenSCAD-like representation of the given solid(s).
 
@@ -1053,7 +1087,7 @@ Possible transformation prepended to the object.
 Represents value `x` (number, array, etc.) in OpenSCAD format.
 
 """
-function scad(io::IO, s::Geometry)
+function scad(io::IO, s::AbstractGeometry)
 	indent(io)
 	print(io, scad_transform(s))
 	print(io, scad_name(s), "(")
@@ -1070,10 +1104,10 @@ function scad(io::IO, s::Geometry)
 	end
 end
 
-@inline scad(filename::AbstractString, L::Geometry...) =
+@inline scad(filename::AbstractString, L::AbstractGeometry...) =
 	open(filename, "w") do f scad(f, l...) end
 
-function scad_children(io::IO, s::Geometry)
+function scad_children(io::IO, s::AbstractGeometry)
 	print(io, " {\n")
 	io2 = add_indent(io)
 	for c in children(s)
@@ -1088,14 +1122,14 @@ end
 @inline scad_name(::Sphere) = :sphere
 @inline scad_name(::Polygon) = :polygon
 
-@inline scad_parameters(s::Geometry) = parameters(s)
-@inline scad_parameters(s::Box) = (size=Vector{Float64}(s.max - s.min),)
-@inline scad_parameters(s::Ball) = (r=s.radius,)
+@inline scad_parameters(s::AbstractGeometry) = parameters(s)
+@inline scad_parameters(s::Rect) = (size=Vector{Float64}(s.max - s.min),)
+@inline scad_parameters(s::HyperSphere) = (r=s.radius,)
 @inline scad_parameters(p::Polygon) = (points=p.points,)
 
-@inline scad_transform(s::Geometry) = ""
-@inline scad_transform(s::Box) = scad_translate(s.min)
-@inline scad_transform(s::Ball) = scad_translate(s.center)
+@inline scad_transform(s::AbstractGeometry) = ""
+@inline scad_transform(s::Rect) = scad_translate(s.min)
+@inline scad_transform(s::HyperSphere) = scad_translate(s.center)
 @inline scad_translate(p::Point) =
 	iszero(coordinates(p)) ? "" : string("translate", to_scad(p), ")")
 
@@ -1111,7 +1145,7 @@ function scad(io::IO, s::AbstractSurface)
 	println(io, "polyhedron(points=[ // ", nvertices(s), " points:")
 	for (i,p) in pairs(vertices(s))
 		indent(io)
-		print(io, " ", Vector{Float64}(p.coords))
+		print(io, " ", Vector{Float64}(p))
 		if i < nvertices(s) print(io, ","); end
 		println(io, " // ", i)
 	end
@@ -1137,7 +1171,7 @@ end
 # # Attachments««1
 # # Anchor system««2
 # """
-# 		find_anchor(x::Geometry, name)
+# 		find_anchor(x::AbstractGeometry, name)
 # 
 # Returns the anchor (an affine rotation) found for the given `name` for
 # the solid `x`.
@@ -1154,9 +1188,9 @@ end
 # 	 normalized to a point at the boundary of `x` (see below);
 #  - a way to designate a point at the boundary of `x` (see below).
 # """
-# @inline find_anchor(x::Geometry, labels::NTuple{N,Symbol}) where{N} =
+# @inline find_anchor(x::AbstractGeometry, labels::NTuple{N,Symbol}) where{N} =
 # 	find_anchor(x, sum([ labeled_anchor(x, l) for l in labels]))
-# @inline function find_anchor(x::Geometry, label::Symbol)
+# @inline function find_anchor(x::AbstractGeometry, label::Symbol)
 # 	y = labeled_anchor(x, label)
 # 	y isa Missing && error("No anchor named '$label' found in $(scad_name(x))")
 # 	return find_anchor(x, y)
@@ -1172,9 +1206,9 @@ end
 # 	top	  = SA[0,0,+1],
 # 	center= SA[0,0,0],
 # )
-# @inline labeled_anchor(x::Geometry{3}, label::Symbol) =
+# @inline labeled_anchor(x::AbstractGeometry{3}, label::Symbol) =
 # 	get(default_positions, label, missing)
-# @inline labeled_anchor(x::Geometry{2}, label::Symbol) =
+# @inline labeled_anchor(x::AbstractGeometry{2}, label::Symbol) =
 # 	_labeled_anchor_3to2(get(default_positions, label, missing))
 # @inline _labeled_anchor_3to2(::Missing) = missing
 # @inline _labeled_anchor_3to2(v::StaticVector{3}) =
@@ -1220,8 +1254,8 @@ end
 # 
 # Wraps an object, adding symbolic anchors to it.
 # """
-# struct NamedAnchors{D,T} <: Geometry{D,T}
-# 	child::Geometry{D,T}
+# struct NamedAnchors{D,T} <: AbstractGeometry{D,T}
+# 	child::AbstractGeometry{D,T}
 # 	anchors::Dict{Symbol, AnchorData{D,T}}
 # end
 # """
@@ -1235,7 +1269,7 @@ end
 #  - a triple (origin, direction, spin).
 #  - (in 2d) a pair (origin, angle).
 # """
-# @inline named_anchors(x::Geometry{D,T},
+# @inline named_anchors(x::AbstractGeometry{D,T},
 # 	a::Pair{Symbol}...) where{D,T} =
 # 	NamedAnchors{D,T}(x, Dict(k => AnchorData{D,T}(v) for (k,v) in a))
 # 
@@ -1347,10 +1381,10 @@ end
 # Moves (by rotations) all children so that their anchor matches the
 # anchors of `parent` defined by the given labels.
 # """
-# function attach(parent::Geometry, list::Pair{<:Any,<:Geometry}...)
+# function attach(parent::AbstractGeometry, list::Pair{<:Any,<:AbstractGeometry}...)
 # 	union(parent, [ attach_at(parent, pos, child) for (pos,child) in list]...)
 # end
-# function attach_at(parent::Geometry{D}, label, child::Geometry) where{D}
+# function attach_at(parent::AbstractGeometry{D}, label, child::AbstractGeometry) where{D}
 # 	m = find_anchor(parent, label)
 # 	mult_matrix(m, child)
 # end
@@ -1377,7 +1411,7 @@ end
 # Translates the solid so that the anchor with name `label` is at origin
 # and the corresponding anchor vector points inward.
 # """
-# function anchor(x::Geometry, label)
+# function anchor(x::AbstractGeometry, label)
 # # Ax + B maps [0,0,0] to anchor point p, and e_z=[0,0,1] to anchor vec v
 # # namely: A e_z = v, B = p
 # # we want to map p to [0,0,0] and -v to e_z
@@ -1392,7 +1426,7 @@ end
 # end
 # 
 # # Reduction of mult_matrix operations ««1
-# @inline affine_reduce(m::AbstractAffineMap, x::Geometry) =
+# @inline affine_reduce(m::AbstractAffineMap, x::AbstractGeometry) =
 # 	mult_matrix(m, x)
 # @inline affine_reduce(u::LinearMap{<:Diagonal}, x::Square) =
 # 	Square([ u.linear.diag[i] * @inbounds x.size[i] for i in 1:2 ], x.center)
@@ -1412,7 +1446,7 @@ end
 # 	union((affine_reduce(m3, x) for x in children(m2))...)
 # 	# TODO
 # end
-# affine_reduce(x::Geometry) = affine_reduce(LinearMap(I), x)
+# affine_reduce(x::AbstractGeometry) = affine_reduce(LinearMap(I), x)
 #————————————————————— Meshing —————————————————————————————— ««1
 #»»1
 # Converting circles to polygons««1
@@ -1572,7 +1606,7 @@ Converts stuff (numbers, vectors, paths...) to and from `Clipper.jl` types.
 @inline to_clipper(T::Type{<:FixedPoint{<:Int64}}) = T
 @inline to_clipper(T::Type, x::Real) = reinterpret(convert(to_clipper(T), x))
 @inline to_clipper(T::Type, v::Point{2,<:Real}) =
-	Clipper.IntPoint(to_clipper(T, v.coords[1]), to_clipper(T, v.coords[2]))
+	Clipper.IntPoint(to_clipper(T, v[1]), to_clipper(T, v[2]))
 @inline to_clipper(T, p::AbstractVector{<:Point{2}}) =
 	[to_clipper(T, v) for v in p]
 @inline to_clipper(T, p::Vector{<:AbstractVector{<:Point{2}}}) =
@@ -1680,7 +1714,7 @@ given polygon.
 
 Polygon is assumed not self-intersecting.
 """
-@inline function point_in_polygon(point::AnyVec{2,T},
+@inline function point_in_polygon(point::Point{2,T},
 	path::AnyPath{2,T}) where{T}
 	return Clipper.pointinpolygon(to_clipper(T, point), to_clipper(T, path))
 end
@@ -1710,7 +1744,7 @@ end
 
 # HRepElement is the supertype of HalfSpace and HyperPlane
 @inline direction(h::Polyhedra.HRepElement) = h.a
-@inline (h::Polyhedra.HRepElement)(p::Point) = h.a ⋅ p.coords - h.β
+@inline (h::Polyhedra.HRepElement)(p::Point) = h.a ⋅ p - h.β
 @inline ∈(p::Point, h::Polyhedra.HyperPlane) = iszero(h(p))
 @inline convert(T::Type{<:Polyhedra.HRepElement}, h::Polyhedra.HRepElement) =
 	T(h.a, h.β)
@@ -1772,7 +1806,8 @@ end
 """
     line(p1=>p2)
 """
-function line(p12::Pair{<:AnyVec{2}})
+# XXX
+function line(p12::Pair{<:Point{2}})
 	(x1, y1) = p12[1]
 	(x2, y2) = p12[2]
 	a = SA[y1-y2, x2-x1]
@@ -1784,7 +1819,7 @@ end
 
 Returns the half-plane through (p1, p2) such that h(p3) > 0.
 """
-function halfplane(p12::Pair{<:AnyVec{2}}, p3::AnyVec{2})
+function halfplane(p12::Pair{<:Point{2}}, p3::Point{2})
 	l = line(p12)
 # 	(x1, y1) = p12[1]
 # 	(x2, y2) = p12[2]
@@ -1800,15 +1835,16 @@ end
 Returns the triple of half-planes delimiting the interior of the given
 triangle.
 """
-function hrep(p1::AnyVec{2}, p2::AnyVec{2}, p3::AnyVec{2})
+function hrep(p1::Point{2}, p2::Point{2}, p3::Point{2})
 	return (halfplane(p1=>p2, p3),
 	        halfplane(p2=>p3, p1),
 	        halfplane(p3=>p1, p2))
 end
 
+Segment{D,T} = GeometryBasics.Simplex{D,T,2,Point{D,T}}
 function line_inter(s1::Segment{2}, s2::Segment{2})
-	((x1,y1), (x2,y2)) = coordinates.(vertices(s1))
-	((x3,y3), (x4,y4)) = coordinates.(vertices(s2))
+	((x1,y1), (x2,y2)) = vertices(s1)
+	((x3,y3), (x4,y4)) = vertices(s2)
 	d=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4)
 	if iszero(d) return nothing; end
 	a = x1*y2-y1*x2; b = x3*y4-y3*x4
@@ -1977,7 +2013,7 @@ function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
 		newfaces[f1+i] = renum[f] # array indexed by array trick
 	end
 
-	return (typeof(s1))(newpoints, sort(newfaces))
+	return surface(newpoints, newfaces)
 end
 
 """
@@ -2235,103 +2271,6 @@ end
 # 	set!(xa, a, ax); set!(new_ad, d, da); set!(dx, x, xd)
 # 	return m # or x...
 # end
-# Triangulations««1
-# 2d triangulation««2
-"""
-    triangulate_loop(path::Path{2})
-
-Given a closed loop of points,
-returns a Delaunay triangulation of the *inside* of the loop only.
-(Constrained triangulation and all triangles lying outside the loop are
-removed. Triangles are oriented in the same direction as the loop.)
-
-The triangulation is returned as a vector of [i1, i2, i3] = integer indices
-in the list of points.
-"""
-function triangulate_loop(points::Matrix{Float64})
-	N = size(points, 1)
-	return Triangulate.constrained_triangulation(
-		points,
-		collect(1:N), # identity map on points
-		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
-end
-@inline triangulate_loop(points::AnyPath{2}) =
-	triangulate_loop(Matrix{Float64}(vcat(transpose.(points)...)))
-# 	N = length(points)
-# 	m = Matrix{Float64}(vcat(transpose.(points)...))
-# 
-# 	ct = Triangulate.constrained_triangulation(
-# 		m,
-# 		collect(1:N), # trivial map on points
-# 		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
-# 	# returns triangles of the same orientation as the loop:
-# 	# outer triangles are removed by Triangle library
-# 	# each triangle is either inner or outer
-# 	# this is determined e.g. by its barycenter
-# # 	return filter(t->point_in_polygon(sum(points[t])/3, points) > 0, ct)
-# 	return ct
-# end
-
-# 3d face triangulation««2
-"""
-    triangulate_face(points; direction, map, convex)
-
-Returns a triangulation of the face (assumed convex; points in any order)
-Optional keyword arguments:
- - `direction` is a normal vector (used for projecting to 2d).
- - `map` is a labeling of points (default is identity map).
- - `convex` is a Val(true) or Val(false).
-
-The triangulation is returned as a vector of StaticVector{3,Int},
-containing the labels of three points of each triangle.
-"""
-function triangulate_face(
-		points::AbstractVector{<:Point{3}}
-		;
-		direction::AbstractVector = face_normal(points),
-		map::AbstractVector{<:Integer} = [1:length(points)...],
-		convex::Val = Val(false)
-		)
-	coords = project_2d(direction)
-	N = length(points)
-	# this common case deserves a shortcut:
-	if N == 3 return [Vec{3}(map)]; end
-
-	points2d = Matrix{Float64}(undef, N, 2)
-	for (i, p) in pairs(points), (j, x) in pairs(coords)
-		points2d[i, j] = p.coords[x]
-	end
-	if convex isa Val{true}
-		r= Vec{3,Int}.(Triangulate.basic_triangulation(points2d, map))
-		return r
-	else
-		edges = vcat(([map[i] map[mod1(i+1,N)]] for i in 1:N)...)
-		r= Vec{3,Int}.(Triangulate.constrained_triangulation(points2d,
-			map, edges))
-		return r
-	end
-end
-# Triangulating surfaces««2
-"""
-    triangulate(s::AbstractSurface)
-
-Converts a `AbstractSurface` to a `TriangulatedSurface`.
-This triangulates all faces and removes all degenerate (collinear) faces.
-"""
-function triangulate(s::AbstractSurface)
-	triangles = Vec{3,Int}[]
-	for f in faces(s)
-		# kill all 2-faces
-		length(f) <= 2 && continue
-		# triangulate
-		thisface = triangulate_face(vertices(s)[f]; map=f)
-		# kill all degenerate faces
-		@inline is_degenerate(t) =
-			iszero(norm(face_normal(vertices(s)[t])))
-		push!(triangles, filter(!is_degenerate, thisface)...)
-	end
-	return TriangulatedSurface(vertices(s), triangles)
-end
 #Convex hull««1
 # 2d convex hull ««2
 
@@ -2361,8 +2300,7 @@ function convex_hull_list(points)
   # In practice this is faster than using `Polyhedra.jl`.
 #   println("points=$points, length=$(length(points))")
   i0 = findextrema(points;
-    lt=(p,q)->(p.coords[2]<q.coords[2])||
-			(p.coords[2]==q.coords[2] && p.coords[1]>q.coords[1])).min[2]
+    lt=(p,q)->(p[2]<q[2])|| (p[2]==q[2] && p[1]>q[1])).min[2]
   @inline detp2(i,j,k) = det2(points[[i,j,k]]...)
 	# 1024 is an arbitrary value for detecting “aligned” points (i.e. up to
 	# representation errors), which should be fast for both Float and Fixed
@@ -2454,12 +2392,12 @@ order).
 # 3d convex hull ««2
 
 """
-    convex_hull(x::Geometry{3}...)
+    convex_hull(x::AbstractGeometry{3}...)
 
 Returns the convex hull of the union of all the given solids, as a
 pair `(points, faces)`. `faces` is a list of triangles.
 """
-@inline convex_hull(x::Geometry{3}) =
+@inline convex_hull(x::AbstractGeometry{3}) =
 	convex_hull(vcat([vertices(y) for y in x]...))
 
 """
@@ -2558,7 +2496,7 @@ end
 Represents a union of polygons. Each polygon is assumed to be simple and
 ordered in trigonometric ordering.
 """
-struct PolyUnion{T} <: Geometry{2,T}
+struct PolyUnion{T} <: AbstractGeometry{2,T}
 	poly::Vector{Path{2,T}}
 	@inline PolyUnion{T}(p::AbstractVector{<:AnyPath{2,T}}) where{T} =
 		new{T}(Path{2,T}.(p))
@@ -2588,7 +2526,7 @@ function scad(io::IO, u::PolyUnion{S}, spaces::AbstractString) where{S}
 end
 #»»
 # Conversion from leaf 2d types««2
-@inline PolyUnion(l::Geometry{2}; kwargs...) =
+@inline PolyUnion(l::AbstractGeometry{2}; kwargs...) =
 	PolyUnion{real_type(eltype(l))}(l, merge(_DEFAULT_PARAMETERS, kwargs.data))
 
 @inline (U::Type{<:PolyUnion})(x::Square, parameters) =
@@ -2674,7 +2612,7 @@ function offset(U::PolyUnion{T}, u::Real;
 	add_paths!(c, U.poly, join_type, Clipper.EndTypeClosedPolygon)
 	PolyUnion(execute(T, c, u))
 end
-@inline offset(x::Geometry{2}, args...; kwargs...) =
+@inline offset(x::AbstractGeometry{2}, args...; kwargs...) =
 	offset(PolyUnion(x), args...; kwargs...)
 
 # Draw ««2
@@ -2700,12 +2638,12 @@ end
 
 # Convex hull««2
 # """
-# 		convex_hull(x::Geometry{2}...)
+# 		convex_hull(x::AbstractGeometry{2}...)
 # 
 # Returns the convex hull of the union of all the given solids, as a
 # `PolyUnion` structure.
 # """
-@inline convex_hull(x::Geometry{2}...; params=_DEFAULT_PARAMETERS) =
+@inline convex_hull(x::AbstractGeometry{2}...; params=_DEFAULT_PARAMETERS) =
 	convex_hull(PolyUnion(union(x...), params))
 
 @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(vertices(u)))
@@ -2726,9 +2664,9 @@ Returns an equation (`a*x = b`) of the supporting plane, with `a`
 pointing *outwards*.
 """
 function supporting_plane(t::Triangle)
-	(p1, p2, p3) = vertices(t)
+	(p1, p2, p3) = t
 	c = cross(p2-p1, p3-p1)
-	b = dot(c, p1.coords)
+	b = dot(c, p1)
 	return Polyhedra.HyperPlane(c, b)
 end
 
@@ -2766,17 +2704,23 @@ end
 
 
 # Using a Box as a bounding box««2
-@inline ∈(x::AbstractVector, b::Box) = all(b.min.coords .≤ x .≤ b.max.coords)
-@inline ∈(x::Point, b::Box) = x.coords ∈ b
-@inline isempty(b::Box) = any(b.min.coords .> b.max.coords)
+struct Box{D,T} <: GeometryBasics.GeometryPrimitive{D,T}
+	min::Point{D,T}
+	max::Point{D,T}
+end
+@inline ∈(x::AbstractVector, b::Box) = all(b.min .≤ x .≤ b.max)
+# @inline ∈(x::Point, b::Box) = x.coords ∈ b
+@inline isempty(b::Box) = any(b.min .> b.max)
 @inline intersect(a::Box, b::Box) =
-	Box(Point(max.(a.min.coords, b.min.coords)),
-	    Point(min.(a.max.coords, b.max.coords)))
+	Box(Point(max.(a.min, b.min)), Point(min.(a.max, b.max)))
+boundingbox(points::Point{D,T}...) where{D,T} =
+	Box{D,T}(min.(points...), max.(points...))
+boundingbox(g::AbstractGeometry) = boundingbox(GeometryBasics.coordinates(g)...)
 
 # 3d -> 2d projections««2
 const plus1mod3 = SA[2,3,1]
 const plus2mod3 = SA[3,1,2]
-@inline function project_2d(direction::AnyVec{3}, index::Val = Val(false))
+@inline function project_2d(direction::AbstractVector, index::Val = Val(false))
 	# we inline the 'findmax' call since we know the length is 3:
 	# (doing this about halves the running time of this function. Besides,
 	# since the value 'e' only takes three possible values, it enables the
@@ -2847,7 +2791,7 @@ end
 
 An open ray, of the form `a + ]0,∞[ v`.
 """
-struct AffineRay{D,T} <: Geometry{D,T}
+struct AffineRay{D,T} <: AbstractGeometry{D,T}
 	origin::Point{D,T}
 	direction::Vec{D,T}
 end
@@ -2906,7 +2850,7 @@ function intersects(a::AffineRay, t::Triangle, strict = false)
 end
 
 
-struct AffineRayInv{D,T} <: Geometry{D,T}
+struct AffineRayInv{D,T} <: AbstractGeometry{D,T}
 	origin::Vec{D,T}
 	direction::Vec{D,T}
 	inv_dir::Vec{D,T}
@@ -2956,6 +2900,103 @@ function intersections(a::AffineRay, s::TriangulatedSurface,
 	return sum(intersects(a, Triangle(s,i), i>minface )
 		for i in eachindex(faces(s)))
 end
+# Triangulations««1
+# 2d triangulation««2
+"""
+    triangulate_loop(path::Path{2})
+
+Given a closed loop of points,
+returns a Delaunay triangulation of the *inside* of the loop only.
+(Constrained triangulation and all triangles lying outside the loop are
+removed. Triangles are oriented in the same direction as the loop.)
+
+The triangulation is returned as a vector of [i1, i2, i3] = integer indices
+in the list of points.
+"""
+function triangulate_loop(points::Matrix{Float64})
+	N = size(points, 1)
+	return LibTriangle.constrained_triangulation(
+		points,
+		collect(1:N), # identity map on points
+		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
+end
+@inline triangulate_loop(points::AnyPath{2}) =
+	triangulate_loop(Matrix{Float64}(vcat(transpose.(points)...)))
+# 	N = length(points)
+# 	m = Matrix{Float64}(vcat(transpose.(points)...))
+# 
+# 	ct = LibTriangle.constrained_triangulation(
+# 		m,
+# 		collect(1:N), # trivial map on points
+# 		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
+# 	# returns triangles of the same orientation as the loop:
+# 	# outer triangles are removed by Triangle library
+# 	# each triangle is either inner or outer
+# 	# this is determined e.g. by its barycenter
+# # 	return filter(t->point_in_polygon(sum(points[t])/3, points) > 0, ct)
+# 	return ct
+# end
+
+# 3d face triangulation««2
+"""
+    triangulate_face(points; direction, map, convex)
+
+Returns a triangulation of the face (assumed convex; points in any order)
+Optional keyword arguments:
+ - `direction` is a normal vector (used for projecting to 2d).
+ - `map` is a labeling of points (default is identity map).
+ - `convex` is a Val(true) or Val(false).
+
+The triangulation is returned as a vector of StaticVector{3,Int},
+containing the labels of three points of each triangle.
+"""
+function triangulate_face(
+		points::AbstractVector{<:Point{3}}
+		;
+		direction::AbstractVector = face_normal(points),
+		map::AbstractVector{<:Integer} = [1:length(points)...],
+		convex::Val = Val(false)
+		)
+	coords = project_2d(direction)
+	N = length(points)
+	# this common case deserves a shortcut:
+	if N == 3 return [Vec{3}(map)]; end
+
+	points2d = Matrix{Float64}(undef, N, 2)
+	for (i, p) in pairs(points), (j, x) in pairs(coords)
+		points2d[i, j] = p[x]
+	end
+	if convex isa Val{true}
+		r= Vec{3,Int}.(LibTriangle.basic_triangulation(points2d, map))
+		return r
+	else
+		edges = vcat(([map[i] map[mod1(i+1,N)]] for i in 1:N)...)
+		r= Vec{3,Int}.(LibTriangle.constrained_triangulation(points2d,
+			map, edges))
+		return r
+	end
+end
+# Triangulating surfaces««2
+"""
+    triangulate(s::AbstractSurface)
+
+Converts a `AbstractSurface` to a `TriangulatedSurface`.
+This triangulates all faces and removes all degenerate (collinear) faces.
+"""
+function triangulate(s::AbstractSurface)
+	triangles = Vec{3,Int}[]
+	for f in faces(s)
+		# kill all 2-faces
+		length(f) <= 2 && continue
+		# triangulate
+		thisface = triangulate_face(vertices(s)[f]; map=f)
+		# kill all degenerate faces
+		@inline is_degenerate(t) =
+			iszero(norm(face_normal(vertices(s)[t])))
+		push!(triangles, filter(!is_degenerate, thisface)...)
+	end
+	return TriangulatedSurface(vertices(s), triangles)
+end
 # 3d union and intersection««1
 # After [Zhou, Grinspun, Zorin, Jacobson](https://dl.acm.org/doi/abs/10.1145/2897824.2925901)
 # Self-intersection««2
@@ -2978,7 +3019,7 @@ function self_intersect(s::AbstractTriangulatedSurface)
 	inc = incidence(s; vf=false) # we only need edge_faces
 	println("planes...")
 	# we precompute all planes: we need them later for edge intersections
-	planes = [ supporting_plane(Triangle(s, i)) for i in eachindex(faces(s)) ]
+	planes = [ supporting_plane(tri) for tri in s ]
 
 	n = nvertices(s)
 # 	println("self_intersect: $n points at beginning")
@@ -3022,7 +3063,7 @@ function self_intersect(s::AbstractTriangulatedSurface)
 # 		println("  face $i: $f")
 		# set up infrastructure for this face
 		triangle = vertices(s)[f]
-		bbox = boundingbox(triangle)
+		bbox = boundingbox(triangle...)
 		plane = planes[i]
 		(proj, lift) = project_2d(plane)
 		triangle2 = hrep([p[proj] for p in triangle]...) # hrep of projection
@@ -3052,8 +3093,7 @@ function self_intersect(s::AbstractTriangulatedSurface)
 				continue
 			end
 			# the previous line ensures that z1 ≠ z2, so this never fails:
-			p2 = Point((z2*segment.vertices[1][proj] -
-				z1*segment.vertices[2][proj])/(z2-z1))
+			p2 = Point((z2*segment[1][proj] - z2*segment[2][proj])/(z2-z1))
 			if any(h(p2) <= 0 for h in triangle2)
 				continue
 			end
@@ -3079,7 +3119,7 @@ function self_intersect(s::AbstractTriangulatedSurface)
 		(proj, kmax) = project_2d(v, Val(true))
 		eq2 = line(vertices(s)[e[1]][proj] => vertices(s)[e[2]][proj])
 
-		bbox = boundingbox(vertices(s)[e])
+		bbox = boundingbox(vertices(s)[e]...)
 		# edge-vertex intersections:««
 		for (j, p) in pairs(vertices(s))
 			if p ∉ bbox || j ∈ e || eq2(Point(p[proj]...)) ≠ 0 || eq1(p) ≠ 0
@@ -3192,14 +3232,14 @@ function subtriangulate(s::AbstractTriangulatedSurface)
 # 			println("$(coords[i,1]) $(coords[i,2]) $p")
 # 		end
 # 		println("($coords, $plist, $cons)")
-		tri = Triangulate.constrained_triangulation(coords, plist,
+		tri = LibTriangle.constrained_triangulation(coords, plist,
 			[perimeter[mod1(i+j,l)] for i in eachindex(perimeter), j in 0:1])
 # 		println("triangulation = $tri")
 		push!(newfaces, tri...)
 	end
 
 	newfaces = remove_opposite_faces(newfaces)
-	return TriangulatedSurface(newpoints, newfaces)
+	return surface(newpoints, newfaces)
 end
 
 # Splitting into regular components««2
@@ -3613,7 +3653,7 @@ function path_extrude(path::AbstractVector{Point{2,T}},
 
 	N = length(poly)
 	# offset_path is a vector of vector of paths
-	offset_path = offset([path], [pt.coords[1] for pt in poly],
+	offset_path = offset([path], [pt[1] for pt in poly],
 		join = join, ends = closed ? :closed : :butt)
 	# new_points is a flat list of all 3d points produced
 	new_points = [[
@@ -3717,9 +3757,9 @@ end
 @inline (S::Type{<:AbstractSurface})(s::Transform, parameters...) =
 	S(s.child, parameters...)
 # CSG operations««2
-function (S::Type{<:AbstractSurface})(s::CSGUnion{3}, parameters...)
+function surface(s::CSGUnion{3}, parameters...)
 	return select_multiplicity(isequal(1),
-		[S(x, parameters...) for x in children(s)]...)
+		[surface(x, parameters...) for x in children(s)]...)
 end
 function (S::Type{<:AbstractSurface})(s::CSGInter{3}, parameters...)
 	return select_multiplicity(isequal(length(children(s))),
@@ -3762,7 +3802,7 @@ end
 # # 
 # #  - `Cylinder`: shows a circle in 3d space, parametrized by center (`Vec{3}`), normal vector (non-zero), radius (scalar), and preferred orientation (vector; should be in the circle plane).
 # # """
-# # struct DiameterArrow{X<:Geometry,T,D,N} <: AbstractAnnotation{D}
+# # struct DiameterArrow{X<:AbstractGeometry,T,D,N} <: AbstractAnnotation{D}
 # # 	center::Vec{D,T}
 # # 	radius::T
 # # 	orientation::Vec{D,T}
@@ -3776,9 +3816,9 @@ end
 # # 		new{Cylinder, T, 3, Vec{3,T}}(center, radius, orientation, normal)
 # # end
 # # 
-# # struct Annotate{D,T} <: Geometry{D,T}
+# # struct Annotate{D,T} <: AbstractGeometry{D,T}
 # # 	annotations::Vector{<:AbstractAnnotation{D}}
-# # 	child::Geometry{D,T}
+# # 	child::AbstractGeometry{D,T}
 # # end
 # # # the offset is just a hint; we let the visualizer take care of using
 # # # this
@@ -3798,7 +3838,7 @@ function explain(s::AbstractSurface, io::IO = stdout; scale=1,
 	println(io, "translate($offset) {")
 	for (i, p) in pairs(Solids.vertices(s))
 		println(io, """
-translate($scale*$(p.coords)) {
+translate($scale*$(Vector{Float64}(p)) {
 	color("red") sphere(1);
 	color("black", .8) linear_extrude(1) text(\"$i\", size=5);
 }""")

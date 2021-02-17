@@ -1,6 +1,13 @@
 # Immediate work
+ - split in several files after all (will help in `include()` time)?
+ - `AbstractMesh` is not a subtype of `AbstractGeometry`
+   and hence `union(...)` etc will not work on it.
+	 => there needs to be a `Surface` type encapsulating this
+	 (i.e. deriving from `AbstractGeometry` and containing some `Mesh`
+	 data).
+ * use `BasicGeometry`
  - a common name for meshing objects (either `Mesh` or `elements` ?)
-   => **realize**
+   => **Mesh**? or **realize**
  - try 2 strategies for n-ary intersection/union:
    - merge all structures and compute multiplicity with ray-shooting,
 	 - or reduce with binary op
