@@ -8,7 +8,6 @@ using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers
 using SparseArrays
-using Dictionaries
 
 import GeometryBasics
 import GeometryBasics: AbstractGeometry, Point, Vec
@@ -479,6 +478,7 @@ vertices(s::GeometryBasics.AbstractMesh) = GeometryBasics.coordinates(s)
 nvertices(s::AbstractSurface) = length(vertices(s))
 faces(s::AbstractSurface) = GeometryBasics.faces(s)
 nfaces(s::AbstractSurface) = length(faces(s))
+@inline facetype(s::AbstractSurface{T,F}) where{T,F} = F
 
 AbstractTriangulatedSurface{T} =
 	GeometryBasics.AbstractMesh{<:GeometryBasics.TriangleP{3,T}}
@@ -504,9 +504,6 @@ TriangulatedSurface(
 # fields are simplices.elements:: Vector{Point{3,T}}
 #            simplices.faces::Vector{TriangleFace{Int}}
 #            simplices.faces[1].data::NTuple{3,Int}
-@inline nvertices(s::AbstractSurface) = length(vertices(s))
-@inline nfaces(s::AbstractSurface) = length(faces(s))
-@inline facetype(s::AbstractSurface{T,F}) where{T,F} = F
 
 # abstract type AbstractTriangulatedSurface{T} <:
 # 	AbstractSurface{T,SVector{3,Int}} end
