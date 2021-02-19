@@ -15,7 +15,7 @@ module LibTriangle
 	function constrained_triangulation(args...)
 		# XXX temporary: the libtriangle call tends to segfault whenever lines
 		# cross, so we show what it is called with
-		println("constrained triangulation: ", args...)
+		println("constrained_triangulation($(args...))")
 		return Triangle.constrained_triangulation(args...)
 	end
 end; import .LibTriangle
@@ -33,7 +33,7 @@ import .AbstractMeshes: vertices
 
 # using MiniQhull
 import Rotations
-import ColorTypes: ColorTypes, Colorant
+import Colors: Colors, Colorant
 import Clipper
 import LightGraphs
 
@@ -245,11 +245,12 @@ end
 # Glue for types imported from Meshes.jl: Square, Cube, Circle, Sphere««2
 # --mesh
 @inline Box{D}(p1::AbstractVector, p2::AbstractVector) where{D} =
-	Box{D,promote_type(coordtype.((p1,p2))...)}(Point{D}(p1), Point{D}(p2))
+	Box{D,promote_type(eltype.((p1,p2))...)}(Point{D}(p1), Point{D}(p2))
 @inline Box{D}(v::AbstractVector; origin=zero(v), center=false) where{D} =
 	let p1 = center ? origin - one_half(v) : origin
 	Box{D}(p1, p1 + v)
 	end
+@inline width(b::Box) = b.max - b.min
 
 """
     Square(size; origin, center=false)
@@ -354,13 +355,15 @@ struct EmptyIntersect end
 
 macro define_neutral(op, what, result)
 	quote
-	@inline $op(neutral, absorb::$what) = $result
-	@inline $op(absorb::$what, neutral) = $result
-	@inline $op(x::$what, ::$what) = x
+	@inline $(esc(op))(neutral, absorb::$what) = $result
+	@inline $(esc(op))(absorb::$what, neutral) = $result
+	@inline $(esc(op))(x::$what, ::$what) = x
 	end
 end
 union() = EmptyUnion()
 intersect() = EmptyIntersect()
+Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
+Base.show(io::IO, ::EmptyIntersect) = print(io, "intersect())")
 
 # these are necessary for the following macros:
 function minkowski end
@@ -645,7 +648,7 @@ Colors objects `s...` in the given color.
 @inline color(c::AbstractString, s...) =
 	color(parse(Colorant, c), s...)
 @inline color(c::AbstractString, a::Real, s...) =
-	color(ColorTypes.coloralpha(parse(Colorant, c), a), s...)
+	color(Colors.coloralpha(parse(Colorant, c), a), s...)
 
 # Linear extrusion««2
 LinearExtrude = Transform{:linear_extrude}
@@ -960,13 +963,13 @@ end
 @inline scad_name(::Polygon) = :polygon
 
 @inline scad_parameters(s::Geometry) = parameters(s)
-@inline scad_parameters(s::Box) = (size=Vector{Float64}(s.widths),)
+@inline scad_parameters(s::Box) = (size=Vector{Float64}(width(s)),)
 @inline scad_parameters(s::HyperSphere) = (r=s.radius,)
 @inline scad_parameters(s::Cylinder) = (h=s.height, r1=s.r1, r2=s.r2,)
 @inline scad_parameters(p::Polygon) = (points=p.points,)
 
 @inline scad_transform(s::Geometry) = ""
-@inline scad_transform(s::Box) = scad_origin(s.origin)
+@inline scad_transform(s::Box) = scad_origin(minimum(s))
 @inline scad_transform(s::HyperSphere) = scad_origin(s.center)
 @inline scad_transform(s::Cylinder) = scad_origin(s.origin)
 @inline scad_origin(p) =
@@ -977,7 +980,7 @@ end
 # kill any SVector{...} appearing in output:
 @inline to_scad(v::AbstractVector) = Vector(to_scad.(v))
 @inline to_scad(c::Colorant) = round.(Float64.([
-	ColorTypes.red(c), ColorTypes.green(c), ColorTypes.blue(c), ColorTypes.alpha(c)]), digits=3)
+	Colors.red(c), Colors.green(c), Colors.blue(c), Colors.alpha(c)]), digits=3)
 
 # special case: Surface, with annotations for points
 function scad(io::IO, s::Surface)
@@ -1092,7 +1095,7 @@ function unit_n_gon(T::Type{<:Real}, n::Int)
 	reinterpret(Vec{2,T}, z)
 end
 @inline unit_n_gon(r, parameters...) =
-	r*unit_n_gon(real_type(r), sides(r, parameters))
+	r*unit_n_gon(real_type(r), sides(r, 360°, parameters...))
 
 const golden_angle = 2π/MathConstants.φ
 """
@@ -3323,7 +3326,7 @@ function vertices(c::Cylinder, parameters)
 	            [ c.origin + [p; c.height ] for p in p2 ])
 end
 @inline vertices(s::Sphere, parameters) =
-	Point.(fibonacci_sphere_points(s.radius, parameters)) + s.center
+	Point.(fibonacci_sphere_points(s.radius, parameters...)) + s.center
 
 # All of these are convex, so we use the lazy approach and just take
 # convex hull of all the points.
@@ -3745,7 +3748,7 @@ end
 # # Exports ««1
 export square, Circle, cube, Cylinder, Polygon, Surface
 export mult_matrix, translate, scale, rotate, mirror
-export linear_extrude, rotate_extrude
+export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
 export difference, ⋃, ⋂, offset, hull, minkowski
 export scad

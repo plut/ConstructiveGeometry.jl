@@ -14,3 +14,5 @@ $(Surface(t1 \ t2))
 \e[31;1mConvex hull of two tetrahedra:\e[m
 $(Surface(hull(t1, t2)))
 """)
+# file `tetrahedra.png` contains images of these four constructions
+# (generated with OpenSCAD for now).

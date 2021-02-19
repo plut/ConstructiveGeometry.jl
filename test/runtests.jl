@@ -1,9 +1,10 @@
-using Test, StaticArrays, Colors
-
-# push!(LOAD_PATH, "./src", "src")
 using ConstructiveGeometry
-import ConstructiveGeometry: _FIXED, Vec, Path, Point
-import ConstructiveGeometry: from_clipper, to_clipper
+using Test
+using StaticArrays
+using ConstructiveGeometry: _FIXED, Vec, Point, Path
+using ConstructiveGeometry: from_clipper, to_clipper
+using ConstructiveGeometry: children, vertices
+CG = ConstructiveGeometry
 
 function test_from_to(T, x)
 	return @test from_clipper(T, to_clipper(T, x)) == x
@@ -26,13 +27,9 @@ end
 end
 
 @testset "Handling of objects" begin #<<<1
-using ConstructiveGeometry: Square, Circle
-using ConstructiveGeometry: children
-using ConstructiveGeometry: mult_matrix, translate, scale
-using ConstructiveGeometry: color
-s = Square(1)
+s = square(1)
 @testset "Primitives" begin #<<<2
-@test s == Square([1,1])
+@test s == square([1,1])
 end
 @testset "Operations" begin #<<<2
 @test union(s, union()) === s
@@ -42,16 +39,15 @@ end
 @test 2s == scale(2, s)
 @test scale(2)*s == scale(2, s)
 @test scale(2)*[s] == scale(2, s)
-@test color("red", s) == color(parse(Colorant, "red"), s)
+@test color("red")*s == color("red", s)
 end
 end
 @testset "Clipper" begin #<<<1
-s = Square(1)
+s = square(1)
 # FIXME
 end
 @testset "Extrusion" begin #<<<1
-using ConstructiveGeometry: path_extrude, points
-C = points(Circle(3.),(precision=.01,accuracy=1))
+C = vertices(Circle(3.),(precision=.01,accuracy=1))
 c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
 @test (path_extrude(c, C)) != 0
 end
@@ -80,33 +76,40 @@ CH = convex_hull([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),P(1,1,1),P(1,0,0),])
 	])== [2,5,3,6,1]
 end
 @testset "Surfaces" begin #<<<1
-using ConstructiveGeometry: connected_components, Surface, merge, select_faces
+using ConstructiveGeometry: Surface, merge, select_faces
 using ConstructiveGeometry: nvertices, nfaces
 v=[[0,-1],[1,0],[0,1],[-1,0]]
 for j in eachindex(v), i in 1:j-1
 	@test ConstructiveGeometry.circular_lt(v[i], v[j])
 end
-@test connected_components([:a, :b, :c, :d, :e], [[1,2],[1,3],[4,5]]) ==
-	[([:a, :b, :c], [[1,2],[1,3]]),
-	 ([:d, :e], [[1,2]]) ]
+# @test connected_components([:a, :b, :c, :d, :e], [[1,2],[1,3],[4,5]]) ==
+# 	[([:a, :b, :c], [[1,2],[1,3]]),
+# 	 ([:d, :e], [[1,2]]) ]
 function pyramid(t=[0,0,0], n=0)
-	points = ConstructiveGeometry.Point{3}.([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
-	faces = [[4,3,2],[2,3,1],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
+	points = ([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
+  faces = [[4,3,2],[2,1,4],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
 	faces1 = [ f .+ n for f in faces ]
 	return Surface(points, faces1)
 end
+nvf(s) = (CG.nvertices(s), CG.nfaces(s))
 p1 = pyramid()
 p2 = pyramid([1,0,0])
-p3 = merge(p1, p2)
-p1bis = select_faces(1:6, p3)
-@test nfaces(p1bis) == nfaces(p1)
-@test nvertices(p1bis) == nvertices(p1)
-u12 = union(p1, p2)
-i12 = intersect(p1, p2)
-@test length(u12.points) == 14 && length(u12.faces) == 24
-@test length(i12.points) == 8  && length(u12.faces) == 12
+u12 = Surface(p1 ∪ p2)
+i12 = Surface(p1 ∩ p2)
+d12 = Surface(p1 \ p2)
+@test nvf(u12) == (14, 24)
+@test nvf(i12) == (8, 12)
+@test nvf(d12) == (8, 12)
+
+# p3 = merge(p1, p2)
+# p1bis = select_faces(1:6, p3)
+# @test nfaces(p1bis) == nfaces(p1)
+# @test nvertices(p1bis) == nvertices(p1)
+# u12 = union(p1, p2)
+# i12 = intersect(p1, p2)
+# @test nvertices(u12) == 14 && nfaces(u12) == 24
+# @test nvertices(i12) == 8  && nfaces(u12) == 12
 end
 #>>>1
 
 # vim: noet ts=2 fmr=<<<,>>>
-
