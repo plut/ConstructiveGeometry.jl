@@ -16,6 +16,9 @@ module LibTriangle
 		# XXX temporary: the libtriangle call tends to segfault whenever lines
 		# cross, so we show what it is called with
 		println("constrained_triangulation($(args...))")
+		for (i, v) in pairs(args[2])
+			println("$(args[1][i,1]) $(args[1][i,2]) $v")
+		end
 		return Triangle.constrained_triangulation(args...)
 	end
 end; import .LibTriangle
@@ -282,6 +285,7 @@ A circle. Discretization is done via the `accuracy` and `precision`
 parameters.
 """
 Circle = HyperSphere{2}
+circle(args...; kwargs...) = Circle(args...; kwargs...)
 """
     Sphere(radius)
 
@@ -289,6 +293,7 @@ A sphere. Discretization is done via the `accuracy` and `precision`
 parameters.
 """
 Sphere = HyperSphere{3}
+sphere(args...; kwargs...) = Sphere(args...; kwargs...)
 
 # Cylinder ««2
 """
@@ -1058,7 +1063,7 @@ hence square of edge length is d²≈ 8πr²/√3/(n-2).
   ∼ (π/√3)/(n-2) + O(n-2)^-2;
   hence  n ≤ 2 + (π/√3)/ε.
 """
-function sphere_vertices(r::Real, parameters::NamedTuple)
+function sphere_vertices(r::Real, parameters::NamedTuple = _DEFAULT_PARAMETERS)
 	n_acc = ceil(Int, 2 + (8π/√3)*(r/parameters.accuracy)^2)
 	n_pre = ceil(Int, 2 + (π/√3)/parameters.precision)
 	# a sphere always has at least 6 vertices
@@ -1121,9 +1126,9 @@ function fibonacci_sphere_points(T::Type{<:Real}, n::Int)
 	end
 	return v
 end
-@inline fibonacci_sphere_points(r::Real, parameters) =
+@inline fibonacci_sphere_points(r::Real, parameters...) =
 	r*fibonacci_sphere_points(real_type(r),
-		sphere_vertices(r, parameters))
+		sphere_vertices(r, parameters...))
 
 # Clipper.jl interface: clip, offset, simplify««1
 # This is the only section in this file which contains code directly
@@ -2618,7 +2623,8 @@ Returns all self-intersections of `s`, as a `NamedTuple`:
 Point indices are returned as indices in `vertices(s)` ∪ {new points}.
 
 """
-function self_intersect(s::AbstractSurface)
+function self_intersect(s::AbstractSurface, debug=false)
+	dprintln(args...) = (debug && println(args...))
 	println("incidence...")
 	inc = incidence(s; vf=false) # we only need edge_faces
 	println("planes...")
@@ -2639,10 +2645,12 @@ function self_intersect(s::AbstractSurface)
 		return n + length(new_points)
 	end
 	@inline function add_point_edge!(e, k, p)#««
-# 		println("adding point $k=$p to edge $e")
-# 		println("  $e=[$(vertices(s)[e])]")
-# 		println("  current points for this edge: $(edge_points[e])")
-# 		println("  current coordinates: $(edge_coords[e])")
+		dprintln("adding point $k to edge $e")
+# 		dprintln("""
+# adding point $k=$p to edge $e
+#   $e=[$(vertices(s)[e])]
+#   current points for this edge: $(edge_points[e])")
+#   current coordinates: $(edge_coords[e])""")
 		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
 		# fixme: unroll this loop to allow constant-propagation:
 		i = argmax(abs.(vec))
@@ -2651,14 +2659,14 @@ function self_intersect(s::AbstractSurface)
 			push!(edge_coords[e], p[i])
 			return
 		end
-# 		println("  sorted by coordinate $i ($(vec[i]))")
-# 		println("  e=$e")
+# 		dprintln("  sorted by coordinate $i ($(vec[i]))")
+# 		dprintln("  e=$e")
 		rev = (vec[i] < 0)
 		j = searchsorted(edge_coords[e], p[i]; rev=rev)
-# 		println("  inserting at position $j, $(first(j))")
+# 		dprintln("  inserting at position $j, $(first(j))")
 		insert!(edge_points[e], first(j), k)
 		insert!(edge_coords[e], first(j), p[i])
-# 		println("  now edge_points[$e] = $(edge_points[e])")
+# 		dprintln("  now edge_points[$e] = $(edge_points[e])")
 	end#»»
 
 	println("faces...")
@@ -2682,7 +2690,7 @@ function self_intersect(s::AbstractSurface)
 				continue
 			end
 			# vertex is inside this face, mark it
-# 			println("vertex $j inside face $i=$f")
+			dprintln("vertex $j is inside face $i=$f")
 			push!(face_points[i], j)
 		end#»»
 		# face-edge intersections««
@@ -2698,14 +2706,16 @@ function self_intersect(s::AbstractSurface)
 			end
 			# the previous line ensures that z1 ≠ z2, so this never fails:
 			(a1, a2) = coordinates.(vertices(segment))
-			p2 = Point((z2*a1[proj] - z2*a2[proj])/(z2-z1))
+			p2 = Point((z2*a1[proj] - z1*a2[proj])/(z2-z1))
 			if any(h(p2) <= 0 for h in triangle2)
 				continue
 			end
 			p3 = lift(p2)
 			k = create_point!(p3)
-# 			println("edge $e intersects face $i=$f at $k=$(last(new_points))")
-# 			println("  adding point $k to face $i=$f")
+			dprintln("edge $e intersects face $i=$f at $k")
+			dprintln("adding point $k to face $i=$f")
+			@assert norm(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]])) <= 1e-3*norm(vertices(s)[e[1]]-vertices(s)[e[2]])
+# 			dprintln("cross: $(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]]))")
 			push!(face_points[i], k)
 			add_point_edge!(e, k, p3)
 		end#»»
@@ -2733,7 +2743,7 @@ function self_intersect(s::AbstractSurface)
 
 			# edge (segment) is intersection of bbox and line,
 			# therefore here we know that the point is on the edge:
-# 			println("vertex $j is on edge $e")
+			dprintln("vertex $j is on edge $e")
 			add_point_edge!(e, j, p)
 		end#»»
 		# edge-edge intersections:««
@@ -2755,24 +2765,30 @@ function self_intersect(s::AbstractSurface)
 			end
 			if eq2(p[proj]) ≠ 0 continue; end
 			# point p is a new point and on both edges e and e1
-# 			println("edges $e and $e1 intersect")
-# 			println("""
-# Edges $e, $e1:
-# flist = $flist = $(faces(s)[abs.(flist)])
-# equations = $eq1, $eq2
-# segment = $segment
-# (z1, z2) = $((z1, z2))
-# (w1, w2) = $((w1, w2))
-# candidate p (segment ∩ z): $p
-# """)
+			dprintln("edges $e and $e1 intersect")
+			dprintln("""
+Edges $e, $e1:
+flist = $flist = $(faces(s)[abs.(flist)])
+equations = $eq1, $eq2
+segment = $segment
+(z1, z2) = $((z1, z2))
+(w1, w2) = $((w1, w2))
+candidate p (segment ∩ z): $p
+""")
 # 		@assert false
 			k = create_point!(p)
-# 			println("edge intersection: $e, $e1 => $k = $p")
-# 			println("  $(vertices(s)[e])\n  $(vertices(s)[e1])")
+			dprintln("edge intersection: $e, $e1 => $k = $p")
+			dprintln("  $(vertices(s)[e])\n  $(vertices(s)[e1])")
 			add_point_edge!(e, k, p)
 			add_point_edge!(e1, k, p)
 		end#»»
 	end#»»
+	for (f, p) in pairs(face_points)
+		dprintln(" face $f=$(faces(s)[f]): $p")
+	end
+	for (e, p) in pairs(edge_points)
+		dprintln("  edge $e: $p")
+	end
 	return (points = new_points,
 		edge_points = edge_points,
 		face_points = face_points)
@@ -2811,13 +2827,12 @@ function subtriangulate(s::AbstractSurface)
 
 	for (i, f) in pairs(faces(s))
 		extra = self_int.face_points[i]
-# 		println("subtriangulating face $f: inserting $extra")
-# 		println("first face $f[1] $f[2]: $(edge_points(f[1],f[2]))")
 		perimeter =
 			[ f[1]; edge_points(f[1], f[2]);
 			  f[2]; edge_points(f[2], f[3]);
 				f[3]; edge_points(f[3], f[1]); ]
-# 		println("  perimeter=$perimeter")
+		println("subtriangulating face $f: inner points $extra")
+		println("  perimeter=$perimeter")
 		if length(extra) == 0 && length(perimeter) == 3
 			push!(newfaces, f)
 			continue
@@ -3038,7 +3053,9 @@ of `s`.
 """
 function multiplicity_levels(s::AbstractSurface)
 	conn = incidence(s)
+	explain(s, "/tmp/mu.scad", scale=10)
 	reg = regular_components(s, conn)
+	println("regular components: $(length(reg.components))")
 	# The two next variables encode the bipartite graph of cells and
 	# regular components:
 	#  - `cells`: for each regular component, the pair (cell above, cell below)
@@ -3052,9 +3069,9 @@ function multiplicity_levels(s::AbstractSurface)
 	@inline function attach_cell_face(c, f)
 		comp = reg.label[abs(f)] # ID of regular component
 		u = f > 0 ? 1 : 2
-# 		println("attaching cell $c to face $f=$(faces(s)[abs(f)]), component $comp")
-# 		println("  there exists currently $(length(boundary)) cells")
-# 		println("  current boundary of component: $(cells[comp,:])")
+		println("attaching cell $c to face $f=$(faces(s)[abs(f)]), component $comp")
+		println("  there exists currently $(length(boundary)) cells")
+		println("  current boundary of component: $(cells[comp,:])")
 		if iszero(cells[comp,u]) || cells[comp,u] == c
 			cells[comp,u] = c
 		else
@@ -3076,15 +3093,15 @@ function multiplicity_levels(s::AbstractSurface)
 		return c
 	end
 	for (i1, r1) in pairs(reg.components)
-# 		println("** component ($i1, $r1)")
+		println("** component ($i1, $r1)")
 		for i2 in 1:i1-1
 		edge = reg.adjacency[i1,i2]
-# 		println("\e[1;4medge = $edge\e[m")
+		println("\e[1;4medge = $edge\e[m")
 		iszero(edge) && continue
 		r2 = reg.components[i2]
-# 		println("regular components $i1=$r1 and $i2=$r2 meet at edge $edge")
+		println("regular components $i1=$r1 and $i2=$r2 meet at edge $edge")
 		flist = faces_around_edge(s, edge, conn)
-# 		println("   ordered faces at this edge: $flist, vertices=$([sum(faces(s)[abs.(f)])-sum(edge) for f in flist])")
+		println("   ordered faces at this edge: $flist, vertices=$([sum(faces(s)[abs.(f)])-sum(edge) for f in flist])")
 		for (j, f) in pairs(flist)
 			j1 = mod1(j+1, length(flist)); f1 = flist[j1]
 			# create cell between faces f and f1
@@ -3306,7 +3323,7 @@ end#»»
 # Converting 3d objects to Surfaces««1
 # Primitive objects««2
 Surface(s::Surface) = s
-function vertices(s::Cube, parameters::NamedTuple)
+function vertices(s::Cube, parameters...)
 	(u,v) = (s.min, s.max)
 	return Point{3}.([
 		SA[u[1],u[2],u[3]],
@@ -3319,14 +3336,14 @@ function vertices(s::Cube, parameters::NamedTuple)
 		SA[v[1],v[2],v[3]],
 	])
 end
-function vertices(c::Cylinder, parameters)
+function vertices(c::Cylinder, parameters::NamedTuple = _DEFAULT_PARAMETERS)
 	p1 = unit_n_gon(c.r1, parameters)
 	p2 = unit_n_gon(c.r2, parameters)
 	return vcat([ c.origin + [ p; 0 ] for p in p1],
 	            [ c.origin + [p; c.height ] for p in p2 ])
 end
-@inline vertices(s::Sphere, parameters) =
-	Point.(fibonacci_sphere_points(s.radius, parameters...)) + s.center
+@inline vertices(s::Sphere, parameters...) =
+	[ s.center + p for p in fibonacci_sphere_points(s.radius, parameters...) ]
 
 # All of these are convex, so we use the lazy approach and just take
 # convex hull of all the points.
@@ -3335,7 +3352,7 @@ function Surface(s::Union{Cube, Cylinder, Sphere},
 		parameters...)
 	p = vertices(s, parameters...)
 	(pts, faces) = convex_hull(p)
-	return triangulate(Surface(pts, faces))
+	return triangulate(pts, faces)
 end
 # Transformations««2
 function Surface(s::AffineTransform, parameters...)
@@ -3746,7 +3763,7 @@ end
 # # 
 # #
 # # Exports ««1
-export square, Circle, cube, Cylinder, Polygon, Surface
+export square, circle, cube, sphere, cylinder, Polygon, Surface
 export mult_matrix, translate, scale, rotate, mirror
 export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
@@ -3755,16 +3772,20 @@ export scad
 # don't export include, of course
 # »»1
 function explain(s::AbstractSurface, io::IO = stdout; scale=1,
-		offset=[0.,0.,0.])
-	println(io, "translate($offset) {")
+		offset=[0.,0.,0.], name=:m )
+	println(io, """
+module $name(pos=$offset, c="gray") {
+translate($scale*pos) {
+""")
 	for (i, p) in pairs(ConstructiveGeometry.vertices(s))
 		println(io, """
 translate($scale*$(Vector{Float64}(coordinates(p)))) {
 	color("red") sphere(1);
-	color("black", .8) linear_extrude(1) text(\"$i\", size=5);
-}""")
+	color("black", .8) linear_extrude(1) text("$i", size=5);
+}
+""")
 	end
-	println(io, "color(\"gray\", .7) polyhedron([")
+	println(io, "color(c, .7) polyhedron([")
 	b = false
 	for p in ConstructiveGeometry.vertices(s)
 		print(io, b ? "," : ""); b = true
@@ -3776,7 +3797,7 @@ translate($scale*$(Vector{Float64}(coordinates(p)))) {
 		print(io, b ? "," : ""); b = true
 		println(io, " ", Vector{Int}(f) .- 1, " //", Vector{Int}(f))
 	end
-	println(io, "]); }")
+	println(io, "]); } }\n$name();")
 end
 @inline explain(s::AbstractSurface, f::AbstractString; kwargs...) = begin
 	println("writing a surface with $(nvertices(s)) points to $f")
