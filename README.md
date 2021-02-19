@@ -17,13 +17,14 @@ define basic 3d models.
 
 
 The roadmap now includes at least the following:
- - interfacing with `Makie.jl` for in-built visualization of models;
- - direct output to STL files (and input of STL files);
+ - built-in visualization of models;
+ - direct mesh I/O from and to relevant file formats;
  - add more convenience constructors (e.g. for transforms);
- - see if 3d algorithms could be made faster with better data structures
-	 (e.g. halfedge structures);
+ - improve speed of some algorithms by tweaking the associated data
+	 structures;
  - implement missing operators: 3d Minkowski sum; 2d/3d Minkowski
 	 difference;
+ - add a `text()` constructor;
  - add an annotation system to ease the design of complex models.
 
 Any contributions are welcome!

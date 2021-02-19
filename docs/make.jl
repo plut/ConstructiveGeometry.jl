@@ -1,8 +1,11 @@
 push!(LOAD_PATH, "src/")
 push!(LOAD_PATH, "../src/")
 using Documenter, ConstructiveGeometry
-makedocs(sitename="ConstructiveGeometry.jl")
+makedocs(
+# 	modules = [ConstructiveGeometry],
+	sitename="ConstructiveGeometry.jl",
+)
 
 deploydocs(
-    repo = "github.com/plut/ConstructiveGeometry.jl.git",
+	repo = "github.com/plut/ConstructiveGeometry.jl.git",
 )

@@ -1,26 +1,22 @@
 # Immediate work
- - reorganize inside the file
+ - `Region`: finish 2d subsystem
+ - use `Reexport.jl`
+ + fix the docs re: `module.function` (see how it's done in other
+	 packages)
+	 - and the tests as well
+ * reorganize inside the file
  - split in several files after all (will help in `include()` time)?
- - `AbstractMesh` is not a subtype of `AbstractGeometry`
-   and hence `union(...)` etc will not work on it.
-	 => there needs to be a `Surface` type encapsulating this
-	 (i.e. deriving from `AbstractGeometry` and containing some `Mesh`
-	 data).
- * use `BasicGeometry`
- - a common name for meshing objects (either `Mesh` or `elements` ?)
-   => **Mesh**? or **realize**
+ - a common name for meshing objects
+   => **realize** **Surface**
  - try 2 strategies for n-ary intersection/union:
    - merge all structures and compute multiplicity with ray-shooting,
 	 - or reduce with binary op
- + do something smart for triangle intersections
-   and on-the-fly retriangulation
  - check using vs. import
- - populate export list
  - add a display method that shows the tree
  - replace `triangulate_between` by an actual Triangulate call
  - write a few examples
  - use `Dictionaries.jl`
- - use `Meshes.jl`
+ + use `Meshes.jl`
   - make it work with `Makie` and `MeshIO`
   - and suggest a few upstream PR.
  * test suite
@@ -66,7 +62,8 @@
    * `hull`: use embedding to push all objects to same space if possible
    * `minkowski`: ditto
 # Primitives
- + decide whether to use Square or square as a name
+ - add trivial types for EmptyUnion and EmptyIntersect
+ * decide whether to use Square or square as a name
  suggestion: `Square` is the raw constructor;
  `square` is the convenience user function
   - (which might return e.g. a rounded square)

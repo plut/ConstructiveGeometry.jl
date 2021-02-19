@@ -13,7 +13,6 @@ ConstructiveGeometry.Cylinder
 ConstructiveGeometry.Sphere
 ConstructiveGeometry.Polygon
 ConstructiveGeometry.Surface
-ConstructiveGeometry.NeutralSolid
 ```
 
 ## Transformations
@@ -68,8 +67,8 @@ ConstructiveGeometry.set_parameters
 
 ## Operations
 ```@docs
-ConstructiveGeometry.union
-ConstructiveGeometry.intersect
+union(::AbstractGeometry,::AbstractGeometry)
+intersect(::AbstractGeometry,::AbstractGeometry)
 ConstructiveGeometry.difference
 ConstructiveGeometry.hull
 ConstructiveGeometry.minkowski
