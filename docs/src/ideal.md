@@ -67,8 +67,8 @@ ConstructiveGeometry.set_parameters
 
 ## Operations
 ```@docs
-union(::AbstractGeometry,::AbstractGeometry)
-intersect(::AbstractGeometry,::AbstractGeometry)
+union(::Geometry,::Geometry)
+intersect(::Geometry,::Geometry)
 ConstructiveGeometry.difference
 ConstructiveGeometry.hull
 ConstructiveGeometry.minkowski
