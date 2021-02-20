@@ -1033,24 +1033,21 @@ end
 # Default value is 0.02 (1-cos(180°/`$fa`)).
 # FIXME: explain why .005 works better
 
-_DEFAULT_PARAMETERS = (accuracy = 2.0, precision = .005)
+_DEFAULT_PARAMETERS = (accuracy = 0.1, precision = .005)
 
 """
-    sides(radius, parameters, θ = 360°)
+    sides(radius, parameters)
 
 Returns the number of sides used to draw a circle (arc) of given angle.
 The base value `n` is given by the minimum of:
- - accuracy: each side (length `θ r/n`) must not be smaller than accuracy,
-   or n = θ r / accuracy;
- - precision: deviation=1/cos(θ/2n)≈ θ²/8n²,
-	 or n ≈ θ/√(8 * precision)
+ - accuracy: each sagitta (s= r(1-cos 2π/n)) must not be smaller
+ than `accuracy`, or n = π √(r/2 accuracy);
+ - precision: s/r = 1-cos(2π/n)  not smaller than precision,
+ or n = π /√(2*precision).
 """
-function sides(r::Real, angle::AnyAngle = 360°,
-		parameters::NamedTuple = _DEFAULT_PARAMETERS)
-	θ = radians(angle)
-	acc = ceil(Int, θ*r / (parameters.accuracy))
-	pre = ceil(Int, θ/sqrt(8*parameters.precision))
-	base = min(acc, pre)
+function sides(r::Real, parameters::NamedTuple = _DEFAULT_PARAMETERS)
+  ε = max(parameters.precision, parameters.accuracy/r)
+	base = ceil(Int, π/√(2*ε))
 	# a circle always has at least 4 sides
 	return max(4, base)
 end
@@ -1061,22 +1058,23 @@ Returns the number `n` of points on a sphere according to these
 parameters.
 
 This produces n points on the sphere, hence 2n-4 triangular faces
-(genus 0). Average surface of a triangular face is 4πr²/(2n-4)=2πr²/(n-2),
-hence square of edge length is d²≈ 8πr²/√3/(n-2).
-(unit equilateral triangle s = √3d²/4, i.e. d²=4s/√3).
+(genus 0). Average area of a triangular face is 4πr²/(2n-4)=2πr²/(n-2),
+hence square of edge length is d²≈ (8π/√3) r²/(n-2).
+(unit equilateral triangle area: A=√3d²/4, i.e. d²=(4/√3)A).
 
-* each edge length `d` must not be smaller than accuracy `α`:
-  namely 8πr²/√3/(n-2) ≥ α², or n ≤ (8π/√3) (r/α)² + 2.
-* each error (sagitta) must not be smaller than `r*ε`, where ε = precision;
-  sagitta formula: σ/r = 1-√(1-d²/4r²) = 1-√(1-(2π/√3)/(n-2)).
-  ∼ (π/√3)/(n-2) + O(n-2)^-2;
-  hence  n ≤ 2 + (π/√3)/ε.
+Sagitta is given by
+s/r = 1-√{1-d²/4r²}
+≈ 1-(1-d²/8 r²)
+≈ 1-(1-(π/√3)/(n-2))
+≈ (π/√3)/(n-2).
+Hence n ≈ 2 + (π/√3)/(precision).
+
 """
 function sphere_vertices(r::Real, parameters::NamedTuple = _DEFAULT_PARAMETERS)
-	n_acc = ceil(Int, 2 + (8π/√3)*(r/parameters.accuracy)^2)
-	n_pre = ceil(Int, 2 + (π/√3)/parameters.precision)
+  ε = max(parameters.precision, parameters.accuracy/r)
+	base = 2 + ceil(Int, (π/√3)/ε)
 	# a sphere always has at least 6 vertices
-	return max(6, min(n_acc, n_pre))
+	return max(6, base)
 end
 
 
@@ -1109,7 +1107,7 @@ function unit_n_gon(T::Type{<:Real}, n::Int)
 	reinterpret(Vec{2,T}, z)
 end
 @inline unit_n_gon(r, parameters...) =
-	r*unit_n_gon(real_type(r), sides(r, 360°, parameters...))
+	r*unit_n_gon(real_type(r), sides(r, parameters...))
 
 const golden_angle = 2π/MathConstants.φ
 """
