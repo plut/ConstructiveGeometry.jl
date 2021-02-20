@@ -10,12 +10,12 @@ function test_from_to(T, x)
 	return @test from_clipper(T, to_clipper(T, x)) == x
 end
 
-@testset "Types" begin #<<<1
-@testset "Basic types" begin #<<<2
+@testset "Types" begin #««1
+@testset "Basic types" begin #««2
 V = Point(1,2)
 @test V.coords === SA[1,2]
 end
-@testset "Conversion to/from Clipper.jl" begin #<<<2
+@testset "Conversion to/from Clipper.jl" begin #««2
 V = Point(1,2)
 test_from_to(Int, 3)
 test_from_to(Int, V)
@@ -26,32 +26,32 @@ test_from_to(Float64, 3)
 end
 end
 
-@testset "Handling of objects" begin #<<<1
+@testset "Handling of objects" begin #««1
 s = square(1)
-@testset "Primitives" begin #<<<2
+@testset "Primitives" begin #««2
 @test s == square([1,1])
 end
-@testset "Operations" begin #<<<2
+@testset "Operations" begin #««2
 @test union(s, union()) === s
 @test length(children(union(s, union(s)))) == 2
 end
-@testset "Transforms" begin #<<<2
+@testset "Transforms" begin #««2
 @test 2s == scale(2, s)
 @test scale(2)*s == scale(2, s)
 @test scale(2)*[s] == scale(2, s)
 @test color("red")*s == color("red", s)
 end
 end
-@testset "Clipper" begin #<<<1
+@testset "Clipper" begin #««1
 s = square(1)
 # FIXME
 end
-@testset "Extrusion" begin #<<<1
-C = vertices(Circle(3.),(precision=.01,accuracy=1))
+@testset "Extrusion" begin #««1
+C = vertices(circle(3.),(precision=.01,accuracy=1))
 c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
 @test (path_extrude(c, C)) != 0
 end
-@testset "Convex hull" begin #<<<1
+@testset "Convex hull" begin #««1
 using ConstructiveGeometry: convex_hull, convex_hull_list
 P(x...) = Point(Float64.(x)...)
 CH = convex_hull([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),P(1,1,1),P(1,0,0),])
@@ -75,7 +75,12 @@ CH = convex_hull([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),P(1,1,1),P(1,0,0),])
 	P(0.0, 0.7294358146330306),
 	])== [2,5,3,6,1]
 end
-@testset "Surfaces" begin #<<<1
+@testset "Basic geometry" begin#««1
+v = [[-1,0],[0,-1],[1,0],[0,1]]
+m = [CG.circular_sign(i,j) for i in v, j in v]
+@test sign.(m) == [0 1 1 1; -1 0 1 1; -1 -1 0 1; -1 -1 -1 0]
+end
+@testset "Surfaces" begin #««1
 using ConstructiveGeometry: Surface, merge, select_faces
 using ConstructiveGeometry: nvertices, nfaces
 v=[[0,-1],[1,0],[0,1],[-1,0]]
@@ -110,6 +115,6 @@ d12 = Surface(p1 \ p2)
 # @test nvertices(u12) == 14 && nfaces(u12) == 24
 # @test nvertices(i12) == 8  && nfaces(u12) == 12
 end
-#>>>1
+#»»1
 
-# vim: noet ts=2 fmr=<<<,>>>
+# vim: noet ts=2 fmr=««,»»

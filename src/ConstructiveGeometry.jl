@@ -7,6 +7,8 @@ using FixedPointNumbers
 using SparseArrays
 using Logging
 
+
+isunique(array) = length(unique(array)) == length(array)
 import Polyhedra # for convex hull
 import GLPK
 # hide the Triangle module name so that we may use it for a type:
@@ -22,8 +24,9 @@ module LibTriangle
 		end
 		s*= "»»\n"
 		@debug s
+		isunique(array) = length(unique(array)) == length(array)
+		@assert isunique(args[2]) "points must be unique: $(args[2])"
 		println(s)
-# 		flush(Main.log_txt)
 		return Triangle.constrained_triangulation(args...)
 	end
 end; import .LibTriangle
@@ -1028,8 +1031,9 @@ end
 #
 # Precision is the relative deviation allowed.
 # Default value is 0.02 (1-cos(180°/`$fa`)).
+# FIXME: explain why .005 works better
 
-_DEFAULT_PARAMETERS = (accuracy = 2.0, precision = .02)
+_DEFAULT_PARAMETERS = (accuracy = 2.0, precision = .005)
 
 """
     sides(radius, parameters, θ = 360°)
@@ -1870,17 +1874,29 @@ end
 """
     circular_sign(u,v)
 
-Let `α` and `β` be the angles of `u`,`v` in ]-π, π].
+Let `α` and `β` be the angles of `u`,`v` in [-π, π[.
 This function returns a number <0 iff `α` < `β`, >0 iff `α` > `β`,
 and `0` iff `α` == `β`.
 """
 @inline function circular_sign(u, v)
-	if u[2] < 0
-		v[2] ≥ 0 && return -1
-	else
-		v[2] < 0 && return 1
+# 16 cases to consider: u = (-1, -i, 1, i), same for v
+	if u[2] > 0
+		v[2] ≤ 0 && return -1 # (i,-1), (i,-i), (i,1)
+	elseif u[2] < 0
+		v[2] > 0 && return 1 #(-i,i)
+	elseif u[2] == 0
+		if v[2] == 0
+			return sign(v[1]) - sign(u[1]) #(1,1) (1,-1) (-1,1) (-1,-1)
+		elseif v[2] > 0
+			return 1 #(-1,i) (1,i)
+		else
+			# the following line is not needed, but faster than computing det:
+			return -sign(u[1]) #(-1,-i) (1,-i) 
+		end
 	end
-	return det2(u, v)
+	# determinant also works for the following cases:
+	# (-1,-i), (-i, -1), (-i, 1), (1, i)
+	return det2(u,v)
 end
 
 
@@ -2227,23 +2243,31 @@ Combines both triangulations, renumbering points of `s2` as needed.
 (Numbering in `s1` is preserved).
 """
 function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
+	@debug "merge: $(nvertices(s1)),$(nfaces(s1)) + $(nvertices(s2)),$(nfaces(s2))««"
 	renum = Vector{Int}(undef, nvertices(s2))
 	# renumber points:
 	p1 = nvertices(s1)
 	p2 = nvertices(s2)
-	newpoints = similar(vertices(s1), p1+p2)
-	newpoints[1:p1] = vertices(s1)
+	newpoints = copy(vertices(s1))
+# 	newpoints = similar(vertices(s1), p1+p2)
+# 	newpoints[1:p1] = vertices(s1)
 	idx = p1
 	for (i, p) in pairs(vertices(s2))
 		k = findfirst(same(p), newpoints)
 		if k == nothing
-			newpoints[idx+=1] = p
-			renum[i] = idx
+			push!(newpoints, p)
+			renum[i] = length(newpoints)
+			@debug "point $i of s2 renamed to $(renum[i])"
 		else
 			renum[i] = k
+			@debug "point $i of s2 is identical to point $k of s1"
 		end
 	end
-	resize!(newpoints, idx)
+	str = ""
+	for (i, r) in pairs(renum)
+		str*= "renum[$i] = $r"
+	end
+	@debug "renum:\n$str"
 
 	# relabel faces
 	f1 = nfaces(s1)
@@ -2251,9 +2275,11 @@ function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
 	newfaces = similar(faces(s1), f1+f2)
 	newfaces[1:f1] = faces(s1)
 	for (i, f) in pairs(faces(s2))
+		@debug "renum face $i=$f to $(f1+i) = $(renum[f])"
 		newfaces[f1+i] = renum[f] # array indexed by array trick
+		@assert isunique(renum[f]) "face not unique: $f => $(renum[f])"
 	end
-
+	@debug "»»"
 	return Surface(newpoints, newfaces)
 end
 
@@ -3007,6 +3033,8 @@ function faces_around_edge(s::AbstractSurface,
 	end
 	reorder = sort(eachindex(flist);
 		lt=(i, j) -> let b = circular_sign(face_vec2[i], face_vec2[j])
+		  @debug "comparing:
+  ($(flist[i]) = $(face_vec2[i]), $(flist[j]) = $(face_vec2[j])): circular_sign = $b"
 			if !iszero(b) return (b > 0)
 			# the use of **signed** face numbers guarantees consistent ordering
 			# even if two faces are adjacent on two edges with reversed
@@ -3078,6 +3106,7 @@ function multiplicity_levels(s::AbstractSurface)
 	@debug "multiplicity_levels ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	@debug " Input surface:\n"*strscad(s)
 	conn = incidence(s)
+	@debug "incidence done"
 	@debug " Incidence:\n $conn"
 	explain(s, "/tmp/mu.scad", scale=40)
 	println("regular components...")

@@ -154,6 +154,7 @@
  - export to SVG/STL/PLY
    - `MeshIO`
 # Extras
+ - icosphere (from Blender)
  * [surface decimation](https://caffeineviking.net/papers/stima.pdf)
  - improve `unit_n_gon` to take advantage of symmetries
  + investigate Fibonacci spheres
