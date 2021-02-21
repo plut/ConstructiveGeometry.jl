@@ -4,7 +4,8 @@
  - [ ] what to do for polygons with holes? find a representation that
 	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
 	 possibilities include:
-|        | ⋃(poly with hole) | (polys) + (holes) | xor list |
+
+|        | U(poly with hole) | (polys) + (holes) | xor list |
 |--------|-------------------|-------------------|----------|
 |Clipper |                   |                   |          |
 |extrude |                   |                   |          |
