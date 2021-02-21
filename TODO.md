@@ -11,7 +11,7 @@
 |Clipper out| **hard**?         |                   | easy             |
 |extrude    | easy              |                   |xor of extrusions |
 |draw       | easy              |                   |                  |
-|svg        | easy              |                   |easy (*evenodd*)  |
+|svg        | easy              |                   |easy (`evenodd`)  |
 |openscad   | easy              | **must try**      | **must try**     |
 
 Clipper out: must parse xor list as a list of polys and holes.
