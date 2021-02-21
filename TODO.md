@@ -1,25 +1,21 @@
 # Immediate work
- - [ ] `Region`: finish 2d subsystem
- - [ ] what to do for polygons with holes?
+ - [x] clear meshing parameter propagation
+ - [-] `Region`: finish 2d subsystem
+ - [x] what to do for polygons with holes?
    - [ ] xor is doable for extrusions but might be harder to convert to
 		 openscad
    - [ ] look in `Makie`
 	 - in `BasicGeometry`: a list of polygons + list of holes
 	 - this is simplest (it works as a xor polygon, whereas converting any
 		 xor to this is harder)
- - [ ] use `Reexport.jl`
  - [?] reorganize inside the file
  - [ ] split in several files after all (will help in `include()` time)?
- - [ ] a common name for meshing objects
-   => **realize** **Surface**
- - [ ] try 2 strategies for n-ary intersection/union:
-   - [ ] merge all structures and compute multiplicity with ray-shooting,
+ - [x] a common name for meshing objects
+   => **mesh**
 	 - or reduce with binary op
  - [x] check using vs. import
- - [ ] add a display method that shows the tree
  - [ ] replace `triangulate_between` by an actual Triangulate call
  - [x] write a few examples
- - [ ] use `Dictionaries.jl`
  - [x] test suite
  - [ ] Minkowski difference of polygons
  - [ ] fix `Offset` for polygon unions
@@ -27,13 +23,16 @@
    - [ ] using the `sides` function...
  - [?] check that `convex_hull` works
 # Dependencies
+ - [ ] use `Dictionaries.jl`
+ - [ ] use `Reexport.jl`
 decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
- - [ ] `Meshes.jl`:
-   - [ ] which basic useful algorithms are in this package?
-   - [ ] seems to work with `Makie`
-   - [ ] simple base types (`Point` is good)
+ - [x] `Meshes.jl`:
+   - [ ] which basic useful algorithms are in this package? not many...
+   - [x] seems to work with `Makie`
+   - [x] simple base types (`Point` is good; has basic operations + rand)
  - [ ] `GeometryBasics.jl`:
    - [ ] a bit more basic algorithms (meshing of spheres, cylinders?)
+	   - only very basic stuff
    - [ ] `MeshIO.jl` works with `GeometryBasics`
    - [ ] `Point` is bad
    - [ ] mesh types are awfully long and depend on bad `Point` type
@@ -71,6 +70,9 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [?] `hull`: use embedding to push all objects to same space if possible
    - [?] `minkowski`: ditto
 # Primitives
+ - [ ] decide whether primitives always have origin=0
+   - this is probably simpler for generating points (translating later)
+	 - and transparent for the user: the constructor can do the translation
  - [x] add trivial types for EmptyUnion and EmptyIntersect
  - [?] decide whether to use Square or square as a name
  suggestion: `Square` is the raw constructor;
@@ -159,6 +161,9 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] export to SVG/STL/PLY
    - [ ] `MeshIO`
 # Extras
+ - [ ] add a display method that shows the tree
+ - [ ] try 2 strategies for n-ary intersection/union:
+   - [ ] merge all structures and compute multiplicity with ray-shooting,
  - [ ] icosphere (from Blender)
  - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
  - [ ] improve `unit_n_gon` to take advantage of symmetries
