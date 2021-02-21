@@ -57,3 +57,6 @@ This gives
 ``n = \min(π √{r/(2\texttt{accuracy})}, π √{1/(2\texttt{precision})}).``
 
 In addition, the number of sides is bounded below to always be at least 4.
+The number of sides thus increases as the square root of the radius,
+with an upper bound. With the default parameters, that upper bound is
+``n=32``.
