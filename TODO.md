@@ -1,9 +1,11 @@
 # Immediate work
  - `Region`: finish 2d subsystem
+ - what to do for polygons with holes?
+   - look in `Makie`
+	 - in `BasicGeometry`: a list of polygons + list of holes
+	 - this is simplest (it works as a xor polygon, whereas converting any
+		 xor to this is harder)
  - use `Reexport.jl`
- + fix the docs re: `module.function` (see how it's done in other
-	 packages)
-	 - and the tests as well
  * reorganize inside the file
  - split in several files after all (will help in `include()` time)?
  - a common name for meshing objects
@@ -11,30 +13,33 @@
  - try 2 strategies for n-ary intersection/union:
    - merge all structures and compute multiplicity with ray-shooting,
 	 - or reduce with binary op
- - check using vs. import
+ * check using vs. import
  - add a display method that shows the tree
  - replace `triangulate_between` by an actual Triangulate call
- - write a few examples
+ * write a few examples
  - use `Dictionaries.jl`
- + use `Meshes.jl`
-  - make it work with `Makie` and `MeshIO`
-  - and suggest a few upstream PR.
  * test suite
- - what to do for polygons with holes?
-   - look in `Makie`
-	 - in `BasicGeometry`: a list of polygons + list of holes
-	 - parity is probably simplest bet (easily allows both non-connected
-		 polys and holes)
-	 - `PolygonXor` type
  - Minkowski difference of polygons
  - fix `Offset` for polygon unions
  - choose a correct value for `Clipper` precision
- * check `convex_hull` works
+   - using the `sides` function...
+ * check that `convex_hull` works
+# Dependencies
+decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
+ - `Meshes.jl`:
+   - which basic useful algorithms are in this package?
+   - seems to work with `Makie`
+   - simple base types (`Point` is good)
+ - `GeometryBasics.jl`:
+   - a bit more basic algorithms (meshing of spheres, cylinders?)
+   - `MeshIO.jl` works with `GeometryBasics`
+   - `Point` is bad
+   - mesh types are awfully long and depend on bad `Point` type
 # Basic types
  - clarify `Path`: maybe add `points` iterator and `matrix` abstract
 	 conversion. Or make `Path` an actual struct type and add accessors.
  - this needs a plane object type (which could be the image by a 2x3
-   multmatrix of `:full`).
+   multmatrix of `:full`), for intersections etc.
  - think of using `LabelledArrays.jl` (`SLArray`) as an alternative to
    `StaticVector` for `Vec` types
  - add a 1d type (points, segments; paths) for minkowski (/ extrusions)?
@@ -62,7 +67,7 @@
    * `hull`: use embedding to push all objects to same space if possible
    * `minkowski`: ditto
 # Primitives
- - add trivial types for EmptyUnion and EmptyIntersect
+ + add trivial types for EmptyUnion and EmptyIntersect
  * decide whether to use Square or square as a name
  suggestion: `Square` is the raw constructor;
  `square` is the convenience user function
@@ -103,7 +108,7 @@
    their subjects (and more importantly, their dimension) are known
  + call Clipper to provide offset algorithm
 	+ orientation, area, pointinpolygon
-	- this provides polygon intersection, difference, …
+	+ this provides polygon intersection, difference, …
 	+ also offset and `get_bounds`
  + draw(path, width) (using Clipper.offset)
  + convex hull (in dim 2)
@@ -132,12 +137,8 @@
  - 3d Minkowski
  - replace minkowski with circle by an offset
 # Issues in other packages
- - `StaticArrays.jl`: SDiagonal is currently *not* a static matrix?
-    julia> SDiagonal(1,2,3) isa StaticMatrix
-    false
  - `Rotations.jl`: using the same type for angles and coordinates is not
    terribly useful (in particular with angles in radians).
- - *Julia*: add `cossin` to `sincos` (helps with complex units).
 # Packaging
  * write a full doc about how to define a new transform
  - complete the list of exports
