@@ -2162,9 +2162,9 @@ boundingbox(g::Geometry) = boundingbox(AbstractMeshes.vertices(g)...)
 const plus1mod3 = SA[2,3,1]
 const plus2mod3 = SA[3,1,2]
 @inline function project_2d(direction::AbstractVector, index::Val = Val(false))
-	# we inline the 'findmax' call since we know the length is 3:
+	# we inline the `findmax` call since we know the length is 3:
 	# (doing this about halves the running time of this function. Besides,
-	# since the value 'e' only takes three possible values, it enables the
+	# since the value `k` only takes three possible values, it enables the
 	# compiler to propagate constants.)
 	a1 = abs(direction[1]); a2=abs(direction[2]); a3=abs(direction[3])
 	k = (a1 < a2) ? ((a2 < a3) ? 3 : 2) : ((a1 < a3) ? 3 : 1)
@@ -2274,7 +2274,7 @@ we apply the linear transformation
 x ↦ (⟨x,v2,v3⟩,⟨v1,x,v3⟩,⟨v1,v2,x⟩)  (⟨⟩ is the determinant)
 This maps the three points of the triangle to
 (δ,0,0), (0,δ,0), (0,0,δ), where δ=⟨v1,v2,v3⟩.
-The sign of δ gives the position of the origin w.r.t the triangle: δ⟩0
+The sign of δ gives the position of the origin w.r.t the triangle: δ>0
 iff the origin is *inside* the triangle.
 
 Once the vertices of the triangle are aligned to the axes, the ray
@@ -4109,18 +4109,4 @@ function strscad(args...)
 end
 end #««1 module
 # »»1
-
-# macro use(m)#««
-# 	N = filter(x->x != m, names(eval(m)))
-# 	Expr(:block, :(using .$m),
-# 		map(N) do x quote
-# 			$(esc(x))(args...) = eval($(esc(m))).$x(args...)
-# 		end
-# 	end...)
-# end#»»
-using StaticArrays, LinearAlgebra, FixedPointNumbers
-F = Fixed{Int64, 16}
-
-
-nothing
 # vim: fdm=marker fmr=««,»» noet:

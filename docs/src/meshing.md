@@ -2,7 +2,7 @@
 
 ## Interface
 
-`Surface(objects...)`
+`mesh(objects...)`
 
 
 ## Accuracy and precision
@@ -37,7 +37,7 @@ To set values other than the defaults for an object,
 apply the `set_parameters` transform to that object:
 
 ```julia
-set_parameters(accuracy=0.2)*
+set_parameters(accuracy=1)*
 Circle(2)
 ```
 
@@ -58,5 +58,13 @@ This gives
 
 In addition, the number of sides is bounded below to always be at least 4.
 The number of sides thus increases as the square root of the radius,
-with an upper bound. With the default parameters, that upper bound is
-``n=32``.
+with an upper bound.
+With the default parameters, one has
+``n ≈ min(32, 7√r)``.
+
+## Symmetry
+
+In addition to `accuracy` and `precision`,
+the `symmetry` parameter allows forcing the number of vertices
+of a circle to be a multiple of a defined value
+(by rounding up, if needed, to a multiple of `symmetry`).

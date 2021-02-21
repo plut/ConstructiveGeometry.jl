@@ -10,6 +10,7 @@
 |Clipper in | easy (as xor)     | easy (as xor)     | easy             |
 |Clipper out| **hard**          |                   | easy             |
 |extrude    | easy              |                   |xor of extrusions |
+|minkowski  | easy-ish          | ?                 |quite hard (split)|
 |Makie      | easy              |                   |**hard**          |
 |svg        | easy              |                   |easy (`evenodd`)  |
 |openscad   | easy              | just works        | just works       |
@@ -56,7 +57,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [ ] `Point` is bad
    - [ ] mesh types are awfully long and depend on bad `Point` type
 # Basic types
- - [ ] add a `symmetry` parameter for circles
+ - [x] add a `symmetry` parameter for circles
    - [ ] (and spheres?)
  - [ ] clarify `Path`: maybe add `points` iterator and `matrix` abstract
 	 conversion. Or make `Path` an actual struct type and add accessors.
