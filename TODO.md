@@ -5,12 +5,13 @@
 	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
 	 possibilities include:
 
-|        | U(poly with hole) | (polys) + (holes) | xor list |
-|--------|-------------------|-------------------|----------|
-|Clipper |                   |                   |          |
-|extrude |                   |                   |          |
-|draw    |                   |                   |          |
-|openscad|                   |                   |          |
+|           | U(poly with hole) | (polys) + (holes) | xor list         |
+|-----------|-------------------|-------------------|------------------|
+|Clipper in | easy (as xor)     |                   | easy             |
+|Clipper out| **hard**?         |                   | easy             |
+|extrude    | easy              |                   |xor of extrusions |
+|draw       | easy              |                   |                  |
+|openscad   | easy              | **must try**      | **must try**     |
 
 	  1. union of polygon with holes: trivial to convert
 		(2) list of polys + list of holes,
