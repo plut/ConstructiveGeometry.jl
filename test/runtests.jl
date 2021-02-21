@@ -81,7 +81,7 @@ m = [CG.circular_sign(i,j) for i in v, j in v]
 @test sign.(m) == [0 1 1 1; -1 0 1 1; -1 -1 0 1; -1 -1 -1 0]
 end
 @testset "Surfaces" begin #««1
-using ConstructiveGeometry: Surface, merge, select_faces
+using ConstructiveGeometry: Surface, merge, select_faces, mesh
 using ConstructiveGeometry: nvertices, nfaces
 v=[[0,-1],[1,0],[0,1],[-1,0]]
 for j in eachindex(v), i in 1:j-1
@@ -99,9 +99,9 @@ end
 nvf(s) = (CG.nvertices(s), CG.nfaces(s))
 p1 = pyramid()
 p2 = pyramid([1,0,0])
-u12 = Surface(p1 ∪ p2)
-i12 = Surface(p1 ∩ p2)
-d12 = Surface(p1 \ p2)
+u12 = mesh(p1 ∪ p2)
+i12 = mesh(p1 ∩ p2)
+d12 = mesh(p1 \ p2)
 @test nvf(u12) == (14, 24)
 @test nvf(i12) == (8, 12)
 @test nvf(d12) == (8, 12)

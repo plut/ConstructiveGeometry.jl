@@ -3,34 +3,29 @@
 
 [![Documentation|Dev](https://img.shields.io/badge/docs-latest-blue.svg)](https://plut.github.io/ConstructiveGeometry.jl/dev/)
 
-A module providing a syntax and tool
-to define CAD objects directly as Julia scripts.
+A module providing a syntax and tools
+to define CSG objects in Julia.
 
-Currently a work in progress. What should work, at least in part:
+This module is currently a work in progress,
+roughly at the “proof of concept” stage.
+The following work at least in some cases:
 
  - an easy-to-use syntax for defining solids and CSG operations;
  - meshing of most 2d and 3d operations;
- - output format: OpenSCAD file.
+ - output as an OpenSCAD file.
 
 This means that it should already be possible to use this module to
 define basic 3d models:
-
 ```julia
-using ConstructiveGeometry
-
-t1 = Surface([[0,0,0],[2,0,0],[0,2,0],[0,0,2]],
-  [[1,3,2],[1,4,3],[1,2,4],[2,3,4]])
-t2 = Surface([[2,0,0],[0,0,0],[2,0,2],[2,2,0]],
-  [[1,3,2],[1,4,3],[1,2,4],[2,3,4]])
-
-Surface(t1 ∪ t2)
-Surface(t1 ∩ t2)
-Surface(t1 \ t2)
-Surface(hull(t1, t2))
+s1 = sphere(20)
+s2 = cube(20)
+mesh(s1 ∪ s2)
+mesh(s1 ∩ s2)
+mesh(s1 \ s2)
+mesh(hull(s1, s2))
 ```
-
 gives the following output:
-![CSG operations on two tetrahedra](examples/tetrahedra.png)
+![CSG operations on two tetrahedra](examples/sphere_cube.png)
 
 OpenSCAD was used for rendering the image,
 although not for computing the CSG operations.

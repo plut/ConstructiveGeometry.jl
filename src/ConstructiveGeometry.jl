@@ -3675,7 +3675,7 @@ function mesh(s::CSGUnion{3}, parameters)
 	return select_multiplicity(x->x ≥ 1,
 		[mesh(x, parameters) for x in children(s)]...)
 end
-function Surface(s::CSGInter{3}, parameters)
+function mesh(s::CSGInter{3}, parameters)
 	return select_multiplicity(isequal(length(children(s))),
 		[mesh(x, parameters) for x in children(s)]...)
 end
