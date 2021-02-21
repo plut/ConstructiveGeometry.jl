@@ -106,7 +106,7 @@ Returns the index following `i` in the indices of array `a`, looping past
 the end of `a` if needed.
 If `count` is provided, advance by `count` steps instead.
 """
-@inline cyclindex(i::Int, a) = _cyclindex(i, eachindex(a))
+@inline cyclindex(i::Int, a, count...) = _cyclindex(i, eachindex(a), count...)
 @inline _cyclindex(i::Int, a::Base.OneTo) = mod(i, a.stop)+1
 @inline _cyclindex(i::Int, a::Base.OneTo, count::Int) =
 	mod1(i+count, a.stop)
@@ -360,58 +360,90 @@ end
 
 @inline vertices(p::Polygon) = p.points
 @inline nvertices(p) = length(vertices(p))
-# Region««2
+# PolygonXor««2
 """
-    Cheese
+    PolygonXor(polygon...)
+    PolygonXor([points], [points]...)
 
-A polygonal area with polygonal holes.
-All these polygons are assumed to be simple closed loops, in direct order.
+Exclusive union of several polygons.
+(This may be used to represent either the disjoint union of several polygons,
+or a polygon with holes, etc.)
 """
-struct Cheese{T} <: Geometry{2,T}
-  exterior::Polygon{T}
-  holes::Vector{Polygon{T}}
+struct PolygonXor{T} <: Geometry{2,T}
+	paths::Vector{Polygon{T}}
+end
+PolygonXor(p::Polygon...) = PolygonXor{real_type(coordtype.(p)...)}([p...])
+PolygonXor(points::AbstractVector{<:Point{2}}...) =
+	PolygonXor(Polygon.(points)...)
+PolygonXor(points::AbstractVector{<:AbstractVector{<:Real}}...) =
+	PolygonXor([Point{2}.(p) for p in points]...)
+
+@inline paths(p::PolygonXor) = p.paths
+@inline vertices(p::PolygonXor) = vcat(vertices.(paths(p))...)
+
+scad_name(::PolygonXor) = :polygon
+function scad_parameters(p::PolygonXor)
+	firstindex = zeros(Int, length(p.paths))
+	firstindex[1] = 0
+	for i in 1:length(p.paths)-1
+		firstindex[i+1] = firstindex[i] + length(p.paths[i])
+	end
+	points = vcat(vertices.(p.paths)...)
+	paths = [[firstindex[i] : firstindex[i] + nvertices(p.paths[i])-1;]
+		for i in eachindex(p.paths)]
+	return (points = points, paths = paths)
 end
 
-Cheese(p::Polygon) = Cheese{coordtype(p)}(p, [])
-Cheese(p::Polygon, holes::Polygon...) =
-	Cheese{real_type(coordtype(p), coordtype.(holes)...)}(p, [holes...])
-
-
-"""
-    Region
-
-A distinct union of polygonal areas with polygonal holes.
-
-Should be fillable with parity rule.
-"""
-struct Region{T} <: Geometry{2,T}
-  children::Vector{Cheese{T}}
-end
-Region(p::Cheese) = Region{coordtype(p)}([p])
-Region(p::Polygon) = Region(Cheese(p))
-Region(v::Vector{<:Point{2}}) = Region(Polygon(v))
-
-children(r::Region) = r.children
-
-# Meshing
-function vertices(s::Square)
-	# in trigonometric order:
-	(u, v) = (minimum(s), maximum(s))
-	return Point{2}.([
-		SA[u[1],u[2]],
-		SA[v[1],u[2]],
-		SA[v[1],v[2]],
-		SA[u[1],v[2]]])
-end
-@inline vertices(c::Circle, parameters) =
-	[ c.center + p for p in unit_n_gon(c.radius, parameters) ]
-
-mesh(s::Geometry) = mesh(s, _DEFAULT_PARAMETERS)
-mesh(s::Region, parameters) = s
-mesh(s::Polygon, parameters) = Region(s)
-mesh(s::Square, parameters) = Region(vertices(s))
-mesh(s::Circle, parameters) = Region(vertices(s, parameters))
-
+# # Region (as explicit union of polygons-with-holes)««2
+# """
+#     Cheese
+# 
+# A polygonal area with polygonal holes.
+# All these polygons are assumed to be simple closed loops, in direct order.
+# """
+# struct Cheese{T} <: Geometry{2,T}
+#   exterior::Polygon{T}
+#   holes::Vector{Polygon{T}}
+# end
+# 
+# Cheese(p::Polygon) = Cheese{coordtype(p)}(p, [])
+# Cheese(p::Polygon, holes::Polygon...) =
+# 	Cheese{real_type(coordtype(p), coordtype.(holes)...)}(p, [holes...])
+# 
+# @inline scad_name(::Cheese) = :polygon
+# function scad_parameters(p::Cheese)
+# 	firstindex = similar(p.holes, Int)
+# 	if length(p.holes) > 1 # else length(firstindex) == 0...
+# 		firstindex[1] = nvertices(p.exterior)
+# 		for i in 1:length(p.holes)-1
+# 			firstindex[i+1] = firstindex[i] + nvertices(p.holes[i])
+# 		end
+# 	end
+# 	points = vcat(vertices(p.exterior), vertices.(p.holes)...)
+# 	paths = [[0:nvertices(p.exterior)-1;],
+# 		[[firstindex[i] : firstindex[i]+nvertices(p.holes[i])-1;]
+# 			for i in eachindex(p.holes)]...]
+# 	return (points=points, paths=paths)
+# end
+# 
+# """
+#     Region
+# 
+# A distinct union of polygonal areas with polygonal holes.
+# 
+# Should be fillable with parity rule.
+# """
+# struct Region{T} <: Geometry{2,T}
+#   children::Vector{Cheese{T}}
+# end
+# Region(p::Cheese) = Region{coordtype(p)}([p])
+# Region(p::Polygon) = Region(Cheese(p))
+# Region(v::Vector{<:Point{2}}) = Region(Polygon(v))
+# 
+# children(r::Region) = r.children
+# @inline scad_name(::Region) = :union
+# @inline scad_parameters(::Region) = NamedTuple()
+# 
 # Empty unions and intersects««2
 """
     EmptyUnion
@@ -1019,8 +1051,8 @@ function scad(io::IO, s::Geometry)
 	end
 end
 
-@inline scad(filename::AbstractString, L::Geometry...) =
-	open(filename, "w") do f scad(f, l...) end
+@inline scad(filename::AbstractString, s::Geometry...) =
+	open(filename, "w") do f scad(f, s...) end
 
 function scad_children(io::IO, s::Geometry)
 	print(io, " {\n")
@@ -1037,29 +1069,13 @@ end
 @inline scad_name(::Sphere) = :sphere
 @inline scad_name(::Cylinder) = :cylinder
 @inline scad_name(::Polygon) = :polygon
-@inline scad_name(::Cheese) = :polygon
-@inline scad_name(::Region) = :union
+
 
 @inline scad_parameters(s::Geometry) = parameters(s)
 @inline scad_parameters(s::Box) = (size=Vector{Float64}(width(s)),)
 @inline scad_parameters(s::HyperSphere) = (r=s.radius,)
 @inline scad_parameters(s::Cylinder) = (h=s.height, r1=s.r1, r2=s.r2,)
 @inline scad_parameters(p::Polygon) = (points=p.points,)
-function scad_parameters(p::Cheese)
-	firstindex = similar(p.holes, Int)
-	if length(p.holes) > 1 # else length(firstindex) == 0...
-		firstindex[1] = nvertices(p.exterior)
-		for i in 1:length(p.holes)-1
-			firstindex[i+1] = firstindex[i] + nvertices(p.holes[i])
-		end
-	end
-	points = vcat(vertices(p.exterior), vertices.(p.holes)...)
-	paths = [[0:nvertices(p.exterior)-1;],
-		[[firstindex[i] : firstindex[i]+nvertices(p.holes[i])-1;]
-			for i in eachindex(p.holes)]...]
-	return (points=points, paths=paths)
-end
-@inline scad_parameters(::Region) = NamedTuple()
 
 @inline scad_transform(s::Geometry) = ""
 @inline scad_transform(s::Box) = scad_origin(minimum(s))
@@ -1106,6 +1122,24 @@ end
 
 #————————————————————— Meshing (2d) —————————————————————————————— ««1
 #»»1
+# Generic code for 2d and 3d meshing««1
+mesh(s::Geometry) = mesh(s, _DEFAULT_PARAMETERS)
+# Transformations««2
+function mesh(s::AffineTransform, parameters)
+	g = mesh(s.child, parameters)
+	b = sign(s.data)
+	@assert b ≠ 0 "Only invertible linear transforms are supported (for now)"
+	if b > 0
+		return (typeof(g))(s.data.(vertices(g)), faces(g))
+	else
+		return (typeof(g))(s.data.(vertices(g)), reverse.(faces(g)))
+	end
+end
+@inline mesh(s::SetParameters, parameters) =
+	mesh(s.child, merge(parameters, s.data))
+# Generic case (e.g. `color`): do nothing
+@inline mesh(s::Transform, parameters) = mesh(s.child, parameters)
+
 # Converting circles to polygons««1
 # Accuracy is the absolute deviation allowed.
 # Default value is 2.0 (from OpenSCAD `$fs`), interpreted as 2mm.
@@ -1223,22 +1257,6 @@ end
 	r*fibonacci_sphere_points(real_type(r),
 		sphere_vertices(r, parameters...))
 
-# Generic code for 2d and 3d meshing««1
-# Transformations««2
-function mesh(s::AffineTransform, parameters)
-	g = mesh(s.child, parameters)
-	b = sign(s.data)
-	@assert b ≠ 0 "Only invertible linear transforms are supported (for now)"
-	if b > 0
-		return (typeof(g))(s.data.(vertices(g)), faces(g))
-	else
-		return (typeof(g))(s.data.(vertices(g)), reverse.(faces(g)))
-	end
-end
-@inline mesh(s::SetParameters, parameters) =
-	mesh(s.child, merge(parameters, s.data))
-# Generic case (e.g. `color`): do nothing
-@inline mesh(s::Transform, parameters) = mesh(s.child, parameters)
 # Clipper.jl interface: clip, offset, simplify««1
 # This is the only section in this file which contains code directly
 # related to `Clipper.jl`. The entry points to this section are the
@@ -1342,7 +1360,7 @@ end
 function clip(op::Symbol,
 		v1::AbstractVector{Path{2,T}},
 		v2::AbstractVector{Path{2,T}};
-		fill = :positive)::Vector{Path{2,T}} where {T}
+		fill = :evenodd)::Vector{Path{2,T}} where {T}
 	c = ClipperClip(T)
 	add_paths!(c, v1, Clipper.PolyTypeSubject, true) # closed=true
 	add_paths!(c, v2, Clipper.PolyTypeClip, true)
@@ -1695,7 +1713,6 @@ function convex_hull(p::AbstractVector{<:Point{3,T}}) where{T}
 	return (points=V, faces=triangles)
 end
 
-
 # 2d Minkowski sum««1
 # Convolution of polygons««2
 # http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
@@ -1722,7 +1739,8 @@ function circularcmp(v1, v2, v3, ::Val{:offset})
 	return (d1+d2+d3) ≥ 2
 end
 
-function convolution(p::AnyPath{2}, q::AnyPath{2})
+function convolution(p::AbstractVector{<:Vec{2}},
+		q::AbstractVector{<:Vec{2}})
 	(np, nq) = (length(p), length(q))
 	ep = [p[cyclindex(i, p)]-p[i] for i in eachindex(p)] # edges of p
 	eq = [q[cyclindex(i, q)]-q[i] for i in eachindex(q)]
@@ -1741,16 +1759,137 @@ function convolution(p::AnyPath{2}, q::AnyPath{2})
 end
 p⋆q = convolution(p, q)
 # Minkowski sum of polygons and their unions ««2
-function minkowski(p::AnyPath{2}, q::AnyPath{2})
+function minkowski(p::AnyPath{2}, q::AnyPath{2}; fill=:nonzero)
 	r = convolution(p, q)
-	return simplify([r]; fill=:nonzero)
+	return simplify([r]; fill)
 end
-function minkowski(vp::Vector{<:AnyPath{2}}, vq::Vector{<:AnyPath{2}})
-	vr = vec([convolution(p, q) for p in vp, q in vq])
-	return simplify(vr; fill=:nonzero)
+function minkowski(vp::AbstractVector{<:AbstractVector{<:Vec{2}}},
+		vq::AbstractVector{<:AbstractVector{<:Vec{2}}}; fill=:nonzero)
+	vr = vec([Point{2}.(convolution(p, q)) for p in vp, q in vq])
+	return simplify(vr; fill)
+end
+function minkowski(p::Polygon, q::Polygon)
+	return PolygonXor(minkowski(p, q; fill=:evenodd)...)
+end
+function minkowski(p::PolygonXor, q::PolygonXor)
+	cp = [ coordinates.(vertices(x)) for x in paths(p) ]
+	cq = [ coordinates.(vertices(y)) for y in paths(q) ]
+	return PolygonXor(minkowski(cp, cq, fill=:evenodd)...)
 end
 
 # TODO: 3d Minkowski««2
+
+# 2d meshing««1
+# Primitive objects««2
+function vertices(s::Square)
+	# in trigonometric order:
+	(u, v) = (minimum(s), maximum(s))
+	return Point{2}.([
+		SA[u[1],u[2]],
+		SA[v[1],u[2]],
+		SA[v[1],v[2]],
+		SA[u[1],v[2]]])
+end
+@inline vertices(c::Circle, parameters) =
+	[ c.center + p for p in unit_n_gon(c.radius, parameters) ]
+
+mesh(s::PolygonXor, parameters) = s
+mesh(s::Polygon, parameters) = PolygonXor(s)
+mesh(s::Square, parameters) = PolygonXor(vertices(s))
+mesh(s::Circle, parameters) = PolygonXor(vertices(s, parameters))
+
+# Reduction of CSG operations««2
+@inline clip(op, s::PolygonXor...) =
+	reduce((p,q)->clip(op, vertices.(paths(p)), vertices.(paths(q)),
+		fill=:evenodd), s)
+mesh(s::CSGUnion{2}, parameters) =
+	PolygonXor(clip(:union, [mesh(x, parameters) for x in children(s)]...)...)
+
+mesh(s::CSGInter{2}, parameters) =
+	PolygonXor(clip(:intersection,
+		[mesh(x, parameters) for x in children(s)]...)...)
+
+mesh(s::CSGDiff{2}, parameters) =
+	PolygonXor(clip(:difference,
+		mesh(s.children[1], parameters), mesh(s.children[2], parameters))...)
+
+function mesh(s::CSGHull{2}, parameters)
+	l = [mesh(x, parameters) for x in children(s)]
+	return PolygonXor(convex_hull([vertices.(l)...;]))
+end
+
+function mesh(s::CSGMinkowski{2}, parameters)
+	l = [mesh(x, parameters) for x in children(s)]
+	global G = minkowski(l[1], l[2])
+# 	return PolygonXor(reduce((p,q)->minkowski(p,q), l)...)
+end
+
+# Set-wise operations:
+# # Minkowski sum:
+# function (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:minkowski},
+# 	parameters)::U
+# 	reduce((a,b)->U(minkowski(a.poly, b.poly)),
+# 		_convert(U, s.children, parameters))
+# end
+# function _combine2(::Val{:minkowski}, a::PolyUnion{T}, b::PolyUnion{T}) where{T}
+# 	# not implemented in Clipper.jl...
+# end
+
+# # Offset ««2
+# """
+# 		offset(P::Polygon, u::Real; options...)
+# 
+# Offsets polygon `P` by radius `u` (negative means inside the polygon,
+# positive means outside). Options:
+# 
+#  - `join_type`: :round | :square | :miter
+#  - `miter_limit` (default 2.0)
+# """
+# function offset(U::PolyUnion{T}, u::Real;
+# 		join_type = :round,
+# 		miter_limit::Float64 = 2.0,
+# 		precision::Real = 0.2) where{T}
+# 
+# 	c = ClipperOffset(miter_limit, clipper_float(clipper_type(T), precision))
+# 	add_paths!(c, U.poly, join_type, Clipper.EndTypeClosedPolygon)
+# 	PolyUnion(execute(T, c, u))
+# end
+# @inline offset(x::Geometry{2}, args...; kwargs...) =
+# 	offset(PolyUnion(x), args...; kwargs...)
+# 
+# # Draw ««2
+# """
+#     draw(path, width; kwargs...)
+# 
+#     ends=:round|:square|:butt|:closed
+#     join=:round|:miter|:square
+# """
+# function draw(path::Path{2,T}, width::Real;
+# 		ends::Symbol = :round, join::Symbol = :round,
+# 		miter_limit::Float64 = 2.0, precision::Real = 0.2) where{T}
+# 	CT = clipper_type(T)
+# 	RT = clipper_rettype(T)
+# 	c = ClipperOffset(miter_limit, clipper_float(CT, precision))
+# 	println("join=$join, round=$round")
+# 	Clipper.add_path!(c, clipper_path(path),
+# 		JoinType(Val(join)), EndType(Val(ends)))
+# 	println("$(clipper_type(T)) $(CT(1.)); prec=$(Float64(CT(precision)))")
+# 	ret = clipper_unpath.(RT, Clipper.execute(c, clipper_float(CT, width)/2))
+# 	return PolyUnion(ret)
+# end
+# 
+# # Convex hull««2
+# # """
+# # 		convex_hull(x::Geometry{2}...)
+# # 
+# # Returns the convex hull of the union of all the given solids, as a
+# # `PolyUnion` structure.
+# # """
+# @inline convex_hull(x::Geometry{2}...) =
+# 	convex_hull(PolyUnion(union(x...)))
+# 
+# @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(vertices(u)))
+# 
 
 # 2d subsystem««1
 # # PolyUnion««2
