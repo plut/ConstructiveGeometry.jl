@@ -47,7 +47,7 @@ s = square(1)
 # FIXME
 end
 @testset "Extrusion" begin #««1
-C = vertices(circle(3.),(precision=.01,accuracy=1))
+C = vertices(circle(3.),(precision=.01,accuracy=1,symmetry=1))
 c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
 @test (path_extrude(c, C)) != 0
 end
