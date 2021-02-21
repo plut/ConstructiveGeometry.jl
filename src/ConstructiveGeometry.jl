@@ -386,7 +386,7 @@ function scad_parameters(p::PolygonXor)
 	firstindex = zeros(Int, length(p.paths))
 	firstindex[1] = 0
 	for i in 1:length(p.paths)-1
-		firstindex[i+1] = firstindex[i] + length(p.paths[i])
+		firstindex[i+1] = firstindex[i] + nvertices(p.paths[i])
 	end
 	points = vcat(vertices.(p.paths)...)
 	paths = [[firstindex[i] : firstindex[i] + nvertices(p.paths[i])-1;]
@@ -1414,6 +1414,8 @@ Polygon is assumed not self-intersecting.
 	path::AnyPath{2,T}) where{T}
 	return Clipper.pointinpolygon(to_clipper(T, point), to_clipper(T, path))
 end
+@inline point_in_polygon(point::Point{2}, path::Polygon) =
+	point_in_polygon(point, vertices(path))
 # Polyhedra interface and intersections««1
 # Polyhedra types««2
 @inline polyhedra_lib(T::Type{<:Real}) =
@@ -1714,6 +1716,37 @@ function convex_hull(p::AbstractVector{<:Point{3,T}}) where{T}
 end
 
 # 2d Minkowski sum««1
+# Identify holes of PolygonXor
+"""
+    identify_polygons(s::PolygonXor)
+
+Given a `PolygonXor` defined as the exclusive union of polygons and holes,
+returns a vector mapping individual polygons of `s` to:
+ - positive indices 1, 2, 3... for the exterior polygons of `s`;
+ - negative indices for the holes, indicating in which exterior polygon is the corresponding hole.
+"""
+function identify_polygons(s::PolygonXor)
+	n = length(paths(s))
+	m = [ point_in_polygon(vertices(p)[1], q) for p in paths(s), q in paths(s) ]
+	index = zeros(Int, n)
+	hole = zeros(Int, n)
+	c = 0 # number of connected components
+	for i in 1:n
+		# if this is a hole, then it will have m[i,j] > 0 for some i
+		k = findfirst(m[i,:] .> 0)
+		if k == nothing
+			index[i] = (c+= 1)
+		else
+			hole[i] = k
+		end
+	end
+	for i in 1:n
+		if hole[i] > 0
+			index[i] = -index[hole[i]]
+		end
+	end
+	return index
+end
 # Convolution of polygons««2
 # http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
 """

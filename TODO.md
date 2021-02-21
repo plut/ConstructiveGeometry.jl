@@ -1,7 +1,7 @@
 # Immediate work
  - [x] clear meshing parameter propagation
  - [-] `Region`: finish 2d subsystem
- - [ ] what to do for polygons with holes? find a representation that
+ - [x] what to do for polygons with holes? find a representation that
 	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
 	 possibilities include:
 
@@ -32,13 +32,12 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [ ] split in several files after all (will help in `include()` time)?
  - [x] a common name for meshing objects
    => **mesh**
-	 - or reduce with binary op
  - [x] check using vs. import
  - [ ] replace `triangulate_between` by an actual Triangulate call
  - [x] write a few examples
  - [x] test suite
  - [ ] Minkowski difference of polygons
- - [ ] fix `Offset` for polygon unions
+ - [ ] fix `Offset` for polygon xor
  - [ ] choose a correct value for `Clipper` precision
    - [ ] using the `sides` function...
  - [?] check that `convex_hull` works
@@ -184,6 +183,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] add a display method that shows the tree
  - [ ] try 2 strategies for n-ary intersection/union:
    - [ ] merge all structures and compute multiplicity with ray-shooting,
+	 - [x] or reduce with binary op
  - [ ] icosphere (from Blender)
  - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
  - [ ] improve `unit_n_gon` to take advantage of symmetries
