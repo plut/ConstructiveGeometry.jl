@@ -11,10 +11,13 @@
 |Clipper out| **hard**?         |                   | easy             |
 |extrude    | easy              |                   |xor of extrusions |
 |draw       | easy              |                   |                  |
+|svg        | easy              |                   |easy (*evenodd*)  |
 |openscad   | easy              | **must try**      | **must try**     |
 
 Clipper out: must parse xor list as a list of polys and holes.
-Same hardness for A and B.
+Same hardness for ⋃(poly+hole) and (polys)+(holes).
+
+Extrude of ⋃(p+h): triangulate faces and build manually.
 
 	  1. union of polygon with holes: trivial to convert
 		(2) list of polys + list of holes,
