@@ -1,7 +1,19 @@
 # Immediate work
  - [x] clear meshing parameter propagation
  - [-] `Region`: finish 2d subsystem
- - [x] what to do for polygons with holes?
+ - [ ] what to do for polygons with holes? find a representation that
+	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
+	 possibilities include:
+|        | ⋃(poly with hole) | (polys) + (holes) | xor list |
+|-------:|-------------------|-------------------|----------|
+|Clipper |                   |                   |          |
+|extrude |                   |                   |          |
+|draw    |                   |                   |          |
+|openscad|                   |                   |          |
+
+	  1. union of polygon with holes: trivial to convert
+		(2) list of polys + list of holes,
+		(3) flat xor of polygons]
    - [ ] xor is doable for extrusions but might be harder to convert to
 		 openscad
    - [ ] look in `Makie`
