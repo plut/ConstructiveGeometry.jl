@@ -8,11 +8,11 @@
 |           | U(poly with hole) | (polys) + (holes) | xor list         |
 |-----------|-------------------|-------------------|------------------|
 |Clipper in | easy (as xor)     | easy (as xor)     | easy             |
-|Clipper out| **hard**?         |                   | easy             |
+|Clipper out| **hard**          |                   | easy             |
 |extrude    | easy              |                   |xor of extrusions |
-|draw       | easy              |                   |                  |
+|Makie      | easy              |                   |**hard**          |
 |svg        | easy              |                   |easy (`evenodd`)  |
-|openscad   | easy              | **must try**      | **must try**     |
+|openscad   | easy              | just works        | just works       |
 
 Clipper out: must parse xor list as a list of polys and holes.
 Same hardness for ⋃(poly+hole) and (polys)+(holes).

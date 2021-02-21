@@ -1752,7 +1752,7 @@ end
 
 # TODO: 3d Minkowski««2
 
-2d subsystem««1
+# 2d subsystem««1
 # # PolyUnion««2
 # # type and constructors from points««
 # """
@@ -1813,9 +1813,6 @@ end
 # 	U(s.child, parameters)
 # 
 # Reduction of CSG operations««2
-@inline (clip(op, u::Region) =
-	reduce((a,b)->U(clip(op, a.poly, b.poly)), u)
-
 # # Reduction of CSG operations««2
 # @inline (clip(op, u::U...)::U) where{U<:PolyUnion} =
 # 	reduce((a,b)->U(clip(op, a.poly, b.poly)), u)
