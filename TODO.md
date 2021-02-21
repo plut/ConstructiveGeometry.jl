@@ -7,11 +7,14 @@
 
 |           | U(poly with hole) | (polys) + (holes) | xor list         |
 |-----------|-------------------|-------------------|------------------|
-|Clipper in | easy (as xor)     |                   | easy             |
+|Clipper in | easy (as xor)     | easy (as xor)     | easy             |
 |Clipper out| **hard**?         |                   | easy             |
 |extrude    | easy              |                   |xor of extrusions |
 |draw       | easy              |                   |                  |
 |openscad   | easy              | **must try**      | **must try**     |
+
+Clipper out: must parse xor list as a list of polys and holes.
+Same hardness for A and B.
 
 	  1. union of polygon with holes: trivial to convert
 		(2) list of polys + list of holes,
