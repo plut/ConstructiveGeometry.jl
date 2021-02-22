@@ -1872,10 +1872,11 @@ function mesh(s::Offset, parameters)
 	T = coordtype(s)
 	m = mesh(s.child, parameters)
 	ε = max(parameters.accuracy, parameters.precision * s.data.r)
-	c = ClipperOffset(T, s.data.miter_limit, to_clipper_float(T, ε))
-	add_paths!(c, [coordinates.(p) for p in vertices.(m.paths)],
-		s.data.join, Clipper.EndTypeClosedPolygon)
-	return execute(c, s.data.r)
+	return PolygonXor(offset(vertices.(paths(m)), s.data.r;
+		join = s.data.join,
+		ends = :closed,
+		miter_limit = s.data.miter_limit,
+		precision = ε)...)
 end
 # """
 # 		offset(P::Polygon, u::Real; options...)
