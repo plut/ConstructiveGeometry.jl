@@ -167,6 +167,14 @@ const ° = 1.
 
 # General tools««1
 isunique(array) = length(unique(array)) == length(array)
+struct Consecutives{T,V} <: AbstractVector{T}
+	parent::V
+end
+consecutives(v::AbstractVector{T}) where{T} =
+	Consecutives{T,typeof(v)}(v)
+Base.getindex(c::Consecutives, i::Integer) =
+	(c.parent[i], c.parent[mod1(i+1, length(c.parent))])
+Base.size(c::Consecutives) = size(c.parent)
 # findextrema««2
 """
     findextrema(itr; lt=isless)
@@ -453,10 +461,16 @@ Draw(path::Union{AnyPath{2},AbstractVector{<:AbstractVector{<:Real}}}, width;
 		ends=:round, join=:round, miter_limit=2.) =
 	Draw{real_type(coordtype.(path)...)}(path, width, ends, join, miter_limit)
 
-# function draw(path::Path{2,T}, width::Real;
-# 		ends::Symbol = :round, join::Symbol = :round,
-# 		miter_limit::Float64 = 2.0, precision::Real = 0.2) where{T}
-#
+"""
+    draw(path, width; kwargs)
+    ends = :loop|:butt|:square|:round
+		join = :square|:round|:miter
+    miter_limit = 2.0
+
+Draws a path of given width.
+"""
+draw(path, width; kwargs...) = Draw(path, width; kwargs...)
+
 # PolygonXor««2
 """
     PolygonXor(polygon...)
@@ -1116,7 +1130,7 @@ function scad(io::IO, s::Surface)
 		if i < nvertices(s) print(io, ","); end
 		println(io, " // ", i)
 	end
-	println(io, "],[ // ", nfaces(s), " faces:")
+	println(io, "], faces=[ // ", nfaces(s), " faces:")
 	for (i,f) in pairs(faces(s))
 		indent(io)
 		print(io, " ", Vector(f .- 1))
@@ -3484,7 +3498,7 @@ function multiplicity_levels(s::AbstractSurface)
 		for f in flist
 			f1 = abs(f)
 			v = sum(faces(s)[f1]) - sum(edge)
-			str*=string("  ", (f > 0) ? "↑" : "↓",
+			str*=string("  ", (f > 0) ? "↺" : "↻",
 				"(f $f, c $(reg.label[f1]), v $v)\n")
 		end
 		@debug str
@@ -3551,6 +3565,30 @@ end
 
 # Extrusion ««1
 # Linear extrusion««2
+function mesh(s::LinearExtrude, parameters)
+	g = mesh(s.child, parameters)
+	@assert g isa PolygonXor
+	pts2 = vertices(g)
+	tri = triangulate(g)
+	peri = perimeters(g)
+	# perimeters are oriented ↺, 
+
+	n = length(pts2)
+	pts3 = vcat([[Point([coordinates(p); z]) for p in pts2]
+		for z in [0, s.data.height]]...)
+	# for a perimeter p=p1, p2, p3... outward: ↺
+	# with top vertices q1, q2, q3...
+	# faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
+	#  - bottom: identical to tri
+	#  - top: reverse of tri + n
+	#  - sides:
+	faces = [ tri;
+		[ reverse(f) .+ n for f in tri ];
+		vcat([[SA[i,j,i+n] for (i,j) in consecutives(p) ] for p in peri]...);
+		vcat([[SA[j,j+n,i+n] for (i,j) in consecutives(p) ] for p in peri]...);
+	]
+	return Surface(pts3, faces)
+end
 # Path extrusion ««2
 # triangulate_between: triangulate between two parallel paths««
 """
@@ -4139,9 +4177,11 @@ end
 # #
 # # Exports ««1
 export square, circle, cube, sphere, cylinder, Polygon, Surface
+export offset, draw
 export mult_matrix, translate, scale, rotate, mirror
 export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
+export mesh
 export difference, ⋃, ⋂, offset, hull, minkowski
 export scad
 # don't export include, of course
