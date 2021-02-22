@@ -75,11 +75,12 @@ CH = convex_hull([P(0,0,0),P(0,0,10),P(10,0,0),P(0,10,0),P(1,1,1),P(1,0,0),])
 	P(0.0, 0.7294358146330306),
 	])== [2,5,3,6,1]
 end
-@testset "Triangulation" begin
+@testset "Triangulation" begin««1
 using ConstructiveGeometry: LibTriangle, triangulate, triangulate_loop, identify_polygons, PolygonXor
 @test length(triangulate_loop(Point{2,Float64}.([(0,0),(1,0),(1,1),(0,1)]))) == 2
 square_with_hole = PolygonXor([[5.0, 5.0], [0.0, 5.0], [0.0, 0.0], [5.0, 0.0]],[[1.0, 1.0], [1.0, 3.0], [3.0, 3.0], [3.0, 1.0]])
 @test identify_polygons(square_with_hole) == [1, -1]
+@test length(triangulate(square_with_hole)) == 8
 end
 @testset "Basic geometry" begin#««1
 v = [[-1,0],[0,-1],[1,0],[0,1]]

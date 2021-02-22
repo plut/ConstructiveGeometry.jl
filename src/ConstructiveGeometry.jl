@@ -2828,12 +2828,26 @@ module LibTriangle
 		constrained_triangulation(vertices, collect(vmap), edges(loops...))
 end; import .LibTriangle
 
+"""
+    triangulate(s::PolgyonXor)
+
+Returns a triangulation of vertices of `s`, removing holes.
+"""
 function triangulate(s::PolygonXor)
 	v = vertices(s)
 	id = identify_polygons(s)
 	peri = perimeters(s)
+	is_hole = falses(length(v))
+	for (i, p) in pairs(peri)
+		if id[i] < 0 # is hole
+			is_hole[p] .= true
+		end
+	end
+	println("is_hole: $is_hole")
+			
 	tri = LibTriangle.constrained_triangulation(v, 1:length(v), peri...)
 	# remove triangles made entirely of hole vertices
+	return tri[[!all(is_hole[t]) for t in tri]]
 end
 
 # 2d triangulation««2
