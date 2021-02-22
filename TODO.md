@@ -1,6 +1,8 @@
 # Immediate work
+ - [ ] linear extrusion of PolygonXor
+ - [ ] rotate extrusion of same
  - [x] clear meshing parameter propagation
- - [-] `Region`: finish 2d subsystem
+ - [ ] `Region`: finish 2d subsystem
  - [x] what to do for polygons with holes? find a representation that
 	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
 	 possibilities include:
@@ -34,7 +36,7 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
 	 - in `BasicGeometry`: a list of polygons + list of holes
 	 - this is simplest (it works as a xor polygon, whereas converting any
 		 xor to this is harder)
- - [?] reorganize inside the file
+ - [x] reorganize inside the file
  - [ ] split in several files after all (will help in `include()` time)?
  - [x] a common name for meshing objects
    => **mesh**
@@ -43,10 +45,9 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [x] write a few examples
  - [x] test suite
  - [ ] Minkowski difference of polygons
- - [ ] fix `Offset` for polygon xor
- - [ ] choose a correct value for `Clipper` precision
-   - [ ] using the `sides` function...
- - [?] check that `convex_hull` works
+ - [x] fix `Offset` for polygon xor
+ - [x] choose a correct value for `Clipper` precision
+ - [x] check that `convex_hull` works
 # Dependencies
  - [ ] use `Dictionaries.jl`
  - [ ] use `Reexport.jl`

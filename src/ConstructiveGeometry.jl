@@ -19,7 +19,7 @@ module AbstractMeshes
 	export Box, HyperSphere
 	export coordtype, coordinates, embeddim, vertices
 end; using .AbstractMeshes
-import .AbstractMeshes: vertices
+import .AbstractMeshes: vertices, coordtype
 
 # using MiniQhull
 import Rotations
@@ -96,6 +96,8 @@ If `count` is provided, advance by `count` steps instead.
 Base.getindex(p::Point, i::Integer) = getindex(coordinates(p), i)
 Base.getindex(p::Point, i::AbstractVector) = Point(getindex(coordinates(p), i))
 Base.iszero(p::Point) = iszero(coordinates(p))
+#»»
+coordtype(v::AbstractVector{<:Number}) = eltype(v)
 @inline function barycenter(points::Point...)
 	T = promote_type(coordtype.(points)...)
 	return Point(sum(points) / convert(real_type(T), length(points)))
@@ -137,6 +139,7 @@ end
 # Vector (e.g. a generator, for computed paths).
 
 const Path{D,T<:Real} = Vector{Point{D,T}}
+# constructors:
 # the following functions are wrappers, which should allow us to
 # rewrite `Path` objects as matrices instead (instead of `length` and
 # `getindex`, return one matrix dimension and one column:)
@@ -433,6 +436,27 @@ function hull end
 # # Somewhat reduce type I/O clutter««1
 # Base.show(io::IO, ::Type{_FIXED}) = print(io, "_FIXED")
 # Mesh types in 2d and 3d««1
+# Draw ««2
+"""
+    draw(path, width; kwargs...)
+    ends=:round|:square|:butt|:closed
+    join=:round|:miter|:square
+"""
+struct Draw{T} <: Geometry{2,T}
+	path::Vector{Point{2,T}}
+	width::Float64
+  ends::Symbol
+	join::Symbol
+	miter_limit::Float64
+end
+Draw(path::Union{AnyPath{2},AbstractVector{<:AbstractVector{<:Real}}}, width;
+		ends=:round, join=:round, miter_limit=2.) =
+	Draw{real_type(coordtype.(path)...)}(path, width, ends, join, miter_limit)
+
+# function draw(path::Path{2,T}, width::Real;
+# 		ends::Symbol = :round, join::Symbol = :round,
+# 		miter_limit::Float64 = 2.0, precision::Real = 0.2) where{T}
+#
 # PolygonXor««2
 """
     PolygonXor(polygon...)
@@ -1265,11 +1289,13 @@ const _CLIPPER_ENUM = (#««
 		difference  =Clipper.ClipTypeDifference,
 		xor         =Clipper.ClipTypeXor,
 	),
+	# the enum order in `Clipper.jl` is wrong, we fix it here:
 	ends=(
-		closed=Clipper.EndTypeClosedPolygon,
-		square=Clipper.EndTypeOpenSquare,
-		round =Clipper.EndTypeOpenRound,
-		butt  =Clipper.EndTypeOpenButt,
+		fill  = Clipper.EndType(0), #Clipper.EndTypeClosedPolygon,
+		loop  = Clipper.EndType(1), #Clipper.EndTypeClosedLine,
+		butt  = Clipper.EndType(2), #Clipper.EndTypeOpenButt,
+		square= Clipper.EndType(3), #Clipper.EndTypeOpenSquare,
+		round = Clipper.EndType(4), #Clipper.EndTypeOpenRound,
 	),
 	join=(
 		square=Clipper.JoinTypeSquare,
@@ -1361,7 +1387,7 @@ function clip(op::Symbol,
 end
 function offset(v::AbstractVector{Path{2,T}}, r::Real;
 		join = :round,
-		ends = :closed,
+		ends = :fill,
 		miter_limit = 2.,
 		precision = 0.2
 		)::Vector{Path{2,T}} where{T}
@@ -1371,7 +1397,7 @@ function offset(v::AbstractVector{Path{2,T}}, r::Real;
 end
 function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
 		join = :round,
-		ends = :closed,
+		ends = :fill,
 		miter_limit = 2.,
 		precision = 0.2
 		)::Vector{Vector{Path{2,T}}} where{T}
@@ -1867,39 +1893,25 @@ end
 # 	# not implemented in Clipper.jl...
 # end
 
-# Offset ««2
+# Offset and draw««2
 function mesh(s::Offset, parameters)
 	T = coordtype(s)
 	m = mesh(s.child, parameters)
 	ε = max(parameters.accuracy, parameters.precision * s.data.r)
 	return PolygonXor(offset(vertices.(paths(m)), s.data.r;
 		join = s.data.join,
-		ends = :closed,
+		ends = :fill,
 		miter_limit = s.data.miter_limit,
 		precision = ε)...)
 end
-# """
-# 		offset(P::Polygon, u::Real; options...)
-# 
-# Offsets polygon `P` by radius `u` (negative means inside the polygon,
-# positive means outside). Options:
-# 
-#  - `join_type`: :round | :square | :miter
-#  - `miter_limit` (default 2.0)
-# """
-# function offset(U::PolyUnion{T}, u::Real;
-# 		join_type = :round,
-# 		miter_limit::Float64 = 2.0,
-# 		precision::Real = 0.2) where{T}
-# 
-# 	c = ClipperOffset(miter_limit, clipper_float(clipper_type(T), precision))
-# 	add_paths!(c, U.poly, join_type, Clipper.EndTypeClosedPolygon)
-# 	PolyUnion(execute(T, c, u))
-# end
-# @inline offset(x::Geometry{2}, args...; kwargs...) =
-# 	offset(PolyUnion(x), args...; kwargs...)
-# 
-# # Draw ««2
+
+function mesh(s::Draw, parameters)
+	r = one_half(s.width)
+	ε = max(parameters.accuracy, parameters.precision * r)
+	p = offset([s.path], r; join=s.join, ends=s.ends, miter_limit = s.miter_limit)
+	return PolygonXor(p...)
+end
+
 # """
 #     draw(path, width; kwargs...)
 # 
