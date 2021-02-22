@@ -1,8 +1,10 @@
 # Immediate work
- - [ ] linear extrusion of PolygonXor
- - [ ] rotate extrusion of same
+ - [x] linear extrusion of PolygonXor
+ - [ ] rotate extrusion
+ - [ ] Minkowski sum in 2d
+   - [ ] and Minkowski difference
  - [x] clear meshing parameter propagation
- - [ ] `Region`: finish 2d subsystem
+ - [x] `Region`: finish 2d subsystem
  - [x] what to do for polygons with holes? find a representation that
 	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
 	 possibilities include:
@@ -42,9 +44,9 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
    => **mesh**
  - [x] check using vs. import
  - [ ] replace `triangulate_between` by an actual Triangulate call
+  - likely not possible (these are 3d points in general)
  - [x] write a few examples
  - [x] test suite
- - [ ] Minkowski difference of polygons
  - [x] fix `Offset` for polygon xor
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works
@@ -122,19 +124,16 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
 	 (b) unary operators: + - ! √ ~ ¬
 	 (c) ad-hoc `Transform` with one-letter name, e.g. `H*square(1)`
  - [ ] think of replacing parameters by kwargs
- - [x]  `∪`, `∩`, `\`
+ - [x]  `∪`, `∩`, `\`: booleans
  - [ ] `+ ⊕` Minkowski sum; translation
+ - [ ] `object ± real` = offset
  - [ ] `- ⊖` Minkowski difference
- - [ ] `:` hull ?
- - [ ] `¬` complement
- - [ ] `×` linear_extrude, rotate_extrude
+ - [ ] `:` convex hull ?
+ - [ ] `~` complement
+ - [ ] `×` extrusion (scalar => linear_extrude; interval =>
+	 rotate_extrude; path => path_extrude)
  - [x] `*` multmatrix; scaling
- - [ ] think of overloading `{...}` or`[...]` (either `hcat` or `vcat`,
-   and `braces`, `bracescat`).
-    dump(:({a b})) => :bracescat
-   - [?]*no**: will not work (but could in a macro...)
- - [ ] really really stupid idea: *n*-dimensional matrix actually arranges
-   objects in a matrix...
+ - [ ] make kwargs open for user extension (e.g. rounded squares)
 # Transformations
  - [ ] make transformations even lazier, so that they are evaluated only once
    their subjects (and more importantly, their dimension) are known
@@ -150,6 +149,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] : overload extrude() (for paths, angles, numbers)
  - [ ] minkowski has a convexity parameter
   - [ ] `convexity`'s place is in `SetParameters`
+	 - we don't need convexity
  - [ ] Complex * 2d object
  - [?] a move system (= a representation of abstract affine rotations)
    - [ ] allow `NamedTuple` for this
@@ -158,7 +158,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
     anchor(square(…), [-1,0])
     anchor(square(…), :left)
     square(…, anchor=:left)
- - [ ] make difference() a strictly binary operation?
+ - [x] make difference() a strictly binary operation?
  - [x] add a reduce() operator that multiplies all the matrices
  - [ ] check that it is easy for the user to define arbitrary `Transform`s.
  - [ ] rewrite `attach` using `Transform`
@@ -173,15 +173,13 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    terribly useful (in particular with angles in radians).
 # Packaging
  - [?] write a full doc about how to define a new transform
- - [ ] complete the list of exports
+ - [?] complete the list of exports
  - [?] write a minimal regression test
  - [?] make this a proper package
  - [ ] distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
  - [ ] create incidence structure on triangulated surface creation?
    use [directed edges structure](https://core.ac.uk/download/pdf/190807228.pdf)
- - [ ] maybe using ~ instead of `-` for reversed faces
- - [ ] and use AABBtree for computing face intersections
  - [?] [https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
  - [ ] add some visualization (`Makie`?)
  - [ ] export to SVG/STL/PLY
