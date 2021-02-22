@@ -50,6 +50,12 @@ end
 C = vertices(circle(3.),(precision=.01,accuracy=1,symmetry=1))
 c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
 @test (path_extrude(c, C)) != 0
+
+d=difference(square(15), translate([1,1])*square(8))
+e=linear_extrude(10)*d
+m=mesh(d)
+@test nvertices(m) = 16
+@test nfaces(m) = 32
 end
 @testset "Convex hull" begin #««1
 using ConstructiveGeometry: convex_hull, convex_hull_list

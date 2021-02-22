@@ -447,7 +447,7 @@ function hull end
 # Draw ««2
 """
     draw(path, width; kwargs...)
-    ends=:round|:square|:butt|:closed
+    ends=:round|:square|:butt|:loop
     join=:round|:miter|:square
 """
 struct Draw{T} <: Geometry{2,T}
@@ -3614,13 +3614,14 @@ function triangulate_between(
 		poly2::AbstractVector{<:Path{D,T}},
 		start1::Int = 1, start2::Int = 1) where {D,T}
 	Big = typemax(T)
-	Triangle = SVector{3,Int}
-	triangles = Triangle[]
+# 	Triangle = SVector{3,Int}
+	triangles = SVector{3,Int}[]
 	# head is the marker of current leading edge
 	# headpoint[i] is the point marked to by head[i]
 	# headidx is the new index for this marked point
 	# status[i][j] is the number of last used point in j-th path of i-th poly
 	head = [(1,1), (1,1)]
+	println(length(poly1))
 	headpoint = [poly1[1][1], poly2[1][1]]
 	headidx = [start1, start2]
 	status = zeros.(Int,length.((poly1, poly2)))
@@ -3701,10 +3702,10 @@ function path_extrude(path::AbstractVector{Point{2,T}},
 	N = length(poly)
 	# offset_path is a vector of vector of paths
 	offset_path = offset([path], [pt[1] for pt in poly],
-		join = join, ends = closed ? :closed : :butt)
+		join = join, ends = closed ? :fill : :butt)
 	# new_points is a flat list of all 3d points produced
 	new_points = [[
-		[ Point(pt[1], pt[2], poly[i][2]) for pt in [p...;] ]
+		[ Point([pt[1], pt[2], poly[i][2]]) for pt in [p...;] ]
 		for (i, p) in pairs(offset_path)
 	]...;]
 # 	println("returning new_points:")
