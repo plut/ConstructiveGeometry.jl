@@ -15,6 +15,11 @@
 |svg        | easy              |                   |easy (`evenodd`)  |
 |openscad   | easy              | just works        | just works       |
 
+
+Convolution: parse polys + holes; add to polys, subtract from holes.
+=> must implement Minkowski difference first!
+http://acg.cs.tau.ac.il/copy_of_projects/in-house-projects/exact-and-efficient-construction-of-planar/mink-conv.pdf
+
 Clipper out: must parse xor list as a list of polys and holes.
 Same hardness for ⋃(poly+hole) and (polys)+(holes).
 

@@ -8,29 +8,8 @@ using SparseArrays
 using Logging
 
 
-isunique(array) = length(unique(array)) == length(array)
 import Polyhedra # for convex hull
 import GLPK
-# hide the Triangle module name so that we may use it for a type:
-module LibTriangle
-	import Triangle
-	import Triangle: basic_triangulation
-	function constrained_triangulation(args...)
-		# XXX temporary: the libtriangle call tends to segfault whenever lines
-		# cross, so we show what it is called with
-		s = "constrained_triangulation««:\n$args\n"
-		for (i, v) in pairs(args[2])
-			s*= "$(args[1][i,1]) $(args[1][i,2]) $v\n"
-		end
-		s*= "»»\n"
-		@debug s
-		isunique(array) = length(unique(array)) == length(array)
-		@assert isunique(args[2]) "points must be unique: $(args[2])"
-		println(s)
-		return Triangle.constrained_triangulation(args...)
-	end
-end; import .LibTriangle
-
 module AbstractMeshes
 	using Meshes
 # 	import Meshes: Geometry, Primitive, Point, Vec
@@ -184,6 +163,7 @@ const ° = 1.
 @inline degrees(x::AnyAngle) = degrees(Angle(x))
 
 # General tools««1
+isunique(array) = length(unique(array)) == length(array)
 # findextrema««2
 """
     findextrema(itr; lt=isless)
@@ -360,40 +340,6 @@ end
 
 @inline vertices(p::Polygon) = p.points
 @inline nvertices(p) = length(vertices(p))
-# PolygonXor««2
-"""
-    PolygonXor(polygon...)
-    PolygonXor([points], [points]...)
-
-Exclusive union of several polygons.
-(This may be used to represent either the disjoint union of several polygons,
-or a polygon with holes, etc.)
-"""
-struct PolygonXor{T} <: Geometry{2,T}
-	paths::Vector{Polygon{T}}
-end
-PolygonXor(p::Polygon...) = PolygonXor{real_type(coordtype.(p)...)}([p...])
-PolygonXor(points::AbstractVector{<:Point{2}}...) =
-	PolygonXor(Polygon.(points)...)
-PolygonXor(points::AbstractVector{<:AbstractVector{<:Real}}...) =
-	PolygonXor([Point{2}.(p) for p in points]...)
-
-@inline paths(p::PolygonXor) = p.paths
-@inline vertices(p::PolygonXor) = vcat(vertices.(paths(p))...)
-
-scad_name(::PolygonXor) = :polygon
-function scad_parameters(p::PolygonXor)
-	firstindex = zeros(Int, length(p.paths))
-	firstindex[1] = 0
-	for i in 1:length(p.paths)-1
-		firstindex[i+1] = firstindex[i] + nvertices(p.paths[i])
-	end
-	points = vcat(vertices.(p.paths)...)
-	paths = [[firstindex[i] : firstindex[i] + nvertices(p.paths[i])-1;]
-		for i in eachindex(p.paths)]
-	return (points = points, paths = paths)
-end
-
 # # Region (as explicit union of polygons-with-holes)««2
 # """
 #     Cheese
@@ -486,7 +432,45 @@ function hull end
 
 # # Somewhat reduce type I/O clutter««1
 # Base.show(io::IO, ::Type{_FIXED}) = print(io, "_FIXED")
-# Surface««1
+# Mesh types in 2d and 3d««1
+# PolygonXor««2
+"""
+    PolygonXor(polygon...)
+    PolygonXor([points], [points]...)
+
+Exclusive union of several polygons.
+(This may be used to represent either the disjoint union of several polygons,
+or a polygon with holes, etc.)
+"""
+struct PolygonXor{T} <: Geometry{2,T}
+	paths::Vector{Polygon{T}}
+end
+PolygonXor(p::Polygon...) = PolygonXor{real_type(coordtype.(p)...)}([p...])
+PolygonXor(points::AbstractVector{<:Point{2}}...) =
+	PolygonXor(Polygon.(points)...)
+PolygonXor(points::AbstractVector{<:AbstractVector{<:Real}}...) =
+	PolygonXor([Point{2}.(p) for p in points]...)
+
+@inline paths(p::PolygonXor) = p.paths
+@inline vertices(p::PolygonXor) = vcat(vertices.(paths(p))...)
+
+scad_name(::PolygonXor) = :polygon
+vertices(p::PolygonXor) = [vertices.(paths(p))...;]
+function perimeters(p::PolygonXor)
+	firstindex = zeros(Int, length(p.paths))
+	firstindex[1] = 0
+	for i in 1:length(p.paths)-1
+		firstindex[i+1] = firstindex[i] + nvertices(p.paths[i])
+	end
+	return [[firstindex[i]+1 : firstindex[i] + nvertices(p.paths[i]);]
+		for i in eachindex(p.paths)]
+end
+
+scad_parameters(p::PolygonXor) =
+	(points = vertices(p),
+	paths = [ f .- 1 for f in perimeters(p) ])
+
+# Surface««2
 # TODO also store some face-neighbour information
 # this can be updated (not fully recomputed) for subtriangulation
 """
@@ -2783,6 +2767,32 @@ end
 # 	return m # or x...
 # end
 # Triangulations««1
+# Wrapping the Triangle package««2
+# hide the Triangle module name so that we may use it for a type:
+module LibTriangle
+	import Triangle
+	import Triangle: basic_triangulation
+	function constrained_triangulation(args...)
+		# XXX temporary: the libtriangle call tends to segfault whenever lines
+		# cross, so we show what it is called with
+		s = "constrained_triangulation««:\n$args\n"
+		for (i, v) in pairs(args[2])
+			s*= "$(args[1][i,1]) $(args[1][i,2]) $v\n"
+		end
+		s*= "»»\n"
+		@debug s
+		isunique(array) = length(unique(array)) == length(array)
+		@assert isunique(args[2]) "points must be unique: $(args[2])"
+		println(s) # debug output is not always flushed in time before segfault
+		return Triangle.constrained_triangulation(args...)
+	end
+	function edges(perimeter) # works with 1:n or a vector
+		n = length(perimeter)
+		return [perimeter[mod1(i+j-1, n)] for i in 1:n, j in 1:2]
+	end
+	@inline edges(perimeters...) = [edges.(perimeters)...;]
+end; import .LibTriangle
+
 # 2d triangulation««2
 """
     triangulate_loop(path::Path{2})
@@ -2800,7 +2810,7 @@ function triangulate_loop(points::Matrix{Float64})
 	return LibTriangle.constrained_triangulation(
 		points,
 		collect(1:N), # identity map on points
-		[mod1(i+j-1, N) for i in 1:N, j in 1:2])
+		LibTriangle.edges(1:N))
 end
 @inline triangulate_loop(points::AbstractVector{<:Point{2}}) =
 	triangulate_loop(Matrix{Float64}(vcat(transpose.(coordinates.(points))...)))
@@ -3143,7 +3153,7 @@ function subtriangulate(s::AbstractSurface)
 # 		end
 # 		println("($coords, $plist, $cons)")
 		tri = LibTriangle.constrained_triangulation(coords, plist,
-			[perimeter[mod1(i+j,l)] for i in eachindex(perimeter), j in 0:1])
+			LibTriangle.edges(perimeter))
 # 		println("triangulation = $tri")
 		push!(newfaces, tri...)
 		@debug "returned triangulation=$tri"
