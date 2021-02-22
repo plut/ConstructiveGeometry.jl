@@ -452,10 +452,7 @@ PolygonXor(points::AbstractVector{<:AbstractVector{<:Real}}...) =
 	PolygonXor([Point{2}.(p) for p in points]...)
 
 @inline paths(p::PolygonXor) = p.paths
-@inline vertices(p::PolygonXor) = vcat(vertices.(paths(p))...)
-
-scad_name(::PolygonXor) = :polygon
-vertices(p::PolygonXor) = [vertices.(paths(p))...;]
+@inline vertices(p::PolygonXor) = [vertices.(paths(p))...;]
 function perimeters(p::PolygonXor)
 	firstindex = zeros(Int, length(p.paths))
 	firstindex[1] = 0
@@ -466,6 +463,7 @@ function perimeters(p::PolygonXor)
 		for i in eachindex(p.paths)]
 end
 
+scad_name(::PolygonXor) = :polygon
 scad_parameters(p::PolygonXor) =
 	(points = vertices(p),
 	paths = [ f .- 1 for f in perimeters(p) ])
@@ -2768,30 +2766,46 @@ end
 # end
 # Triangulations««1
 # Wrapping the Triangle package««2
-# hide the Triangle module name so that we may use it for a type:
+# hide the `Triangle` module name to prevent namespace conflict:
 module LibTriangle
-	import Triangle
-	import Triangle: basic_triangulation
-	function constrained_triangulation(args...)
+	import Triangle: Triangle, basic_triangulation
+	using ..ConstructiveGeometry: Point, coordinates, SVector
+
+	function edges(loop) # works with 1:n or a vector
+		n = length(loop)
+		return [loop[mod1(i+j-1, n)] for i in 1:n, j in 1:2]
+	end
+	@inline edges(loops...) = [edges.(loops)...;]
+
+	function constrained_triangulation(vertices::Matrix{Float64},
+			vmap::Vector{Int}, edge_list::Matrix{Int})
 		# XXX temporary: the libtriangle call tends to segfault whenever lines
 		# cross, so we show what it is called with
-		s = "constrained_triangulation««:\n$args\n"
-		for (i, v) in pairs(args[2])
-			s*= "$(args[1][i,1]) $(args[1][i,2]) $v\n"
+		s = "constrained_triangulation««:\n$vertices\n$vmap\n$edge_list\n"
+		for (i, v) in pairs(vmap)
+			s*= "$(vertices[i,1]) $(vertices[i,2]) $v\n"
 		end
 		s*= "»»\n"
 		@debug s
 		isunique(array) = length(unique(array)) == length(array)
-		@assert isunique(args[2]) "points must be unique: $(args[2])"
+		@assert isunique(vmap) "points must be unique: $(vmap)"
 		println(s) # debug output is not always flushed in time before segfault
-		return Triangle.constrained_triangulation(args...)
+		return SVector{3,Int}.(Triangle.constrained_triangulation(vertices,
+			vmap, edge_list))
 	end
-	function edges(perimeter) # works with 1:n or a vector
-		n = length(perimeter)
-		return [perimeter[mod1(i+j-1, n)] for i in 1:n, j in 1:2]
-	end
-	@inline edges(perimeters...) = [edges.(perimeters)...;]
+	constrained_triangulation(vertices::AbstractVector{<:Point{2}},
+			vmap, edge_list) =
+		constrained_triangulation(
+			Matrix{Float64}([transpose.(coordinates.(vertices))...;]),
+			vmap, edge_list)
+	constrained_triangulation(vertices, vmap, loops...) =
+		constrained_triangulation(vertices, collect(vmap), edges(loops...))
 end; import .LibTriangle
+
+function triangulate(s::PolygonXor)
+	v = vertices(s)
+	return LibTriangle.constrained_triangulation(v, 1:length(v), perimeters(s)...)
+end
 
 # 2d triangulation««2
 """
@@ -2805,15 +2819,12 @@ removed. Triangles are oriented in the same direction as the loop.)
 The triangulation is returned as a vector of [i1, i2, i3] = integer indices
 in the list of points.
 """
-function triangulate_loop(points::Matrix{Float64})
-	N = size(points, 1)
-	return LibTriangle.constrained_triangulation(
-		points,
-		collect(1:N), # identity map on points
-		LibTriangle.edges(1:N))
+function triangulate_loop(points::AbstractVector{<:Point{2}})
+	N = length(points)
+	return LibTriangle.constrained_triangulation(points, 1:N, 1:N)
 end
-@inline triangulate_loop(points::AbstractVector{<:Point{2}}) =
-	triangulate_loop(Matrix{Float64}(vcat(transpose.(coordinates.(points))...)))
+# @inline triangulate_loop(points::AbstractVector{<:Point{2}}) =
+# 	triangulate_loop(Matrix{Float64}(vcat(transpose.(coordinates.(points))...)))
 # 	N = length(points)
 # 	m = Matrix{Float64}(vcat(transpose.(points)...))
 # 
