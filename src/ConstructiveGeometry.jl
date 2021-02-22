@@ -803,6 +803,15 @@ end
 @inline Affine(a;center=Val(false)) = Affine(a, Val(false))
 
 @inline (f::Affine)(p::Point) = Point(f.a * coordinates(p) + f.b)
+function (f::Affine)(p::Polygon)
+	if sign(f) > 0
+		return Polygon(f.(vertices(p)))
+	else
+		return Polygon(reverse(f.(vertices(p))))
+	end
+end
+(f::Affine)(p::PolygonXor) = PolygonXor(f.(paths(p)))
+
 # @inline apply(f::Affine, p::Point) = Point(f.a * v.coords + f.b)
 # @inline apply(f::Affine, points::AbstractVector{<:Point}) =
 # 	[apply(f, p) for p in points]
@@ -1107,7 +1116,7 @@ end
 # Generic code for 2d and 3d meshing««1
 mesh(s::Geometry) = mesh(s, _DEFAULT_PARAMETERS)
 # Transformations««2
-function mesh(s::AffineTransform, parameters)
+function mesh(s::AffineTransform{3}, parameters)
 	g = mesh(s.child, parameters)
 	b = sign(s.data)
 	@assert b ≠ 0 "Only invertible linear transforms are supported (for now)"
@@ -1813,6 +1822,7 @@ mesh(s::Polygon, parameters) = PolygonXor(s)
 mesh(s::Square, parameters) = PolygonXor(vertices(s))
 mesh(s::Circle, parameters) = PolygonXor(vertices(s, parameters))
 
+# Transforms««2
 # Reduction of CSG operations««2
 @inline clip(op, s::PolygonXor...) =
 	reduce((p,q)->clip(op, vertices.(paths(p)), vertices.(paths(q)),
@@ -1839,6 +1849,13 @@ function mesh(s::CSGMinkowski{2}, parameters)
 # 	return PolygonXor(reduce((p,q)->minkowski(p,q), l)...)
 end
 
+function mesh(s::AffineTransform{2}, parameters)
+	g = mesh(s.child, parameters)
+	f = s.data
+	b = sign(f)
+	@assert b ≠ 0 "Only invertible linear transforms are supported (for now)"
+	return f(g) # reversal (if b < 0) is done polygon-by-polygon there
+end
 # Set-wise operations:
 # # Minkowski sum:
 # function (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:minkowski},
@@ -1850,7 +1867,16 @@ end
 # 	# not implemented in Clipper.jl...
 # end
 
-# # Offset ««2
+# Offset ««2
+function mesh(s::Offset, parameters)
+	T = coordtype(s)
+	m = mesh(s.child, parameters)
+	ε = max(parameters.accuracy, parameters.precision * s.data.r)
+	c = ClipperOffset(T, s.data.miter_limit, to_clipper_float(T, ε))
+	add_paths!(c, [coordinates.(p) for p in vertices.(m.paths)],
+		s.data.join, Clipper.EndTypeClosedPolygon)
+	return execute(c, s.data.r)
+end
 # """
 # 		offset(P::Polygon, u::Real; options...)
 # 
@@ -2804,7 +2830,10 @@ end; import .LibTriangle
 
 function triangulate(s::PolygonXor)
 	v = vertices(s)
-	return LibTriangle.constrained_triangulation(v, 1:length(v), perimeters(s)...)
+	id = identify_polygons(s)
+	peri = perimeters(s)
+	tri = LibTriangle.constrained_triangulation(v, 1:length(v), peri...)
+	# remove triangles made entirely of hole vertices
 end
 
 # 2d triangulation««2
@@ -3649,7 +3678,6 @@ function path_extrude(path::AbstractVector{Point{2,T}},
 	end
 	return Surface(new_points, tube_triangles)
 end#»»
-
 # Converting 3d objects to Surfaces««1
 # Primitive objects««2
 mesh(s::Surface, parameters) = s
