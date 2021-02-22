@@ -2870,7 +2870,6 @@ function triangulate(s::PolygonXor)
 			is_hole[p] .= true
 		end
 	end
-	println("is_hole: $is_hole")
 			
 	tri = LibTriangle.constrained_triangulation(v, 1:length(v), peri...)
 	# remove triangles made entirely of hole vertices
@@ -3621,7 +3620,6 @@ function triangulate_between(
 	# headidx is the new index for this marked point
 	# status[i][j] is the number of last used point in j-th path of i-th poly
 	head = [(1,1), (1,1)]
-	println(length(poly1))
 	headpoint = [poly1[1][1], poly2[1][1]]
 	headidx = [start1, start2]
 	status = zeros.(Int,length.((poly1, poly2)))
