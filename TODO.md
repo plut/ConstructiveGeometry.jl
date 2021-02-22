@@ -40,6 +40,8 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
 		 xor to this is harder)
  - [x] reorganize inside the file
  - [ ] split in several files after all (will help in `include()` time)?
+ - [ ] 3d => 2d projection
+ - [ ] 3d => 2d intersection with plane
  - [x] a common name for meshing objects
    => **mesh**
  - [x] check using vs. import

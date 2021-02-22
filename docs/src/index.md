@@ -17,14 +17,14 @@ This syntax is inspired by OpenSCAD, but is actual Julia code:
 ```julia
 using ConstructiveGeometry
 
-Square(20)
+square(20)
 
 linear_extrude(30) * [
   intersection(
-    translate([10,0]) * Circle(3),
-    translate([13,0]) * Circle(3),
+    translate([10,0]) * circle(3),
+    translate([13,0]) * circle(3),
   ),
-  color("pink") * scale(2) * Square(1),
+  color("pink") * scale(2) * square(1),
 ]
 
 ```
@@ -38,7 +38,7 @@ As of 2021-01, the only useable output format is an OpenSCAD file.
 
 Other planned output formats include:
  - (**TODO**) represented graphically using one of the Julia plotting packages;
- - (**IN PROGRESS**) converted to a mesh;
+ - (**PARTLY DONE**) converted to a mesh;
  - (**TODO**) directly exported as a 2d (`.svg`)
  or 3d file (`.stl` or `.ply`).
 
@@ -48,20 +48,19 @@ Other planned output formats include:
 ## Basic example
 ```julia
 using ConstructiveGeometry
-import ConstructiveGeometry: Square, Circle, Surface, mult_matrix, translate, scale, color
 
 s1 = union(
   color("pink")*
   translate([3,0])*
   scale([2,1])*
-  Circle(3),
+  circle(3),
 
   color("cyan")*
   translate([0,5])*
-  Square([2,3])
+  square([2,3])
 )
 
-Surface(s1)
+mesh(s1)
 ```
 
 ## I/O

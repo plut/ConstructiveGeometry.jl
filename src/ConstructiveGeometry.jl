@@ -264,54 +264,58 @@ end
 @inline width(b::Box) = b.max - b.min
 
 """
-    Square(size; origin, center=false)
+    square(size; origin, center=false)
 
 An axis-parallel square or rectangle  with given `size`
 (scalar or vector of length 2).
 """
-Square = Box{2}
 square(args...; kwargs...) = Square(args...; kwargs...)
 square(a::Number, b::Number; kwargs...) = square(SA[a,b]; kwargs...)
 square(a::Number; kwargs...) = square(a, a; kwargs...)
+Square = Box{2}
+
 """
-    Cube(size; origin, center=false)
+    cube(size; origin, center=false)
 
 A cube or parallelepiped  with given `size`
 (scalar or vector of length 3).
 """
-Cube = Box{3}
 cube(args...; kwargs...) = Cube(args...; kwargs...)
 cube(a::Number, b::Number, c::Number; kwargs...) = cube(SA[a,b,c]; kwargs...)
 cube(a::Number; kwargs...) = cube(a, a, a; kwargs...)
+Cube = Box{3}
 
 @inline HyperSphere{D}(r::T) where{D,T} =
 	HyperSphere(Point(zero(SVector{D,T})), r)
+
 """
-    Circle(radius)
+    circle(radius)
 
 A circle. Discretization is done via the `accuracy` and `precision`
 parameters.
 """
-Circle = HyperSphere{2}
 circle(args...; kwargs...) = Circle(args...; kwargs...)
+Circle = HyperSphere{2}
+
 """
-    Sphere(radius)
+    sphere(radius)
 
 A sphere. Discretization is done via the `accuracy` and `precision`
 parameters.
 """
-Sphere = HyperSphere{3}
 sphere(args...; kwargs...) = Sphere(args...; kwargs...)
+Sphere = HyperSphere{3}
 
 # Cylinder ««2
 """
-    Cylinder(h, r1, r2 [, center=false])
-    Cylinder(h, (r1, r2) [, center=false])
-    Cylinder(h, r [, center=false])
+    cylinder(h, r1, r2 [, center=false])
+    cylinder(h, (r1, r2) [, center=false])
+    cylinder(h, r [, center=false])
 
-**Warning:** `Cylinder(h,r)` is interpreted as `Cylinder(h,r,r)`,
+**Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
 not `(h,r,0)` as in OpenSCAD.
 """
+@inline cylinder(args...; kwargs...) = Cylinder(args...; kwargs...)
 struct Cylinder{T} <: AbstractMeshes.Primitive{3,T}
 	origin::Point{3,T}
 	height::T
@@ -324,14 +328,16 @@ end
 	Cylinder{real_type(args...)}(args...; kwargs...)
 @inline Cylinder(h, r; kwargs...) = Cylinder(h, r, r; kwargs...)
 
+
 # Polygon ««2
 """
-    Polygon{T}
-    Polygon([point1, point2, ...])
-    Polygon(point1, point2, ...)
+    polygon{T}
+    polygon([point1, point2, ...])
+    polygon(point1, point2, ...)
 
 A simple, closed polygon enclosed by the given vertices.
 """
+@inline polygon(args...; kwargs...) = Polygon(args...; kwargs...)
 struct Polygon{T} <: Geometry{2,T}
 	points::Vector{Point{2,T}}
 	@inline Polygon(points::AbstractVector{<:Point{2}}) =
@@ -450,6 +456,7 @@ function hull end
     ends=:round|:square|:butt|:loop
     join=:round|:miter|:square
 """
+@inline draw(args...; kwargs...) = Draw(args...; kwargs...)
 struct Draw{T} <: Geometry{2,T}
 	path::Vector{Point{2,T}}
 	width::Float64
@@ -531,11 +538,11 @@ nvertices(s::AbstractSurface) = length(vertices(s))
 nfaces(s::AbstractSurface) = length(faces(s))
 
 """
-    Surface([points...], [faces...])
+    surface([points...], [faces...])
 
 Encodes information about a surface.
 """
-
+@inline surface(args...; kwargs...) = Surface(args...; kwargs...)
 struct Surface{T} <: AbstractSurface{T}
 	vertices::Vector{Point{3,T}}
 	faces::Vector{SVector{3,Int}}
@@ -800,14 +807,23 @@ Linear extrusion to height `h`.
 
 Similar to OpenSCAD's `rotate_extrude` primitive.
 """
-RotateExtrude = Transform{:rotate_extrude}
+@inline rotate_extrude(s...) = rotate_extrude(360, s...)
 @inline rotate_extrude(angle::Real, s...; center=false) =
 	RotateExtrude((angle=angle, center=center), s...)
-@inline rotate_extrude(s...) = rotate_extrude(360, s...)
+RotateExtrude = Transform{:rotate_extrude}
 # Offset
-Offset = Transform{:offset}
+"""
+    offset(r, solid...; kwargs...)
+    offset(r; kwargs...) * solid
+
+Offsets by given radius.
+
+    ends=:round|:square|:butt|:loop
+    join=:round|:miter|:square
+"""
 @inline offset(r::Real, s...; join=:round, miter_limit=2.) =
 	Offset((r=r, join=join, miter_limit=miter_limit), s...)
+Offset = Transform{:offset}
 @inline scad_parameters(io::IO, s::Offset) =
 	scad_parameters(io, s, Val(parameters(s).join), parameters(s))
 @inline scad_parameters(io::IO, ::Offset, ::Val{:round}, param) =
@@ -3805,72 +3821,72 @@ function mesh(s::CSGHull{3}, parameters)
 end
 #————————————————————— Extra tools —————————————————————————————— ««1
 #»»1
-# # Return top-level objects from included file««1
-# 
-# # FIXME: replace Main by caller module?
-# # FIXME: add some blob to represent function arguments
-# """
-# 		ConstructiveGeometry.include(file::AbstractString, f::Function)
-# 
-# Reads given `file` and returns the union of all top-level `Geometry`
-# objects (except the results of assignments) found in the file.
-# 
-# ```
-# #### Example: contents of file `example.jl`
-# C=ConstructiveGeometry.Cube(1)
-# S=ConstructiveGeometry.Square(1)
-# ConstructiveGeometry.Circle(3)
-# S
-# 
-# julia> ConstructiveGeometry.include("example.jl")
-# union() {
-#  circle(radius=3.0);
-#  square(size=[1.0, 1.0], center=false);
-# }
-# ```
-# 
-# """
-# function include(file::AbstractString)
-# 	global toplevel_objs = Geometry[]
-# 	Base.include(x->expr_filter(obj_filter, x), Main, file)
-# 	return union(toplevel_objs...)
-# end
-# # # TODO: somehow attach a comment indicating the origin of these objects
-# # # last_linenumber holds the last LineNumberNode value encountered before
-# # # printing this object; we use this to insert relevant comments in the
-# """
-#     obj_filter(x)
-# 
-# Appends `x` to the global list of returned objects if `x` is a `Geometry`.
-# """
-# @inline obj_filter(x) = x
-# @inline obj_filter(x::Geometry) =
-# 	(global toplevel_objs; push!(toplevel_objs, x); return x)
-# 
-# """
-# 		expr_filter(E)
-# 
-# Read top-level expression `E` and decides if a ConstructiveGeometry object is returned.
-# 
-# The function `expr_filter` transforms top-level expressions by wrapping
-# each non-assignment expression inside a call to function `obj_filter`,
-# which can then dispatch on the type of the expression.
-# """
-# # Numeric values, LineNumber expressions etc. will never be useful to us:
-# expr_filter(f::Function, e::Any) = e
-# # expr_filter(e::LineNumberNode) = (global last_linenumber = e)
-# # A Symbol might be an Geometry variable name, so we add it:
-# expr_filter(f::Function, e::Symbol) = :($f($e))
-# 
-# # we add any top-level expressions, except assignments:
-# expr_filter(f::Function, e::Expr) = expr_filter(f, Val(e.head), e)
-# expr_filter(f::Function, ::Val, e::Expr) = :($f($e))
-# expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
-# 
-# # if several expressions are semicolon-chained, we pass this down
-# expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
-# 	Expr(:toplevel, expr_filter.(f, x.args)...)
-# 
+# Return top-level objects from included file««1
+
+# FIXME: replace Main by caller module?
+# FIXME: add some blob to represent function arguments
+"""
+		ConstructiveGeometry.include(file::AbstractString, f::Function)
+
+Reads given `file` and returns the union of all top-level `Geometry`
+objects (except the results of assignments) found in the file.
+
+```
+#### Example: contents of file `example.jl`
+C=ConstructiveGeometry.cube(1)
+S=ConstructiveGeometry.square(1)
+ConstructiveGeometry.circle(3)
+S
+
+julia> ConstructiveGeometry.include("example.jl")
+union() {
+ circle(radius=3.0);
+ square(size=[1.0, 1.0], center=false);
+}
+```
+
+"""
+function include(file::AbstractString)
+	global toplevel_objs = Geometry[]
+	Base.include(x->expr_filter(obj_filter, x), Main, file)
+	return union(toplevel_objs...)
+end
+# # TODO: somehow attach a comment indicating the origin of these objects
+# # last_linenumber holds the last LineNumberNode value encountered before
+# # printing this object; we use this to insert relevant comments in the
+"""
+    obj_filter(x)
+
+Appends `x` to the global list of returned objects if `x` is a `Geometry`.
+"""
+@inline obj_filter(x) = x
+@inline obj_filter(x::Geometry) =
+	(global toplevel_objs; push!(toplevel_objs, x); return x)
+
+"""
+		expr_filter(E)
+
+Read top-level expression `E` and decides if a ConstructiveGeometry object is returned.
+
+The function `expr_filter` transforms top-level expressions by wrapping
+each non-assignment expression inside a call to function `obj_filter`,
+which can then dispatch on the type of the expression.
+"""
+# Numeric values, LineNumber expressions etc. will never be useful to us:
+expr_filter(f::Function, e::Any) = e
+# expr_filter(e::LineNumberNode) = (global last_linenumber = e)
+# A Symbol might be an Geometry variable name, so we add it:
+expr_filter(f::Function, e::Symbol) = :($f($e))
+
+# we add any top-level expressions, except assignments:
+expr_filter(f::Function, e::Expr) = expr_filter(f, Val(e.head), e)
+expr_filter(f::Function, ::Val, e::Expr) = :($f($e))
+expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
+
+# if several expressions are semicolon-chained, we pass this down
+expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
+	Expr(:toplevel, expr_filter.(f, x.args)...)
+
 # # Attachments««1
 # # Anchor system««2
 # """

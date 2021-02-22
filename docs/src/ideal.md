@@ -6,13 +6,13 @@ CurrentModule = ConstructiveGeometry
 ## Primitive solids
 
 ```@docs
-ConstructiveGeometry.Square
-ConstructiveGeometry.Circle
-ConstructiveGeometry.Cube
-ConstructiveGeometry.Cylinder
-ConstructiveGeometry.Sphere
-ConstructiveGeometry.Polygon
-ConstructiveGeometry.Surface
+ConstructiveGeometry.square
+ConstructiveGeometry.circle
+ConstructiveGeometry.cube
+ConstructiveGeometry.cylinder
+ConstructiveGeometry.sphere
+ConstructiveGeometry.polygon
+ConstructiveGeometry.surface
 ```
 
 ## Transformations
@@ -42,6 +42,12 @@ ConstructiveGeometry.mirror
 ```
 
 TODO: `ConstructiveGeometry.project`, `ConstructiveGeometry.cut`.
+
+### 2d drawing
+```@docs
+ConstructiveGeometry.offset
+ConstructiveGeometry.draw
+```
 
 ### Extrusion
 ```@docs
