@@ -534,8 +534,11 @@ or with extra incidence information.
 """
 AbstractSurface = AbstractMeshes.Mesh{3}
 
-nvertices(s::AbstractSurface) = length(vertices(s))
-nfaces(s::AbstractSurface) = length(faces(s))
+@inline vertices(s::AbstractSurface) = _vertices(surface(s))
+@inline faces(s::AbstractSurface) = _faces(surface(s))
+@inline nvertices(s::AbstractSurface) = length(vertices(s))
+@inline nfaces(s::AbstractSurface) = length(faces(s))
+
 
 """
     surface([points...], [faces...])
@@ -555,12 +558,13 @@ TriangulatedSurface = Surface # temporary alias
 	T(Point{3}.(points), SVector{3,Int}.(faces))
 
 Surface(points::AbstractVector{<:Point{3}},
-		faces::AbstractVector{<:SVector{3,<:Integer}}) =
-	Surface{real_type(coordtype.(points)...)}(points, faces)
+		faces::AbstractVector{<:SVector{3,<:Integer}}, args...) =
+	Surface{real_type(coordtype.(points)...)}(points, faces, args...)
 Surface(points, faces) = triangulate(points, faces)
 
-vertices(s::Surface) = s.vertices
-faces(s::Surface) = s.faces
+@inline surface(s::Surface) = s
+@inline _vertices(s::Surface) = s.vertices
+@inline _faces(s::Surface) = s.faces
 
 # a lot of functions operating on 'Surface' values are defined later in
 # the meshing part of this file.
@@ -2414,13 +2418,13 @@ function intersections(a::AffineRay, s::AbstractSurface,
 	return sum(intersects(a, Triangle(s,i), i>minface )
 		for i in eachindex(faces(s)))
 end
-# Operations on simplicial complexes««1
-# Incidence and adjacency««2
-struct SurfaceTriangles{T,S} <:
+# Operations on triangulated surfaces««1
+# Triangle iterator««2
+struct TrianglesIterator{T,S} <:
 		AbstractVector{Triangle{3,T,SVector{3,Point{3,T}}}}
 	surface::S
 end
-function Base.getindex(tri::SurfaceTriangles, i::Integer)
+function Base.getindex(tri::TrianglesIterator, i::Integer)
 	s = tri.surface
 	return Triangle(vertices(s)[faces(s)[i]])
 end
@@ -2430,9 +2434,45 @@ end
 An iterator over all the `Triangle` geometric faces of `s`.
 """
 triangles(s::AbstractSurface) =
-	SurfaceTriangles{coordtype(s),typeof(s)}(s)
-Base.size(tri::SurfaceTriangles) = (nfaces(tri.surface),)
+	TrianglesIterator{coordtype(s),typeof(s)}(s)
+Base.size(tri::TrianglesIterator) = (nfaces(tri.surface),)
 
+# Face edges iterator««2
+struct FaceEdgesIterator{T}
+	vertices::T
+end
+function iterate(itr::FaceEdgesIterator, s::Int = 1)
+	s > length(itr.vertices) && return nothing
+	(e1, e2) = itr.vertices[[s, mod1(s+1, length(itr.vertices))]]
+	return (e1 < e2 ? SA[e1, e2] : SA[e2, e1], s+1)
+end
+@inline length(itr::FaceEdgesIterator) = length(itr.vertices)
+"""
+    face_edges(f)
+
+Returns a list of edges bordering this face, in standard form.
+"""
+@inline face_edges(f) = FaceEdgesIterator(f)
+
+# Detecting opposite faces««2
+# Returns true iff these two faces (vectors of three vertex indices) are
+# opposite.
+function opposite_faces(f::AbstractVector{<:Integer},
+	g::AbstractVector{<:Integer})
+	return ((g[1] == f[1] && g[2] == f[3] && g[3] == f[2])
+		  ||(g[2] == f[2] && g[1] == f[3] && g[3] == f[1])
+			||(g[3] == f[3] && g[1] == f[2] && g[2] == f[1]))
+end
+
+function remove_opposite_faces(flist)
+	keep = trues(length(flist))
+	for (i, f) in pairs(flist), j in 1:i-1
+		g = flist[j]
+		opposite_faces(f, g) && (keep[i] = keep[j] = false)
+	end
+	return flist[keep]
+end
+# Adjacency««2
 """
     adjacency_points(s::AbstractSurface)
 
@@ -2462,67 +2502,6 @@ where the boolean is `true` if the edge was reversed.
 	(e[1] < e[2]) ? (false, SA[e[1],e[2]]) : (true, SA[e[2],e[1]])
 # this must return an array because we use array[array] shorthand
 
-"""
-    AbstractSurfaceIncidence
-
-A triangulated surface with incidence data.
-"""
-abstract type AbstractSurfaceIncidence{T} <: AbstractSurface{T} end
-struct SurfaceIncidence{T, S<:AbstractSurface{T}} <: AbstractSurfaceIncidence{T}
-	surface::S
-	inc_pf:: Vector{Vector{Int}}
-	inc_ef::Dict{SVector{2,Int}, Vector{Int}}
-	inc_ff::Vector{Vector{Int}}
-end
-
-@inline surface(s::SurfaceIncidence) = s.surface
-@inline faces(s::AbstractSurfaceIncidence) = faces(surface(s))
-@inline vertices(s::AbstractSurfaceIncidence) = vertices(surface(s))
-@inline inc_pf(s::SurfaceIncidence) = s.inc_pf
-@inline inc_ef(s::SurfaceIncidence) = s.inc_ef
-@inline inc_ff(s::SurfaceIncidence) = s.inc_ff
-
-"""
-    SurfaceIncidence(s::AbstractSurface)
-
-Returns an incidence and ajacency structure for the simplicial complex s.
-This returns a named tuple with fields:
- - `points`: adjacency for points;
- - `faces`: adjacency for faces;
- - `edge_faces`: incidence edge -> face;
- - `point_faces`: incidence point -> face;
-"""
-function SurfaceIncidence(s::AbstractSurface;
-		vf=true, ef=true, ff=true)
-  inc_pf = [Int[] for p in vertices(s)]
-	# face adjacency needs edge-face:
-	ef = ef||ff
-	if vf
-		for (i, f) in pairs(faces(s)), p in f
-			push!(inc_pf[p], i)
-		end
-	end
-	inc_ef = Dict{SVector{2,Int}, Vector{Int}}()
-	if ef
-		for (i, f) in pairs(faces(s)), u in 1:3
-			e = (f[u], f[plus1mod3[u]])
-			(b, c) = edge_can(e)
-			if !haskey(inc_ef, c) inc_ef[c] = []; end
-			push!(inc_ef[c], b ? -i : i)
-		end
-	end
-	inc_ff = [Int[] for f in faces(s)]
-	if ff
-		for a in values(inc_ef), i in eachindex(a), j in 1:i-1
-			(f, g) = abs(a[i]), abs(a[j])
-			push!(inc_ff[f], g)
-			push!(inc_ff[g], f)
-		end
-	end
-
-	return SurfaceIncidence{coordtype(s), typeof(s)}(s, inc_pf, inc_ef, inc_ff)
-end
-
 # Merging and selecting««2
 """
     merge(s1::AbstractSurface, s2::AbstractSurface)
@@ -2551,11 +2530,7 @@ function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
 			@debug "point $i of s2 is identical to point $k of s1"
 		end
 	end
-	str = ""
-	for (i, r) in pairs(renum)
-		str*= "renum[$i] = $r"
-	end
-	@debug "renum:\n$str"
+	@debug join(["\nrenum[$i]=$r" for (i,r) in pairs(renum)], "")
 
 	# relabel faces
 	f1 = nfaces(s1)
@@ -2618,6 +2593,74 @@ end
 @inline select_faces(test::Function, s::AbstractSurface) =
 	select_faces(filter(test,eachindex(faces(s))), s)
 
+
+# Surfaces with incidence information««1
+# Basic type««2
+"""
+    AbstractSurfaceIncidence
+
+A triangulated surface with incidence data.
+"""
+abstract type AbstractSurfaceIncidence{T} <: AbstractSurface{T} end
+@inline inc_pf(s::AbstractSurfaceIncidence) = _inc_pf(incidence(s))
+@inline inc_ef(s::AbstractSurfaceIncidence) = _inc_ef(incidence(s))
+@inline inc_ff(s::AbstractSurfaceIncidence) = _inc_ff(incidence(s))
+
+struct SurfaceIncidence{T, S<:AbstractSurface{T}} <: AbstractSurfaceIncidence{T}
+	surface::S
+	inc_pf:: Vector{Vector{Int}}
+	inc_ef::Dict{SVector{2,Int}, Vector{Int}}
+	inc_ff::Vector{Vector{Int}}
+end
+
+@inline surface(s::SurfaceIncidence) = s.surface
+@inline incidence(s::SurfaceIncidence) = s
+@inline _inc_pf(s::SurfaceIncidence) = s.inc_pf
+@inline _inc_ef(s::SurfaceIncidence) = s.inc_ef
+@inline _inc_ff(s::SurfaceIncidence) = s.inc_ff
+
+# Constructor from generic triangulated surface««2
+"""
+    SurfaceIncidence(s::AbstractSurface)
+
+Returns an incidence and ajacency structure for the simplicial complex s.
+This returns a named tuple with fields:
+ - `points`: adjacency for points;
+ - `faces`: adjacency for faces;
+ - `edge_faces`: incidence edge -> face;
+ - `point_faces`: incidence point -> face;
+"""
+function SurfaceIncidence(s::AbstractSurface;
+		vf=true, ef=true, ff=true)
+  inc_pf = [Int[] for p in vertices(s)]
+	# face adjacency needs edge-face:
+	ef = ef||ff
+	if vf
+		for (i, f) in pairs(faces(s)), p in f
+			push!(inc_pf[p], i)
+		end
+	end
+	inc_ef = Dict{SVector{2,Int}, Vector{Int}}()
+	if ef
+		for (i, f) in pairs(faces(s)), u in 1:3
+			e = (f[u], f[plus1mod3[u]])
+			(b, c) = edge_can(e)
+			if !haskey(inc_ef, c) inc_ef[c] = []; end
+			push!(inc_ef[c], b ? -i : i)
+		end
+	end
+	inc_ff = [Int[] for f in faces(s)]
+	if ff
+		for a in values(inc_ef), i in eachindex(a), j in 1:i-1
+			(f, g) = abs(a[i]), abs(a[j])
+			push!(inc_ff[f], g)
+			push!(inc_ff[g], f)
+		end
+	end
+
+	return SurfaceIncidence{coordtype(s), typeof(s)}(s, inc_pf, inc_ef, inc_ff)
+end
+
 # """
 #     connected_components(s::AbstractSurface)
 # 
@@ -2648,6 +2691,12 @@ end
 # 		[ [newindex[p] for p in f] for f in faces if component[f[1]] == i ]
 # 		) for i in eachindex(C) ]
 # end
+
+# Neighbours««2
+# returns all vertices neighbours of vertex v
+function neighbors(s::AbstractSurfaceIncidence, v)
+	return union([filter(≠(v), faces(s)[f]) for f in inc_pf(s)[v]]...)
+end
 
 # Manifoldness test««2
 """
@@ -2700,6 +2749,288 @@ function ismanifold(s::AbstractSurfaceIncidence)
 		end
 	end
 	return (value=true, text="is manifold")
+end
+
+# Self-intersection««2
+# TODO: move all intersection computations to clean little functions
+"""
+    self_intersect(s::AbstractSurface)
+
+Returns all self-intersections of `s`, as a `NamedTuple`:
+ - `points`: all new points of intersection (as a vector of `Point{3}`,
+   to be appended to the original geometric points of the structure).
+ - `edge_points`: for all edges, a vector of indices of new points
+   (sorted in the direction of the edge).
+ - `face_points`: for all faces of `s`, the list of new points in this face,
+
+Point indices are returned as indices in `vertices(s)` ∪ {new points}.
+
+"""
+function self_intersect(s::AbstractSurfaceIncidence)
+	println("incidence...")
+# 	inc = incidence(s; vf=false) # we only need edge_faces
+	println("planes...")
+	@debug "self-intersect ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
+	@debug " Input surface:\n"*strscad(s)
+	# we precompute all planes: we need them later for edge intersections
+	planes = [ supporting_plane(tri) for tri in triangles(s) ]
+
+	n = nvertices(s)
+# 	println("self_intersect: $n points at beginning")
+	new_points = similar(vertices(s), 0)
+	T = eltype(eltype(vertices(s)))
+	face_points = [ Int[] for _ in faces(s) ]
+	edge_points = Dict([ k=>Int[] for k in keys(inc_ef(s)) ])
+	edge_coords = Dict([ k=>T[] for k in keys(inc_ef(s)) ])# used for sorting
+	@inline function create_point!(p)
+		j = findfirst(isequal(p), new_points)
+		if j isa Int; return j; end
+		push!(new_points, p)
+		return n + length(new_points)
+	end
+	@inline function add_point_edge!(e, k, p)#««
+		@debug "adding point $k to edge $e ««"
+		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
+		# fixme: unroll this loop to allow constant-propagation:
+		i = argmax(abs.(vec))
+		if length(edge_points[e]) == 0 # most common case
+			push!(edge_points[e], k)
+			push!(edge_coords[e], p[i])
+			@debug "first point on this edge, insertion is trivial»"*"»"
+			return
+		end
+# 		dprintln("  sorted by coordinate $i ($(vec[i]))")
+# 		dprintln("  e=$e")
+		rev = (vec[i] < 0)
+		j = searchsorted(edge_coords[e], p[i]; rev=rev)
+# 		dprintln("  inserting at position $j, $(first(j))")
+		insert!(edge_points[e], first(j), k)
+		insert!(edge_coords[e], first(j), p[i])
+		@debug "  now edge_points[$e] = $(edge_points[e])\n»»"
+	end#»»
+
+	println("faces...")
+	@debug "face-edge and face-vertex intersections: ««\n"
+	# face-edge and face-vertex intersections
+	for (i, f) in pairs(faces(s))
+# 		println("  face $i: $f")
+		# set up infrastructure for this face
+		triangle = vertices(s)[f]
+		bbox = boundingbox(triangle...)
+		plane = planes[i]
+		(proj, lift) = project_2d(plane)
+		triangle2 = hrep([p[proj] for p in triangle]...) # hrep of projection
+
+		# face-vertex intersections««
+		for (j, p) in pairs(vertices(s))
+			if j ∈ f || p ∉ bbox || p ∉ plane
+				continue
+			end
+			p2 = p[proj]
+			if any(h(p2) <= 0 for h in triangle2)
+				continue
+			end
+			# vertex is inside this face, mark it
+			@debug "vertex $j is inside face $i=$f"
+			push!(face_points[i], j)
+		end#»»
+		# face-edge intersections««
+		for (e, flist) in pairs(inc_ef(s))
+			segment = Segment(vertices(s)[e]...)
+			if isempty(boundingbox(segment) ∩ bbox) || !isempty(e ∩ f)
+				continue
+			end
+			# FIXME move this to a segment ∩ triangle function
+			(z1, z2) = plane.(vertices(segment))
+			if z1 * z2 >= 0
+				continue
+			end
+			# the previous line ensures that z1 ≠ z2, so this never fails:
+			(a1, a2) = coordinates.(vertices(segment))
+			p2 = Point((z2*a1[proj] - z1*a2[proj])/(z2-z1))
+			if any(h(p2) <= 0 for h in triangle2)
+				continue
+			end
+			p3 = lift(p2)
+			k = create_point!(p3)
+			@debug "edge $e intersects face $i=$f at $k"
+			@debug "adding point $k to face $i=$f"
+			@assert norm(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]])) <= 1e-3*norm(vertices(s)[e[1]]-vertices(s)[e[2]])
+# 			dprintln("cross: $(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]]))")
+			push!(face_points[i], k)
+			add_point_edge!(e, k, p3)
+		end#»»
+	end
+	@debug "»»\n"
+	println("edges...")
+	@debug "edge-edge and edge-vertex intersections:««\n"
+	# edge-edge and edge-vertex intersections
+	for (e, flist) in pairs(inc_ef(s))
+		# two equations define this edge:
+		# first one is that of an adjacent face
+		eq1 = planes[abs(flist[1])]
+		# for the second equation, it happens (quite often) that edges
+		# delimitate two parallel faces, so we cannot use a second face
+		# equation. Instead we project on first plane and look for an
+		# equation of the projection here.
+		v = direction(eq1)
+		(proj, kmax) = project_2d(v, Val(true))
+		eq2 = line(vertices(s)[e[1]][proj] => vertices(s)[e[2]][proj])
+
+		bbox = boundingbox(vertices(s)[e]...)
+		# edge-vertex intersections:««
+		for (j, p) in pairs(vertices(s))
+			if p ∉ bbox || j ∈ e || eq2(p[proj]) ≠ 0 || eq1(p) ≠ 0
+				continue
+			end
+
+			# edge (segment) is intersection of bbox and line,
+			# therefore here we know that the point is on the edge:
+			@debug "vertex $j is on edge $e"
+			add_point_edge!(e, j, p)
+		end#»»
+		# edge-edge intersections:««
+		for (e1, flist1) in pairs(inc_ef(s))
+
+			# TODO: could this be made simpler by just checking if determinant
+			# is zero?
+			segment = Segment(vertices(s)[e]...)
+			# this makes the iteration triangular:
+			if e1 == e break; end
+			seg1 = Segment(vertices(s)[e1]...)
+			if isempty(boundingbox(seg1) ∩ bbox) continue; end
+			if !isempty(e ∩ e1) continue; end
+			p = inter(segment, seg1)
+			if p isa Nothing continue; end
+			if p ∈ vertices(s)[[e[1], e[2], e1[1], e1[2]]]
+				# this is an edge-vertex intersection
+				continue;
+			end
+			if eq2(p[proj]) ≠ 0 continue; end
+			# point p is a new point and on both edges e and e1
+			@debug "edges $e and $e1 intersect"
+# 		@assert false
+			k = create_point!(p)
+			@debug "edge intersection: $e, $e1 => $k = $p"
+			add_point_edge!(e, k, p)
+			add_point_edge!(e1, k, p)
+		end#»»
+	end
+	@debug " end of edges»»\n"
+	@debug join(["\n face $f=$(faces(s)[f]): $p" for(f,p) in pairs(face_points)])
+	@debug join(["\n edge $e: $p" for(e,p) in pairs(edge_points)])
+	@debug " end of self-intersect»»\n"
+	return (points = new_points,
+		edge_points = edge_points,
+		face_points = face_points)
+end
+
+
+
+# Surfaces with patch information««1
+# # Splitting into regular components««2
+# """
+#     edgewise_connected_components(s)
+# 
+# Returns a tuple `(components, label)`.
+#  - `components[c]` is the list of face indexes in `c`-th connected comp.
+#  - `label[i] = c` is the component to which faced `i` belongs.
+# 
+# Not used. (Working on the global structure allows us to completely
+# dispense from ray tracing).
+# """
+# function edgewise_connected_components(s::AbstractSurfaceIncidence)
+# 	label = [0 for _ in eachindex(faces(s))]
+# 	components = Vector{Int}[]
+# 	visit = Int[]
+# 	@inline function mark_face(i, n)
+# 		label[i] = n; push!(components[n], i)
+# 		push!(visit, i)
+# 	end
+# 	for (i, f) in pairs(faces(s))
+# 		if !iszero(label[i]) continue; end
+# 		push!(components, Int[]); n = length(components)
+# 		mark_face(i, n)
+# 		while !isempty(visit)
+# 			i = pop!(visit)
+# 			for j in inc_ff(s)[i]
+# 				if !iszero(label[j]) continue; end
+# 				mark_face(j, n)
+# 			end
+# 		end
+# 	end
+# 	return (components=components, label=label)
+# end
+# Type definition««2
+"""
+    AbstractSurfacePatches
+
+Contains information describing the partition of the surface
+in manifold patches.
+
+ - `components(s)`: vector of faces in this regular component.
+ - `label(s)`: label assignment (as an index in `components`) for each face.
+ - `adjacency(s)`: for each pair of adjacent components, one of the adjacent edges.
+"""
+abstract type AbstractSurfacePatches{T} <: AbstractSurfaceIncidence{T} end
+struct SurfacePatches{T,S <: AbstractSurfaceIncidence{T}} <:
+		AbstractSurfacePatches{T}
+	incidence::S
+	label::Vector{Int} # label[face] = patch
+	components::Vector{Vector{Int}} # components[patch] = [face, face…]
+	adjacency::Matrix{SVector{2,Int}} # adjacency[component, component] = edge
+end
+
+@inline incidence(s::SurfacePatches) = s.incidence
+@inline surface(s::AbstractSurfacePatches) = surface(incidence(s))
+# this defines faces() and vertices():
+@inline label(s::SurfacePatches) = s.label
+@inline components(s::SurfacePatches) = s.components
+@inline adjacency(s::SurfacePatches) = s.adjacency
+
+# Constructor from surface with incidence««2
+function SurfacePatches(s::AbstractSurfaceIncidence)
+	label = [0 for _ in eachindex(faces(s))]
+	components = Vector{Int}[]
+	visit = Int[]
+	adjacency = zeros(SVector{2,Int},0,0)
+	@inline function mark_face(i, n)
+# 		println("   (marking face $i=$(faces(s)[i]) as $n)")
+		label[i] = n; push!(components[n], i)
+		push!(visit, i)
+	end
+	for (i₀, f₀) in pairs(faces(s))
+		if !iszero(label[i₀]) continue; end
+		push!(components, Int[]); n = length(components)
+		adjacency = let new_adjacency = similar(adjacency, n, n)
+			new_adjacency[1:n-1,1:n-1] .= adjacency
+			fill!(view(new_adjacency, n, :), SA[0,0])
+			fill!(view(new_adjacency, 1:n-1, n), SA[0,0])
+			new_adjacency
+		end
+		mark_face(i₀, n)
+		while !isempty(visit)
+			i = pop!(visit); f = faces(s)[i]
+# 			println(collect(face_edges(f)))
+			for e in face_edges(f)
+# 				println("  adjacent edge $e")
+				adj = filter(!isequal(i), abs.(inc_ef(s)[e]))
+# 				println("  faces = $adj")
+				if length(adj) == 1
+					# regular edge: 2 adjacent faces. One is f, mark the other.
+					iszero(label[adj[1]]) && mark_face(adj[1], n)
+				else # singular edge
+				# populate adjacency matrix
+					for g in adj
+						l = label[g]
+						iszero(l) || (adjacency[l,n] = adjacency[n,l] = e)
+					end
+				end
+			end
+		end
+	end
+	return SurfacePatches{coordtype(s),typeof(s)}(s,
+		label, components, adjacency)
 end
 
 # # DirectedEdgesTriMesh««1
@@ -3004,208 +3335,10 @@ triangulate(points::AbstractMatrix{<:Real}, faces) =
 	triangulate(ViewRows(points), faces)
 # 3d union and intersection««1
 # After [Zhou, Grinspun, Zorin, Jacobson](https://dl.acm.org/doi/abs/10.1145/2897824.2925901)
-# Self-intersection««2
-# TODO: move all intersection computations to clean little functions
-"""
-    self_intersect(s::AbstractSurface)
-
-Returns all self-intersections of `s`, as a `NamedTuple`:
- - `points`: all new points of intersection (as a vector of `Point{3}`,
-   to be appended to the original geometric points of the structure).
- - `edge_points`: for all edges, a vector of indices of new points
-   (sorted in the direction of the edge).
- - `face_points`: for all faces of `s`, the list of new points in this face,
-
-Point indices are returned as indices in `vertices(s)` ∪ {new points}.
-
-"""
-function self_intersect(s::AbstractSurfaceIncidence)
-	println("incidence...")
-# 	inc = incidence(s; vf=false) # we only need edge_faces
-	println("planes...")
-	@debug "self-intersect ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
-	@debug " Input surface:\n"*strscad(s)
-	# we precompute all planes: we need them later for edge intersections
-	planes = [ supporting_plane(tri) for tri in triangles(s) ]
-
-	n = nvertices(s)
-# 	println("self_intersect: $n points at beginning")
-	new_points = similar(vertices(s), 0)
-	T = eltype(eltype(vertices(s)))
-	face_points = [ Int[] for _ in faces(s) ]
-	edge_points = Dict([ k=>Int[] for k in keys(inc_ef(s)) ])
-	edge_coords = Dict([ k=>T[] for k in keys(inc_ef(s)) ])# used for sorting
-	@inline function create_point!(p)
-		j = findfirst(isequal(p), new_points)
-		if j isa Int; return j; end
-		push!(new_points, p)
-		return n + length(new_points)
-	end
-	@inline function add_point_edge!(e, k, p)#««
-		@debug "adding point $k to edge $e ««"
-# 		dprintln("""
-# adding point $k=$p to edge $e
-#   $e=[$(vertices(s)[e])]
-#   current points for this edge: $(edge_points[e])")
-#   current coordinates: $(edge_coords[e])""")
-		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
-		# fixme: unroll this loop to allow constant-propagation:
-		i = argmax(abs.(vec))
-		if length(edge_points[e]) == 0 # most common case
-			push!(edge_points[e], k)
-			push!(edge_coords[e], p[i])
-			@debug "first point on this edge, insertion is trivial»»"
-			return
-		end
-# 		dprintln("  sorted by coordinate $i ($(vec[i]))")
-# 		dprintln("  e=$e")
-		rev = (vec[i] < 0)
-		j = searchsorted(edge_coords[e], p[i]; rev=rev)
-# 		dprintln("  inserting at position $j, $(first(j))")
-		insert!(edge_points[e], first(j), k)
-		insert!(edge_coords[e], first(j), p[i])
-		@debug "  now edge_points[$e] = $(edge_points[e])\n»»"
-	end#»»
-
-	println("faces...")
-	@debug "face-edge and face-vertex intersections: ««\n"
-	# face-edge and face-vertex intersections
-	for (i, f) in pairs(faces(s))
-# 		println("  face $i: $f")
-		# set up infrastructure for this face
-		triangle = vertices(s)[f]
-		bbox = boundingbox(triangle...)
-		plane = planes[i]
-		(proj, lift) = project_2d(plane)
-		triangle2 = hrep([p[proj] for p in triangle]...) # hrep of projection
-
-		# face-vertex intersections««
-		for (j, p) in pairs(vertices(s))
-			if j ∈ f || p ∉ bbox || p ∉ plane
-				continue
-			end
-			p2 = p[proj]
-			if any(h(p2) <= 0 for h in triangle2)
-				continue
-			end
-			# vertex is inside this face, mark it
-			@debug "vertex $j is inside face $i=$f"
-			push!(face_points[i], j)
-		end#»»
-		# face-edge intersections««
-		for (e, flist) in pairs(inc_ef(s))
-			segment = Segment(vertices(s)[e]...)
-			if isempty(boundingbox(segment) ∩ bbox) || !isempty(e ∩ f)
-				continue
-			end
-			# FIXME move this to a segment ∩ triangle function
-			(z1, z2) = plane.(vertices(segment))
-			if z1 * z2 >= 0
-				continue
-			end
-			# the previous line ensures that z1 ≠ z2, so this never fails:
-			(a1, a2) = coordinates.(vertices(segment))
-			p2 = Point((z2*a1[proj] - z1*a2[proj])/(z2-z1))
-			if any(h(p2) <= 0 for h in triangle2)
-				continue
-			end
-			p3 = lift(p2)
-			k = create_point!(p3)
-			@debug "edge $e intersects face $i=$f at $k"
-			@debug "adding point $k to face $i=$f"
-			@assert norm(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]])) <= 1e-3*norm(vertices(s)[e[1]]-vertices(s)[e[2]])
-# 			dprintln("cross: $(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]]))")
-			push!(face_points[i], k)
-			add_point_edge!(e, k, p3)
-		end#»»
-	end
-	@debug "»»\n"
-	println("edges...")
-	@debug "edge-edge and edge-vertex intersections:««\n"
-	# edge-edge and edge-vertex intersections
-	for (e, flist) in pairs(inc_ef(s))
-		# two equations define this edge:
-		# first one is that of an adjacent face
-		eq1 = planes[abs(flist[1])]
-		# for the second equation, it happens (quite often) that edges
-		# delimitate two parallel faces, so we cannot use a second face
-		# equation. Instead we project on first plane and look for an
-		# equation of the projection here.
-		v = direction(eq1)
-		(proj, kmax) = project_2d(v, Val(true))
-		eq2 = line(vertices(s)[e[1]][proj] => vertices(s)[e[2]][proj])
-
-		bbox = boundingbox(vertices(s)[e]...)
-		# edge-vertex intersections:««
-		for (j, p) in pairs(vertices(s))
-			if p ∉ bbox || j ∈ e || eq2(p[proj]) ≠ 0 || eq1(p) ≠ 0
-				continue
-			end
-
-			# edge (segment) is intersection of bbox and line,
-			# therefore here we know that the point is on the edge:
-			@debug "vertex $j is on edge $e"
-			add_point_edge!(e, j, p)
-		end#»»
-		# edge-edge intersections:««
-		for (e1, flist1) in pairs(inc_ef(s))
-
-			# TODO: could this be made simpler by just checking if determinant
-			# is zero?
-			segment = Segment(vertices(s)[e]...)
-			# this makes the iteration triangular:
-			if e1 == e break; end
-			seg1 = Segment(vertices(s)[e1]...)
-			if isempty(boundingbox(seg1) ∩ bbox) continue; end
-			if !isempty(e ∩ e1) continue; end
-			p = inter(segment, seg1)
-			if p isa Nothing continue; end
-			if p ∈ vertices(s)[[e[1], e[2], e1[1], e1[2]]]
-				# this is an edge-vertex intersection
-				continue;
-			end
-			if eq2(p[proj]) ≠ 0 continue; end
-			# point p is a new point and on both edges e and e1
-			@debug "edges $e and $e1 intersect"
-# 		@assert false
-			k = create_point!(p)
-			@debug "edge intersection: $e, $e1 => $k = $p"
-			add_point_edge!(e, k, p)
-			add_point_edge!(e1, k, p)
-		end#»»
-	end
-	@debug " end of edges»»\n"
-	str = ""
-	for (f, p) in pairs(face_points)
-		str*=" face $f=$(faces(s)[f]): $p\n"
-	end
-	for (e, p) in pairs(edge_points)
-		str*="  edge $e: $p\n"
-	end
-	@debug "returned values:««\n$str\n»»\n"
-	@debug " end of self-intersect»»\n"
-	return (points = new_points,
-		edge_points = edge_points,
-		face_points = face_points)
-end
 # Sub-triangulation««2
 # FIXME: after [ZGZJ], this should be done in *clusters* of coplanar
 # faces, so as to ensure compatible triangulation in exceptional cases.
 
-function opposite_faces(f::AbstractVector{<:Integer},
-	g::AbstractVector{<:Integer})
-	return ((g[1] == f[1] && g[2] == f[3] && g[3] == f[2])
-		  ||(g[2] == f[2] && g[1] == f[3] && g[3] == f[1])
-			||(g[3] == f[3] && g[1] == f[2] && g[2] == f[1]))
-end
-function remove_opposite_faces(flist)
-	keep = trues(length(flist))
-	for (i, f) in pairs(flist), j in 1:i-1
-		g = flist[j]
-		opposite_faces(f, g) && (keep[i] = keep[j] = false)
-	end
-	return flist[keep]
-end
 """
     subtriangulate(s::AbstractSurface)
 
@@ -3216,7 +3349,7 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 	println("self-intersect...")
 	self_int = self_intersect(s)
 	println("subtriangulate...")
-	explain(s, "/tmp/s.scad", scale=30)
+# 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	newpoints = [ vertices(s); self_int.points ]
 	newfaces = SVector{3,Int}[]
@@ -3263,126 +3396,7 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 	return Surface(newpoints, newfaces)
 end
 
-# Splitting into regular components««2
-"""
-    edgewise_connected_components(s)
-
-Returns a tuple `(components, label)`.
- - `components[c]` is the list of face indexes in `c`-th connected comp.
- - `label[i] = c` is the component to which faced `i` belongs.
-
-Not used. (Working on the global structure allows us to completely
-dispense from ray tracing).
-"""
-function edgewise_connected_components(s::AbstractSurfaceIncidence)
-	label = [0 for _ in eachindex(faces(s))]
-	components = Vector{Int}[]
-	visit = Int[]
-	@inline function mark_face(i, n)
-		label[i] = n; push!(components[n], i)
-		push!(visit, i)
-	end
-	for (i, f) in pairs(faces(s))
-		if !iszero(label[i]) continue; end
-		push!(components, Int[]); n = length(components)
-		mark_face(i, n)
-		while !isempty(visit)
-			i = pop!(visit)
-			for j in inc_ff(s)[i]
-				if !iszero(label[j]) continue; end
-				mark_face(j, n)
-			end
-		end
-	end
-	return (components=components, label=label)
-end
-struct FaceEdgesIterator{T}
-	vertices::T
-end
-function iterate(itr::FaceEdgesIterator, s::Int = 1)
-	s > length(itr.vertices) && return nothing
-	(e1, e2) = itr.vertices[[s, mod1(s+1, length(itr.vertices))]]
-	return (e1 < e2 ? SA[e1, e2] : SA[e2, e1], s+1)
-end
-@inline length(itr::FaceEdgesIterator) = length(itr.vertices)
-"""
-    face_edges(f)
-
-Returns a list of edges bordering this face, in standard form.
-"""
-@inline face_edges(f) = FaceEdgesIterator(f)
-
-abstract type AbstractSurfacePatches{T} <: AbstractSurfaceIncidence{T} end
-struct SurfacePatches{T,S <: AbstractSurfaceIncidence{T}} <:
-		AbstractSurfacePatches{T}
-	incidence::S
-	label::Vector{Int} # label[face] = patch
-	components::Vector{Vector{Int}} # components[patch] = [face, face…]
-	adjacency::Matrix{SVector{2,Int}} # adjacency[component, component] = edge
-end
-
-@inline incidence(s::SurfacePatches) = s.incidence
-# this defines faces() and vertices():
-@inline surface(s::AbstractSurfacePatches) = surface(incidence(s))
-@inline label(s::SurfacePatches) = s.label
-@inline components(s::SurfacePatches) = s.components
-@inline adjacency(s::SurfacePatches) = s.adjacency
-@inline inc_ef(s::AbstractSurfacePatches) = inc_ef(incidence(s))
-@inline inc_pf(s::AbstractSurfacePatches) = inc_pf(incidence(s))
-"""
-    regular_components(s)
-
-Returns a named tuple `(components, label, adjacency)` describing the partition of the surface in manifold patches.
-
- - `components`: vector of faces in this regular component.
- - `label`: label assignment (as an index in `components`) for each face.
- - `adjacency`: for each pair of adjacent components, one of the adjacent edges.
-"""
-function SurfacePatches(s::AbstractSurfaceIncidence)
-	label = [0 for _ in eachindex(faces(s))]
-	components = Vector{Int}[]
-	visit = Int[]
-	adjacency = zeros(SVector{2,Int},0,0)
-	@inline function mark_face(i, n)
-# 		println("   (marking face $i=$(faces(s)[i]) as $n)")
-		label[i] = n; push!(components[n], i)
-		push!(visit, i)
-	end
-	for (i₀, f₀) in pairs(faces(s))
-		if !iszero(label[i₀]) continue; end
-		push!(components, Int[]); n = length(components)
-		adjacency = let new_adjacency = similar(adjacency, n, n)
-			new_adjacency[1:n-1,1:n-1] .= adjacency
-			fill!(view(new_adjacency, n, :), SA[0,0])
-			fill!(view(new_adjacency, 1:n-1, n), SA[0,0])
-			new_adjacency
-		end
-		mark_face(i₀, n)
-		while !isempty(visit)
-			i = pop!(visit); f = faces(s)[i]
-# 			println(collect(face_edges(f)))
-			for e in face_edges(f)
-# 				println("  adjacent edge $e")
-				adj = filter(!isequal(i), abs.(inc_ef(s)[e]))
-# 				println("  faces = $adj")
-				if length(adj) == 1
-					# regular edge: 2 adjacent faces. One is f, mark the other.
-					iszero(label[adj[1]]) && mark_face(adj[1], n)
-				else # singular edge
-				# populate adjacency matrix
-					for g in adj
-						l = label[g]
-						iszero(l) || (adjacency[l,n] = adjacency[n,l] = e)
-					end
-				end
-			end
-		end
-	end
-	return SurfacePatches{coordtype(s),typeof(s)}(s,
-		label, components, adjacency)
-end
-
-# Arranging into cells««2
+# Faces around an edge««2
 """
     faces_around_edge(s, edge, incidence, [vector = 0])
 
@@ -3437,60 +3451,10 @@ function faces_around_edge(s::AbstractSurfaceIncidence,
 		str*= "  face $(flist[i]) to vertex $p3: vec2=$(face_vec2[i])\n"
 	end
 	@debug str
-# 	println("\e[1medge $edge:\e[m proj=$proj")
-# 	for i in eachindex(flist)
-# 		f = abs(flist[i])
-# 		println("  face $(flist[i]) = $(faces(s)[f]), vec=$(face_vec2[i])")
-# # 		println("    vec2=$(face_vec2[i])  vec3=$(face_vec3[i])")
-# 	end
-# 	for (i, f) in pairs(flist[reorder])
-# 		println("  $i: face $f = $(faces(s)[abs(f)])")
-# 	end
 	return flist[reorder]
 end
 
-# Computing multiplicities««2
-"""
-    cell_multiplicities(cells, boundary)
-
-Given the incidence graph between cells and regular components,
-compute the multiplicity of each cell.
-"""
-function cell_multiplicities(cells, boundary)
-	@debug "cell_multiplicities: $(length(cells)) cells««"
-	@debug "cells = $cells"
-	@debug "boundary = $boundary"
-	multiplicity = [ typemin(0) for _ in boundary ]
-	multiplicity[1] = 0; visit = [1]
-	min_mul = max_mul = multiplicity[1]
-	while !isempty(visit)
-		i = pop!(visit)
-		@debug "visiting cell $i (remaining = $visit)««"
-		for c in boundary[i] # boundary components
-# 			println(" from cell $i visiting component $c")
-			if c > 0 # outgoing from i
-				j = cells[c,2]
-				if multiplicity[j] == typemin(0)
-					multiplicity[j] = multiplicity[i] - 1
-					(multiplicity[j] < min_mul) && (min_mul = multiplicity[j])
-					push!(visit, j)
-				end
-			else
-				j = cells[-c,1]
-				if multiplicity[j] == typemin(0)
-					multiplicity[j] = multiplicity[i] + 1
-					(multiplicity[j] > max_mul) && (max_mul = multiplicity[j])
-					push!(visit, j)
-				end
-			end
-		end
-		@debug "»»"
-	end
-	@debug "computed multiplicity = $multiplicity, $min_mul, $max_mul"
-	@debug "(end cell_multiplicities)»»"
-	return (multiplicity .- min_mul, max_mul .- min_mul)
-end
-
+# Level structure««2
 """
     LevelStructure
 
@@ -3506,59 +3470,46 @@ struct LevelStructure
 		[(i, 0) for i in 1:n],
 		[Set(i) for i in 1:n])
 end
-function connect!(s::LevelStructure, i1, i2, delta)
-	(c1, r1) = s.level[i1]
-	(c2, r2) = s.level[i2]
+function connect!(l::LevelStructure, i1, i2, delta)
+	(c1, r1) = l.level[i1]
+	(c2, r2) = l.level[i2]
 	if c1 == c2
 		@assert r1 + delta == r2
 		return
 	end
-	# connect everything in component c = s.level[i2][1]
-	for k in s.component[c2]
-		# r is replaced by s.level[i1]+delta
-		# r' is replaced by (r'-r) + (s.level[i1]+delta)
-		s.level[k] = (c1, s.level[k][2] - r2 + r1 + delta)
+	# connect everything in component c = l.level[i2][1]
+	for k in l.component[c2]
+		# r is replaced by l.level[i1]+delta
+		# r' is replaced by (r'-r) + (l.level[i1]+delta)
+		l.level[k] = (c1, l.level[k][2] - r2 + r1 + delta)
 	end
-	union!(s.component[c1], s.component[c2])
-	empty!(s.component[c2])
-	return s
+	union!(l.component[c1], l.component[c2])
+	empty!(l.component[c2])
+	return l
 end
-@inline connected(s::LevelStructure, i1, i2) =
-	s.level[i1][1] == s.level[i2][1]
+@inline connected(l::LevelStructure, i1, i2) =
+	l.level[i1][1] == l.level[i2][1]
 
-# """
-#     locate_point(s, regular_components, point)
-# 
-# Returns the (signed) regular component closest to `point`.
-# """
-# function locate_point(s::AbstractSurface, reg, conn, point)
-# 	@debug "locate_point($point)««"
-# 	i = argmin([distance²(vertices(s)[i], point) for i in 1:nvertices(s)])
-# 	@debug "nearest vertex: $i = $(vertices(s)[i])"
-# 	# neighboring points
-# 	neigh = union([filter(≠(i), faces(s)[f]) for f in conn.point_faces[i]]...)
-# 	j = argmin([distance²(vertices(s)[j], point) for j in 1:length(neigh)])
-# 	j = neigh[j]
-# 	@debug "nearest neigbour: $j = $(vertices(s)[j])"
-# 	edge = minmax(i, j)
-# 	@debug "using edge=$edge"
-# 	@debug "(end locate_point)»»"
-# 	flist = faces_around_edge(s, edge, conn, point - vertices(s)[i])
-# end
-
-# `c` is a vector of regular component numbers;
-# returns the list of all vertices belonging to one of the regular
-# components in `c`
-function vertices_in_components(s::AbstractSurfacePatches, c)
-	flist = union(components(s)[[c...]]...)
-	return union(faces(s)[flist]...)
+# Returns a list of connected components for this level structure.
+# Each element of the list represents one connected component,
+# arranged by multiplicity:
+# [ [faces-with-multiplicity = 1], [faces-with-mult = 2], ... ]
+function components(l::LevelStructure)
+	ret = Vector{Vector{Int}}[]
+	for c in l.component
+		isempty(c) && continue
+		(mmin, mmax) = extrema(i->l.level[i][2], c)
+		r = [ Int[] for m in mmin:mmax ]
+		for i in c
+			m = l.level[i][2] # multiplicity of patch c
+			push!(r[1+m-mmin], i)
+		end
+		push!(ret, r)
+	end
+	return ret
 end
 
-# returns all vertices neighbours of vertex v
-function neighbors(s::AbstractSurfaceIncidence, v)
-	return union([filter(≠(v), faces(s)[f]) for f in inc_pf(s)[v]]...)
-end
-
+# Point location algorithm««2
 # finds a good edge from point i, viewed from point k
 function find_good_edge(s::AbstractSurfaceIncidence, i, vp)
 	@debug "finding good edge from $i relative to $vp"
@@ -3591,6 +3542,34 @@ function find_good_edge(s::AbstractSurfaceIncidence, i, vp)
 	return j
 end
 """
+    locate_point(s, c, point)
+
+Determines if the point is inside (returns +1) or outside (returns -1) of connected component `c`.
+"""
+function locate_point(s::AbstractSurfaceIncidence, vlist, point)
+	@debug "locate_point($vlist, $point)««"
+	i = vlist[argmin([distance²(vertices(s)[t], point) for t in vlist])]
+	@debug "  closest vertex is $i = $(vertices(s)[i])"
+	j = find_good_edge(s, i, point)
+	@debug "  best neighbor is $j = $(vertices(s)[j])"
+	(_, edge) = edge_can([i, j])
+	@debug "  best edge is $edge"
+	f = faces_around_edge(s, edge, point - vertices(s)[i])
+	@debug "  faces_around_edge returned $f, returning its sign"
+	@debug "(end locate_point)»»"
+	return sign(f)
+end
+
+# Computation of multiplicity levels««2
+# `c` is a vector of regular component numbers;
+# returns the list of all vertices belonging to one of the regular
+# components in `c`
+function vertices_in_components(s::AbstractSurfacePatches, c)
+	flist = union(components(s)[[c...]]...)
+	return union(faces(s)[flist]...)
+end
+
+"""
     multiplicity_levels(s)
 
 Given a triangulated surface `s`,
@@ -3600,27 +3579,11 @@ of `s`.
 function multiplicity_levels(s::AbstractSurfacePatches)
 	@debug "multiplicity_levels ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	@debug " Input surface:\n"*strscad(s)
-	explain(s, "/tmp/mu.scad", scale=40)
-	println("regular components...")
+# 	explain(s, "/tmp/before-multiplicity.scad", scale=40)
 	println("multiplicity...")
 	@debug "regular components: $(components(s))"
 	@debug "  labeling: $(label(s))"
-	# The two next variables encode the bipartite graph of cells and
-	# regular components:
-	#  - `cells`: for each regular component, the pair (cell above, cell below)
-	#  - `boundary`: for each cell, a list of regular components located
-	#  either above or below this cell
-	#  (this information is encoded in the sign of the component).
-	# Initial value: component i has one cell (2i-1) above it and one cell
-	# (2i) below it; all cells are distinct (they will be merged at component
-	# intersections).
-	cells = [ 2*i + j for i in eachindex(components(s)), j in [-1,0]]
-	boundary = [ isodd(i) ? Set(cld(i, 2)) : Set(-cld(i, 2))
-		for i in eachindex(cells) ]
-	# The graph of cells and patches is stored implicitly;
-	# for each pair of patches, we store the multiplicity difference
-	# between the patches:
-	# !! Beware, only the entries for adjacent compnents are significant!!
+
 	levels = LevelStructure(length(components(s)))
 	for (i1, r1) in pairs(components(s)), i2 in 1:i1-1
 		connected(levels, i1, i2) && continue
@@ -3649,76 +3612,43 @@ function multiplicity_levels(s::AbstractSurfacePatches)
 		@debug "(end edge)»»"
 	end
 	@debug levels
-	# join connected components in level structure
-	# to first non-empty component
-	i1 = findfirst((!isempty).(levels.component))
-	c1 = levels.component[i1]
-	# find one extremal point and edge
-	vlist = vertices_in_components(s, c1)
-	vmax = vlist[argmax([coordinates(vertices(s)[v])[1] for v in vlist])]
+	# connected components of level structure;
+	# each component is arranged by multiplicity:
+	cc = components(levels)
+	# now we rearrange these connected components by inclusion
+	# vlist[i] = list of all vertices in connected component i:
+	# vmax[i] = index of an extremal vertex in cc i
+	# pmax[i] = Point corresponding to this vertex
+	# nest[i] = number of components enclosing this one
+	vlist = [ vertices_in_components(s, union(c...)) for c in cc ]
+	vmax = [ v[argmax([coordinates(vertices(s)[i])[1] for i in v])]
+		for v in vlist]
 	pmax = vertices(s)[vmax]
-	@debug """
-first component: $i1=$c1
-	-> vertices $vlist
-	-> xmax $vmax = $pmax
-	"""
+	nest = fill(0, length(cc))
+	
+	@debug join(["cc $i: vmax=$(vmax[i]): $(pmax[i])" for i in 1:length(cc)], "\n")
 
-	for i2 in i1+1:length(levels.component)
-		c2 = levels.component[i2]
-		isempty(c2) && continue
-		@debug "Joining components $i1=$c1 and $i2=$c2««"
-		vlist = vertices_in_components(s, c2)
-		i = argmin([distance²(vertices(s)[i], pmax) for i in vlist])
-		i = vlist[i]
-		@debug "nearest vertex: $i = $(vertices(s)[i])"
-		j = find_good_edge(s, i, pmax)
-		u = pmax - vertices(s)[i]
-		edge = SA[min(i,j), max(i,j)]
-		@debug "using edge $edge"
-		t = faces_around_edge(s, edge, u)
-		c = label(s)[abs(t)]
-		@debug "returned $t = $(faces(s)[abs(t)]) comp$c"
-		connect!(levels, i1, c, (t > 0) ? 0 : -1)
-		# if point 
-
-		@debug "(join done)»»"
+	# iterate over distinct pairs of components to determine inclusion
+	for i1 in 1:length(cc), i2 in 1:length(cc)
+		i1 == i2 && continue
+		k = locate_point(s, vlist[i2], pmax[i1])
+		# if k > 0 then component i1 is inside i2
+		nest[i1] += (k < 0)
 	end
-	@debug "now levels = $levels"
-	l = [x[2] for x in levels.level]
-	l .-= (minimum(l) - 1) # minimum level is 1
-	lmax = maximum(l)
-	@debug "relative levels = $l (maximum $lmax)"
-	lpatches = [ filter(i->l[i] == k, 1:length(l)) for k in 1:lmax ]
-	@debug "patches sorted by level: $lpatches"
-	lfaces = [ union(components(s)[c]...) for c in lpatches ]
-	@debug "faces sorted by level: $lfaces"
+	@debug "cc = $cc"
+	@debug "nest = $nest"
+	# mpatches[i] = patches enclosing region with multiplicity i
+	mpatches = [ union([get(c, i-n, Int[]) for (c, n) in zip(cc, nest)]...)
+		for i in 1:maximum(nest)+maximum(length.(cc))]
+	@debug "mpatches = $mpatches"
+	@debug join(["region of multiplicity $i enclosed by patches $p" for (i,p) in pairs(mpatches)], "\n")
 
-@debug "(end multiplicity_levels)»»"
-	return lfaces
+	mfaces = [ union(Int[], components(s)[p]...) for p in mpatches ]
+	@debug join(["\n region $i: faces $f" for (i,f) in pairs(mfaces)],"")
+	@debug "(end multiplicity_levels)»»"
+	return mfaces
 end
 # Binary union and intersection««2
-function extract_components(fn, face_idx)
-	@debug "extract_components««"
-	kept = [ fn(m) for m in eachindex(face_idx) ]
-	@debug "faces kept = $kept"
-	regc = Int[]
-	for m in 1:length(kept)-1
-		if kept[m] && !kept[m+1]
-			# e.g. xor: 1 kept, 2 not kept
-			# we add *inverted* components of m
-			push!(regc, filter(x->x < 0, face_idx[m])...)
-		elseif !kept[m] && kept[m+1]
-			# e.g. union: 1 not kept, 2 kept
-			# we add *direct* components of multiplicity m+1
-			push!(regc, filter(x->x > 0, face_idx[m+1])...)
-		end
-	end
-	@debug "end extract_components»»"
-	return regc
-	# faces outer-bounding
-	# cells[i] = [cell inside patch i, cell outside patch i]
-end
-
 function select_multiplicity(m, s::AbstractSurface...)
 	t = subtriangulate(SurfaceIncidence(merge(s...)))
 	face_idx = multiplicity_levels(SurfacePatches(SurfaceIncidence(t)))

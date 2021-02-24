@@ -134,10 +134,14 @@ end
 t1 = tetrahedron()
 t2 = 2t1
 t3 = [3,0,0]+t1
-@test nvf(mesh(union(t1, t2))) == (4,4)
-@test nvf(mesh(union(t1, t3))) == (8,8)
-@test nvf(mesh(intersect(t1, t2))) == (4,4)
-@test nvf(mesh(intersect(t1, t3))) == (0,0)
+@test nvf(mesh(t1∪t2)) == (4,4)
+@test nvf(mesh(t1∪t3)) == (8,8)
+@test nvf(mesh(t1∩t2)) == (4,4)
+@test nvf(mesh(t1∩t3)) == (0,0)
+@test nvf(mesh(t1\t1)) == (0,0)
+@test nvf(mesh(t1\t3)) == (4,4)
+@test nvf(mesh(t1\t2)) == (0,0) # t1 ⊂ t2
+@test nvf(mesh(t2\t1)) == (8,8)
 
 end
 #»»1
