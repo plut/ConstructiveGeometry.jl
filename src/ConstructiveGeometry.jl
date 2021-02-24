@@ -2588,10 +2588,21 @@ Returns the subcomplex containing only the faces `i` for which `f(i)`
 evaluates to a true value. Points are renamed.
 """
 function select_faces(list::AbstractVector{<:Integer}, s::AbstractSurface)
+	@debug "select_faces: keeping $(length(list)) out of $(nfaces(s)) faces««"
+	keep = trues(length(list))
+	for (i, fi) in pairs(list), j in 1:i-1
+		fj = list[j]
+		@debug "examine: ($fi, $fj) => $(faces(s)[fi]), $(faces(s)[fj])"
+		if opposite_faces(faces(s)[fi], faces(s)[fj])
+			@debug "  faces $fi=$(faces(s)[fi]) and $fj=$(faces(s)[fj]) are opposite"
+			(keep[i] = keep[j] = false)
+		end
+	end
+	list = list[keep]
+	@debug "after removing opposites, $(length(list)) remain"
 	renum = fill(0, eachindex(vertices(s)))
 	newfaces = SVector{3,Int}[]
-	newpoints = similar(vertices(s))
-	n = 0
+	newpoints = similar(vertices(s),0)
 	for i in list
 		if i > 0
 			f = faces(s)[i]
@@ -2599,14 +2610,16 @@ function select_faces(list::AbstractVector{<:Integer}, s::AbstractSurface)
 			f = reverse(faces(s)[-i])
 		end
 		for p in f
-			if renum[p] == 0
-				renum[p] = (n+= 1)
-				newpoints[n] = vertices(s)[p]
+			if iszero(renum[p])
+				push!(newpoints, vertices(s)[p])
+				renum[p] = length(newpoints)
+				@debug "point $p = $(vertices(s)[p]) renamed $(renum[p])"
 			end
 		end
+		@debug "face $f renamed $(renum[f])"
 		push!(newfaces, renum[f])
 	end
-	resize!(newpoints, n)
+	@debug "end select_faces»»"
 	return (typeof(s))(
 		newpoints,
 		remove_opposite_faces(newfaces))
@@ -3188,15 +3201,17 @@ end
 # FIXME: after [ZGZJ], this should be done in *clusters* of coplanar
 # faces, so as to ensure compatible triangulation in exceptional cases.
 
+function opposite_faces(f::AbstractVector{<:Integer},
+	g::AbstractVector{<:Integer})
+	return ((g[1] == f[1] && g[2] == f[3] && g[3] == f[2])
+		  ||(g[2] == f[2] && g[1] == f[3] && g[3] == f[1])
+			||(g[3] == f[3] && g[1] == f[2] && g[2] == f[1]))
+end
 function remove_opposite_faces(flist)
 	keep = trues(length(flist))
 	for (i, f) in pairs(flist), j in 1:i-1
 		g = flist[j]
-		if ((g[1] == f[1] && g[2] == f[3] && g[3] == f[2])
-		  ||(g[2] == f[2] && g[1] == f[3] && g[3] == f[1])
-			||(g[3] == f[3] && g[1] == f[2] && g[2] == f[1]))
-			keep[i] = keep[j] = false
-		end
+		opposite_faces(f, g) && (keep[i] = keep[j] = false)
 	end
 	return flist[keep]
 end
@@ -3669,7 +3684,7 @@ first component: $i1=$c1
 	lfaces = [ union(reg.components[c]...) for c in lpatches ]
 	@debug "faces sorted by level: $lfaces"
 
-	@debug "(end multiplicity_levels)»»"
+@debug "(end multiplicity_levels)»»"
 	return lfaces
 end
 # Binary union and intersection««2
@@ -3698,6 +3713,9 @@ end
 function select_multiplicity(m, s::AbstractSurface...)
 	t = subtriangulate(merge(s...))
 	face_idx = multiplicity_levels(t)
+	for f in face_idx[m]
+		@debug "keeping face $f=$(faces(t)[f])"
+	end
 	return select_faces(face_idx[m], t)
 # 	newfaces = extract_components(fn, face_idx)
 # 	return select_faces(newfaces, t)
@@ -4317,7 +4335,7 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 # # 
 # #
 # # Exports ««1
-export square, circle, cube, sphere, cylinder, Polygon, Surface
+export square, circle, cube, sphere, cylinder, polygon, surface
 export offset, draw
 export mult_matrix, translate, scale, rotate, mirror
 export linear_extrude, rotate_extrude, path_extrude

@@ -113,7 +113,7 @@ function pyramid(t=[0,0,0], n=0)
 	points = ([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
   faces = [[4,3,2],[2,1,4],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
 	faces1 = [ f .+ n for f in faces ]
-	return Surface(points, faces1)
+	return surface(points, faces1)
 end
 nvf(s) = (CG.nvertices(s), CG.nfaces(s))
 p1 = pyramid()
@@ -124,6 +124,12 @@ d12 = mesh(p1 \ p2)
 @test nvf(u12) == (14, 24)
 @test nvf(i12) == (8, 12)
 @test nvf(d12) == (8, 12)
+
+function tetrahedron(center=[0,0,0], radius=1)
+	return surface([center+radius*[1,0,0], center+radius*[-1,0,0],
+		center+radius*[0,1,1],center+radius*[0,-1,1]],
+		[[1,3,4],[1,2,3],[1,4,2],[2,4,3]])
+end
 
 # p3 = merge(p1, p2)
 # p1bis = select_faces(1:6, p3)
