@@ -53,6 +53,7 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works
 # Dependencies
+ - [ ] `CircularArrays.jl`
  - [ ] use `Dictionaries.jl`
  - [ ] use `Reexport.jl`
 decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:

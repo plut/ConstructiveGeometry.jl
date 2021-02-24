@@ -760,7 +760,7 @@ function extract end
 # SetParameters««2
 SetParameters = Transform{:parameters}
 """
-    set_parameters(;accuracy=accuracy, precision=precision)
+    set_parameters(;accuracy, precision, symmetry) * solid...
 
 A transformation which passes down the specified parameter values to its
 child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
@@ -1151,7 +1151,7 @@ function scad(io::IO, s::Surface)
 		indent(io)
 		print(io, " ", Vector(f .- 1))
 		if i < nfaces(s) print(io, ","); end
-		println(io, " // ", i)
+		println(io, " // ", i, "=", Vector(f))
 	end
 	indent(io); println(io, "] );")
 end
@@ -1500,7 +1500,7 @@ end
 # `Polyhedra.jl` is a bit slow for these simple cases, so we write them
 # here:
 
-regularize(x::Float64) = (x == -0.0) ? 0.0 : x
+standardize(x::Float64) = (x == -0.0) ? 0.0 : x
 """
     inter(path, hyperplane::Polyhedra.HyperPlane)
 
@@ -1516,7 +1516,7 @@ function inter(path::AnyPath, hyperplane::Polyhedra.HyperPlane)
 		end
 		for j in 1:i-1
 			if s[i] * s[j] < 0
-				newpath[c+= 1] = regularize.((s[j]*path[i]-s[i]*path[j])/(s[j]-s[i]))
+				newpath[c+= 1] = standardize.((s[j]*path[i]-s[i]*path[j])/(s[j]-s[i]))
 			end
 		end
 	end
@@ -1595,13 +1595,14 @@ function line_inter(s1::Segment{2}, s2::Segment{2})
 	if iszero(d) return nothing; end
 	a = x1*y2-y1*x2; b = x3*y4-y3*x4
 	d1 = inv(to_real(d))
-	return Point(d1 .* SA[a*(x3-x4)-b*(x1-x2), a*(y3-y4)-b*(y1-y2)])
+	return Point(standardize.(d1 .* SA[a*(x3-x4)-b*(x1-x2), a*(y3-y4)-b*(y1-y2)]))
 end
 function inter(s1::Segment{2}, s2::Segment{2})
 	c = line_inter(s1, s2)
 	if c isa Nothing return nothing; end
-	if c ∈ boundingbox(s1) return c; end
-	return nothing
+	if c ∉ boundingbox(s1) return nothing; end
+	if c ∉ boundingbox(s2) return nothing; end
+	return c
 end
 #Convex hull««1
 # 2d convex hull ««2
@@ -2288,6 +2289,7 @@ function inter(s1::Segment{3}, s2::Segment{3})
 	end
 	# compute supporting plane
 	plane = supporting_plane(Triangle(a1, b1, a2))
+	iszero(direction(plane)) && return a2
 	(proj, lift) = project_2d(plane)
 	int2 = inter(Segment(a1[proj],b1[proj]), Segment(a2[proj],b2[proj]))
 	if int2 == nothing
@@ -2574,7 +2576,7 @@ function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
 		newfaces[f1+i] = renum[f] # array indexed by array trick
 		@assert isunique(renum[f]) "face not unique: $f => $(renum[f])"
 	end
-	@debug "»»"
+	@debug "(merge done)»»"
 	return Surface(newpoints, newfaces)
 end
 
@@ -2856,9 +2858,12 @@ module LibTriangle
 		end
 		s*= "»»\n"
 		@debug s
+		println(s) # debug output is not always flushed in time before segfault
 		isunique(array) = length(unique(array)) == length(array)
 		@assert isunique(vmap) "points must be unique: $(vmap)"
-		println(s) # debug output is not always flushed in time before segfault
+		for i in 1:size(vertices,1), j in 1:i-1
+			@assert vertices[i,:] != vertices[j,:] "points must be distinct: $i, $j"
+		end
 		return SVector{3,Int}.(Triangle.constrained_triangulation(vertices,
 			vmap, edge_list))
 	end
@@ -3059,8 +3064,8 @@ function self_intersect(s::AbstractSurface)
 	end#»»
 
 	println("faces...")
-	@debug "faces: ««\n"
-	# face-edge and face-vertex intersections««
+	@debug "face-edge and face-vertex intersections: ««\n"
+	# face-edge and face-vertex intersections
 	for (i, f) in pairs(faces(s))
 # 		println("  face $i: $f")
 		# set up infrastructure for this face
@@ -3109,11 +3114,11 @@ function self_intersect(s::AbstractSurface)
 			push!(face_points[i], k)
 			add_point_edge!(e, k, p3)
 		end#»»
-	end#»»
+	end
 	@debug "»»\n"
 	println("edges...")
-	@debug "edges...««\n"
-	# edge-edge and edge-vertex intersections««
+	@debug "edge-edge and edge-vertex intersections:««\n"
+	# edge-edge and edge-vertex intersections
 	for (e, flist) in pairs(inc.edge_faces)
 		# two equations define this edge:
 		# first one is that of an adjacent face
@@ -3158,23 +3163,13 @@ function self_intersect(s::AbstractSurface)
 			if eq2(p[proj]) ≠ 0 continue; end
 			# point p is a new point and on both edges e and e1
 			@debug "edges $e and $e1 intersect"
-			@debug """
-Edges $e, $e1««
-flist = $flist = $(faces(s)[abs.(flist)])
-equations = $eq1, $eq2
-segment = $segment
-(z1, z2) = $((z1, z2))
-(w1, w2) = $((w1, w2))
-candidate p (segment ∩ z): $p
-»»
-"""
 # 		@assert false
 			k = create_point!(p)
 			@debug "edge intersection: $e, $e1 => $k = $p"
 			add_point_edge!(e, k, p)
 			add_point_edge!(e1, k, p)
 		end#»»
-	end#»»
+	end
 	@debug " end of edges»»\n"
 	str = ""
 	for (f, p) in pairs(face_points)
@@ -3215,6 +3210,7 @@ function subtriangulate(s::AbstractSurface)
 	println("self-intersect...")
 	self_int = self_intersect(s)
 	println("subtriangulate...")
+	explain(s, "/tmp/s.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	newpoints = [ vertices(s); self_int.points ]
 	newfaces = SVector{3,Int}[]
@@ -3257,7 +3253,7 @@ function subtriangulate(s::AbstractSurface)
 	end
 
 	@debug "(end subtriangulate)»»"
-	newfaces = remove_opposite_faces(newfaces)
+# 	newfaces = remove_opposite_faces(newfaces)
 	return Surface(newpoints, newfaces)
 end
 
@@ -3365,13 +3361,16 @@ end
 
 # Arranging into cells««2
 """
-    faces_around_edge(s, edge, incidence)
+    faces_around_edge(s, edge, incidence, [vector = 0])
 
 Returns a cyclically ordered list of all faces of `s` around edge `e`,
 with sign indicating the orientation of the face. (The list starts at an arbitrary index).
+
+If a `vector` is provided then this will return a (signed)
+face matching this vector.
 """
 function faces_around_edge(s::AbstractSurface,
-	edge, conn = incidence(s))
+	edge, conn = incidence(s), vec3 = zero(Vec{3,coordtype(s)}))
 	# we project the faces on the plane perpendicular to edge e;
 	# the eye is at position e[2] looking towards e[1].
 	dir3 = vertices(s)[edge[2]]-vertices(s)[edge[1]]
@@ -3389,14 +3388,23 @@ function faces_around_edge(s::AbstractSurface,
 	end
 	reorder = sort(eachindex(flist);
 		lt=(i, j) -> let b = circular_sign(face_vec2[i], face_vec2[j])
-		  @debug "comparing:
-  ($(flist[i]) = $(face_vec2[i]), $(flist[j]) = $(face_vec2[j])): circular_sign = $b"
 			if !iszero(b) return (b > 0)
 			# the use of **signed** face numbers guarantees consistent ordering
 			# even if two faces are adjacent on two edges with reversed
 			# orientations
 			else return flist[i] < flist[j]
 			end end)
+	if !iszero(vec3)
+		vec2 = vec3[proj] - (vec3⋅dir3)*dir2scaled
+		k = searchsorted(face_vec2[reorder], vec2,
+			lt = (u, v)->circular_sign(u, v) > 0)
+		@assert k.start > k.stop "impossible to determine point location at this edge"
+		if k.stop == 0 # k==(1:0): we insert before first edge
+			return -flist[reorder[1]]
+		else # k==(i+1:i): 
+			return flist[reorder[k.stop]]
+		end
+	end
 	str = "faces around edge $edge: $flist\n"
 	for i in reorder
 		f = abs(flist[i])
@@ -3424,11 +3432,15 @@ Given the incidence graph between cells and regular components,
 compute the multiplicity of each cell.
 """
 function cell_multiplicities(cells, boundary)
+	@debug "cell_multiplicities: $(length(cells)) cells««"
+	@debug "cells = $cells"
+	@debug "boundary = $boundary"
 	multiplicity = [ typemin(0) for _ in boundary ]
 	multiplicity[1] = 0; visit = [1]
 	min_mul = max_mul = multiplicity[1]
 	while !isempty(visit)
 		i = pop!(visit)
+		@debug "visiting cell $i (remaining = $visit)««"
 		for c in boundary[i] # boundary components
 # 			println(" from cell $i visiting component $c")
 			if c > 0 # outgoing from i
@@ -3447,10 +3459,110 @@ function cell_multiplicities(cells, boundary)
 				end
 			end
 		end
+		@debug "»»"
 	end
+	@debug "computed multiplicity = $multiplicity, $min_mul, $max_mul"
+	@debug "(end cell_multiplicities)»»"
 	return (multiplicity .- min_mul, max_mul .- min_mul)
 end
 
+"""
+    LevelStructure
+
+Records the graph of levels.
+
+level[i] = (reference point, delta)
+component[reference point] = [all i starting from this point]
+"""
+struct LevelStructure
+	level::Vector{Tuple{Int,Int}}
+	component::Vector{Set{Int}}
+	@inline LevelStructure(n) = new(
+		[(i, 0) for i in 1:n],
+		[Set(i) for i in 1:n])
+end
+function connect!(s::LevelStructure, i1, i2, delta)
+	(c1, r1) = s.level[i1]
+	(c2, r2) = s.level[i2]
+	if c1 == c2
+		@assert r1 + delta == r2
+		return
+	end
+	# connect everything in component c = s.level[i2][1]
+	for k in s.component[c2]
+		# r is replaced by s.level[i1]+delta
+		# r' is replaced by (r'-r) + (s.level[i1]+delta)
+		s.level[k] = (c1, s.level[k][2] - r2 + r1 + delta)
+	end
+	union!(s.component[c1], s.component[c2])
+	empty!(s.component[c2])
+	return s
+end
+@inline connected(s::LevelStructure, i1, i2) =
+	s.level[i1][1] == s.level[i2][1]
+
+"""
+    locate_point(s, regular_components, point)
+
+Returns the (signed) regular component closest to `point`.
+"""
+function locate_point(s::AbstractSurface, reg, conn, point)
+	@debug "locate_point($point)««"
+	i = argmin([distance²(vertices(s)[i], point) for i in 1:nvertices(s)])
+	@debug "nearest vertex: $i = $(vertices(s)[i])"
+	# neighboring points
+	neigh = union([filter(≠(i), faces(s)[f]) for f in conn.point_faces[i]]...)
+	j = argmin([distance²(vertices(s)[j], point) for j in 1:length(neigh)])
+	j = neigh[j]
+	@debug "nearest neigbour: $j = $(vertices(s)[j])"
+	edge = minmax(i, j)
+	@debug "using edge=$edge"
+	@debug "(end locate_point)»»"
+	flist = faces_around_edge(s, edge, conn, point - vertices(s)[i])
+end
+
+# `c` is a vector of regular component numbers;
+# returns the list of all vertices belonging to one of the regular
+# components in `c`
+function vertices_in_components(s::AbstractSurface, reg, c)
+	flist = union(reg.components[[c...]]...)
+	return union(faces(s)[flist]...)
+end
+
+# returns all vertices neighbours of vertex v
+function neighbors(s::AbstractSurface, conn, v)
+	return union([filter(≠(v), faces(s)[f]) for f in conn.point_faces[v]]...)
+end
+
+# finds a good edge from point i, viewed from point k
+function find_good_edge(s::AbstractSurface, conn, i, vp)
+	l = neighbors(s, conn, i)
+	# it is possible that all edges lie in the same plane
+	# (if this is a flat cell), so we pick, as a second point j,
+	# the one which maximizes |y/x|, where
+	# y = ‖pi∧pj‖, x=‖pi·ij‖/‖pi‖²
+	# in other words, we maximize ‖pi∧pj‖²/‖pi·ij‖²
+	# caution: it is possible that pi⋅ij = 0 (edge exactly orthogonal),
+	# in this case we must return j immediately
+# 	vp = vertices(s)[p];
+	vi = vertices(s)[i]; vpi = vi - vp
+	j = l[1]; vj = vertices(s)[j]; vij = vj - vi
+	sp = vpi⋅vij
+	iszero(sp) && return j
+	xyj = (norm²(cross(vpi, vij)), sp*sp)
+	iszero(xyj[2]) && return j
+	for k in l[2:end]
+		vk = vertices(s)[k]; vik = vj - vk
+		sp = vpi⋅vik
+		iszero(sp) && return k
+		xyk = (norm²(cross(vpi, vik)), sp*sp)
+		iszero(xyk[2]) && return k
+		if xyk[2]*xyj[1] > xyk[1]*xyj[2]
+			j = k; xyj = xyk
+		end
+	end
+	return j
+end
 """
     multiplicity_levels(s)
 
@@ -3475,36 +3587,20 @@ function multiplicity_levels(s::AbstractSurface)
 	#  - `boundary`: for each cell, a list of regular components located
 	#  either above or below this cell
 	#  (this information is encoded in the sign of the component).
-	cells = zeros(Int, length(reg.components), 2)
-	boundary = Set{Int}[]
-	# if face f has no cell attached: attach it (and return c)
-	# otherwise: merges cell c with already-attached cell (return its id)
-	@inline function attach_cell_face(c, f)
-		comp = reg.label[abs(f)] # ID of regular component
-		u = f > 0 ? 1 : 2
-		@debug "attaching cell $c to face $f=$(faces(s)[abs(f)]), component $comp««"
-		@debug "  there exists currently $(length(boundary)) cells"
-		@debug "  current boundary of component $comp: $(cells[comp,:])"
-		@debug "   current value at this sign = $(cells[comp,u])"
-		if iszero(cells[comp,u]) || cells[comp,u] == c
-			cells[comp,u] = c
-		else
-			(c, n) = minmax(c, cells[comp,u])
-			@debug "   *** merging cell $n =$(boundary[n]) into cell $c = $(boundary[c])"
-			boundary[c] = union(boundary[c], boundary[n])
-			replace!(cells, n => c)
-			deleteat!(boundary, n)
-		end
-		@assert cells[comp,1] != cells[comp,2]
-		@debug "    now cells[$comp] = $(cells[comp,:])"
-		@debug "    attaching component $(sign(f)*comp) to cell $c"
-		push!(boundary[c], sign(f) * comp)
-		@debug "»»"
-		return c
-	end
-	for (i1, r1) in pairs(reg.components)
-		for i2 in 1:i1-1
-		edge = reg.adjacency[i1,i2]
+	# Initial value: component i has one cell (2i-1) above it and one cell
+	# (2i) below it; all cells are distinct (they will be merged at component
+	# intersections).
+	cells = [ 2*i + j for i in eachindex(reg.components), j in [-1,0]]
+	boundary = [ isodd(i) ? Set(cld(i, 2)) : Set(-cld(i, 2))
+		for i in eachindex(cells) ]
+	# The graph of cells and patches is stored implicitly;
+	# for each pair of patches, we store the multiplicity difference
+	# between the patches:
+	# !! Beware, only the entries for adjacent compnents are significant!!
+	levels = LevelStructure(length(reg.components))
+	for (i1, r1) in pairs(reg.components), i2 in 1:i1-1
+		connected(levels, i1, i2) && continue
+		edge = reg.adjacency[i1, i2]
 		iszero(edge) && continue
 		r2 = reg.components[i2]
 		@debug "regular components $i1 and $i2 meet at edge $edge««"
@@ -3518,42 +3614,69 @@ function multiplicity_levels(s::AbstractSurface)
 		end
 		@debug str
 		for (j, f) in pairs(flist)
+			# connect consecutive patches around an edge,
+			# depending on their orientations
 			j1 = mod1(j+1, length(flist)); f1 = flist[j1]
-			# create cell between faces f and f1
-			push!(boundary, Set{Int}()); c = length(boundary)
-			c = attach_cell_face(c, -f)
-			c = attach_cell_face(c, f1)
+			dir = sign(f1) + sign(f)
+			k = (sign(f) + sign(f1)) >> 1
+			c = reg.label[abs(f)]; c1 = reg.label[abs(f1)]
+			connect!(levels, c, c1, -k)
 		end
-		@debug "»»"
-		end
+		@debug "(end edge)»»"
 	end
+	@debug levels
+	# join connected components in level structure
+	# to first non-empty component
+	i1 = findfirst((!isempty).(levels.component))
+	c1 = levels.component[i1]
+	# find one extremal point and edge
+	vlist = vertices_in_components(s, reg, c1)
+	vmax = vlist[argmax([coordinates(vertices(s)[v])[1] for v in vlist])]
+	pmax = vertices(s)[vmax]
+	@debug """
+first component: $i1=$c1
+	-> vertices $vlist
+	-> xmax $vmax = $pmax
+	"""
 
-	(multiplicity, max_mul) = cell_multiplicities(cells, boundary)
+	for i2 in i1+1:length(levels.component)
+		c2 = levels.component[i2]
+		isempty(c2) && continue
+		@debug "Joining components $i1=$c1 and $i2=$c2««"
+		vlist = vertices_in_components(s, reg, c2)
+		i = argmin([distance²(vertices(s)[i], pmax) for i in vlist])
+		i = vlist[i]
+		@debug "nearest vertex: $i = $(vertices(s)[i])"
+		j = find_good_edge(s, conn, i, pmax)
+		u = pmax - vertices(s)[i]
+		edge = SA[min(i,j), max(i,j)]
+		@debug "using edge $edge"
+		t = faces_around_edge(s, edge, conn, u)
+		c = reg.label[abs(t)]
+		@debug "returned $t = $(faces(s)[abs(t)]) comp$c"
+		connect!(levels, i1, c, (t > 0) ? 0 : -1)
+		# if point 
 
-	# cell_idx[i] = indices of cells forming region i
-	cell_idx = [ filter(i->multiplicity[i] == m, eachindex(boundary))
-		for m in 0:max_mul ]
-	# comp_idx[i] = indices of (oriented) regular components bounding
-	# region i
-	comp_idx = [ collect(union(boundary[x]...)) for x in cell_idx]
-	# face_idx[i] = indices of (oriented) faces bounding region i
-	face_idx = [ union([ c > 0 ? reg.components[c] : .-reg.components[-c]
-		for c in comp ]...) for comp in comp_idx ]
-	global G = (
-		components = reg.components,
-		cells = cells,
-		boundary = boundary,
-		multiplicity = multiplicity,
-		comp_idx = comp_idx,
-		face_idx = face_idx,
-	)
+		@debug "(join done)»»"
+	end
+	@debug "now levels = $levels"
+	l = [x[2] for x in levels.level]
+	l .-= (minimum(l) - 1) # minimum level is 1
+	lmax = maximum(l)
+	@debug "relative levels = $l (maximum $lmax)"
+	lpatches = [ filter(i->l[i] == k, 1:length(l)) for k in 1:lmax ]
+	@debug "patches sorted by level: $lpatches"
+	lfaces = [ union(reg.components[c]...) for c in lpatches ]
+	@debug "faces sorted by level: $lfaces"
 
-	@debug "(end multiplicity_levels) »»"
-	return face_idx
+	@debug "(end multiplicity_levels)»»"
+	return lfaces
 end
 # Binary union and intersection««2
 function extract_components(fn, face_idx)
-	kept = [ fn(m-1) for m in eachindex(face_idx) ]
+	@debug "extract_components««"
+	kept = [ fn(m) for m in eachindex(face_idx) ]
+	@debug "faces kept = $kept"
 	regc = Int[]
 	for m in 1:length(kept)-1
 		if kept[m] && !kept[m+1]
@@ -3566,16 +3689,18 @@ function extract_components(fn, face_idx)
 			push!(regc, filter(x->x > 0, face_idx[m+1])...)
 		end
 	end
+	@debug "end extract_components»»"
 	return regc
 	# faces outer-bounding
 	# cells[i] = [cell inside patch i, cell outside patch i]
 end
 
-function select_multiplicity(fn, s::AbstractSurface...)
+function select_multiplicity(m, s::AbstractSurface...)
 	t = subtriangulate(merge(s...))
 	face_idx = multiplicity_levels(t)
-	newfaces = extract_components(fn, face_idx)
-	return select_faces(newfaces, t)
+	return select_faces(face_idx[m], t)
+# 	newfaces = extract_components(fn, face_idx)
+# 	return select_faces(newfaces, t)
 end
 
 # Extrusion ««1
@@ -3715,8 +3840,9 @@ function path_extrude(path::AbstractVector{Point{2,T}},
 
 	N = length(poly)
 	# offset_path is a vector of vector of paths
-	offset_path = offset([path], [pt[1] for pt in poly],
-		join = join, ends = closed ? :fill : :butt)
+	offset_path = offset([path], [pt[1] for pt in poly];
+		join = join, ends = closed ? :fill : :butt,
+		precision = precision)
 	# new_points is a flat list of all 3d points produced
 	new_points = [[
 		[ Point([pt[1], pt[2], poly[i][2]]) for pt in [p...;] ]
@@ -3801,11 +3927,11 @@ function mesh(s::Union{Cylinder, Sphere}, parameters)
 end
 # CSG operations««2
 function mesh(s::CSGUnion{3}, parameters)
-	return select_multiplicity(x->x ≥ 1,
+	return select_multiplicity(1,
 		[mesh(x, parameters) for x in children(s)]...)
 end
 function mesh(s::CSGInter{3}, parameters)
-	return select_multiplicity(isequal(length(children(s))),
+	return select_multiplicity(length(children(s)),
 		[mesh(x, parameters) for x in children(s)]...)
 end
 function mesh(s::CSGComplement{3}, parameters)

@@ -94,6 +94,11 @@ v = [[-1,0],[0,-1],[1,0],[0,1]]
 m = [CG.circular_sign(i,j) for i in v, j in v]
 @test sign.(m) == [0 1 1 1; -1 0 1 1; -1 -1 0 1; -1 -1 -1 0]
 end
+@testset "Intersection" begin#««1
+seg1 = CG.Segment(Point(0,0,2), Point(0,2,0))
+seg2 = CG.Segment(Point(0,1,1), Point(1,0,1))
+@test CG.inter(seg1, seg2) == Point(0,1,1)
+end
 @testset "Surfaces" begin #««1
 using ConstructiveGeometry: Surface, merge, select_faces, mesh
 using ConstructiveGeometry: nvertices, nfaces
