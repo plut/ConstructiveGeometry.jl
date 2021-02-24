@@ -125,20 +125,20 @@ d12 = mesh(p1 \ p2)
 @test nvf(i12) == (8, 12)
 @test nvf(d12) == (8, 12)
 
-function tetrahedron(center=[0,0,0], radius=1)
-	return surface([center+radius*[1,0,0], center+radius*[-1,0,0],
-		center+radius*[0,1,1],center+radius*[0,-1,1]],
+function tetrahedron(;center=[0,0,0], radius=1)
+	return surface([center+radius*[1,0,-.5], center+radius*[-1,0,-.5],
+		center+radius*[0,1,.5],center+radius*[0,-1,.5]],
 		[[1,3,4],[1,2,3],[1,4,2],[2,4,3]])
 end
 
-# p3 = merge(p1, p2)
-# p1bis = select_faces(1:6, p3)
-# @test nfaces(p1bis) == nfaces(p1)
-# @test nvertices(p1bis) == nvertices(p1)
-# u12 = union(p1, p2)
-# i12 = intersect(p1, p2)
-# @test nvertices(u12) == 14 && nfaces(u12) == 24
-# @test nvertices(i12) == 8  && nfaces(u12) == 12
+t1 = tetrahedron()
+t2 = 2t1
+t3 = [3,0,0]+t1
+@test nvf(mesh(union(t1, t2))) == (4,4)
+@test nvf(mesh(union(t1, t3))) == (8,8)
+@test nvf(mesh(intersect(t1, t2))) == (4,4)
+@test nvf(mesh(intersect(t1, t3))) == (0,0)
+
 end
 #»»1
 

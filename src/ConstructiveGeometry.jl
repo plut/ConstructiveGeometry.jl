@@ -2583,7 +2583,7 @@ function select_faces(list::AbstractVector{<:Integer}, s::AbstractSurface)
 	keep = trues(length(list))
 	for (i, fi) in pairs(list), j in 1:i-1
 		fj = list[j]
-		@debug "examine: ($fi, $fj) => $(faces(s)[fi]), $(faces(s)[fj])"
+# 		@debug "examine: ($fi, $fj) => $(faces(s)[fi]), $(faces(s)[fj])"
 		if opposite_faces(faces(s)[fi], faces(s)[fj])
 			@debug "  faces $fi=$(faces(s)[fi]) and $fj=$(faces(s)[fj]) are opposite"
 			(keep[i] = keep[j] = false)
@@ -3328,6 +3328,7 @@ end
 @inline components(s::SurfacePatches) = s.components
 @inline adjacency(s::SurfacePatches) = s.adjacency
 @inline inc_ef(s::AbstractSurfacePatches) = inc_ef(incidence(s))
+@inline inc_pf(s::AbstractSurfacePatches) = inc_pf(incidence(s))
 """
     regular_components(s)
 
@@ -3554,14 +3555,14 @@ function vertices_in_components(s::AbstractSurfacePatches, c)
 end
 
 # returns all vertices neighbours of vertex v
-function neighbors(s::AbstractSurface, conn, v)
-	return union([filter(≠(v), faces(s)[f]) for f in conn.point_faces[v]]...)
+function neighbors(s::AbstractSurfaceIncidence, v)
+	return union([filter(≠(v), faces(s)[f]) for f in inc_pf(s)[v]]...)
 end
 
 # finds a good edge from point i, viewed from point k
-function find_good_edge(s::AbstractSurface, conn, i, vp)
+function find_good_edge(s::AbstractSurfaceIncidence, i, vp)
 	@debug "finding good edge from $i relative to $vp"
-	l = neighbors(s, conn, i)
+	l = neighbors(s, i)
 	# it is possible that all edges lie in the same plane
 	# (if this is a flat cell), so we pick, as a second point j,
 	# the one which maximizes |y/x|, where
@@ -3670,12 +3671,12 @@ first component: $i1=$c1
 		i = argmin([distance²(vertices(s)[i], pmax) for i in vlist])
 		i = vlist[i]
 		@debug "nearest vertex: $i = $(vertices(s)[i])"
-		j = find_good_edge(s, conn, i, pmax)
+		j = find_good_edge(s, i, pmax)
 		u = pmax - vertices(s)[i]
 		edge = SA[min(i,j), max(i,j)]
 		@debug "using edge $edge"
 		t = faces_around_edge(s, edge, u)
-		c = reg.label[abs(t)]
+		c = label(s)[abs(t)]
 		@debug "returned $t = $(faces(s)[abs(t)]) comp$c"
 		connect!(levels, i1, c, (t > 0) ? 0 : -1)
 		# if point 
@@ -3722,9 +3723,11 @@ function select_multiplicity(m, s::AbstractSurface...)
 	t = subtriangulate(SurfaceIncidence(merge(s...)))
 	face_idx = multiplicity_levels(SurfacePatches(SurfaceIncidence(t)))
 	flist = get(face_idx, m, Int[])
+	@debug "select_multiplicity««"
 	for f in flist
 		@debug "keeping face $f=$(faces(t)[f])"
 	end
+	@debug "(end select_multiplicity)»»"
 	return select_faces(flist, t)
 end
 
@@ -4341,7 +4344,7 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 # # # this
 # # 
 # #
-# # Exports ««1
+# Exports ««1
 export square, circle, cube, sphere, cylinder, polygon, surface
 export offset, draw
 export mult_matrix, translate, scale, rotate, mirror
