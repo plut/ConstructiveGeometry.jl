@@ -1,6 +1,7 @@
 # Immediate work
  - [x] linear extrusion of PolygonXor
  - [ ] rotate extrusion
+ - [ ] intersection with half-plane and half-space
  - [ ] Minkowski sum in 2d
    - [ ] and Minkowski difference
  - [x] clear meshing parameter propagation
@@ -46,16 +47,16 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
    => **mesh**
  - [x] check using vs. import
  - [ ] replace `triangulate_between` by an actual Triangulate call
-  - likely not possible (these are 3d points in general)
+  - [x] likely not possible (these are 3d points in general)
  - [x] write a few examples
  - [x] test suite
  - [x] fix `Offset` for polygon xor
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works
 # Dependencies
- - [ ] `CircularArrays.jl`
- - [ ] use `Dictionaries.jl`
- - [ ] use `Reexport.jl`
+ - [ ] `CircularArrays.jl` ?
+ - [ ] `Dictionaries.jl` ?
+ - [ ] `Reexport.jl` ?
 decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [x] `Meshes.jl`:
    - [ ] which basic useful algorithms are in this package? not many...
@@ -68,6 +69,10 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [ ] `Point` is bad
    - [ ] mesh types are awfully long and depend on bad `Point` type
 # Basic types
+ - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
+	 types
+	  [ ] probably requires making `Vec` a separate type from `SArray`
+		(to avoid piracy)
  - [x] add a `symmetry` parameter for circles
    - [ ] (and spheres?)
  - [ ] clarify `Path`: maybe add `points` iterator and `matrix` abstract

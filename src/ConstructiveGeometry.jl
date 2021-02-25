@@ -498,6 +498,12 @@ PolygonXor(points::AbstractVector{<:AbstractVector{<:Real}}...) =
 
 @inline paths(p::PolygonXor) = p.paths
 @inline vertices(p::PolygonXor) = [vertices.(paths(p))...;]
+"""
+    perimeters(::PolygonXor)
+
+Returns a list of perimeters and holes for this region.
+Perimeters are oriented ↺ and holes ↻.
+"""
 function perimeters(p::PolygonXor)
 	firstindex = zeros(Int, length(p.paths))
 	firstindex[1] = 0
@@ -812,8 +818,8 @@ Linear extrusion to height `h`.
 Similar to OpenSCAD's `rotate_extrude` primitive.
 """
 @inline rotate_extrude(s...) = rotate_extrude(360, s...)
-@inline rotate_extrude(angle::Real, s...; center=false) =
-	RotateExtrude((angle=angle, center=center), s...)
+@inline rotate_extrude(angle::Real, s...) =
+	RotateExtrude((angle=angle,), s...)
 RotateExtrude = Transform{:rotate_extrude}
 # Offset
 """
@@ -1199,6 +1205,9 @@ end
 
 _DEFAULT_PARAMETERS = (accuracy = 0.1, precision = .005, symmetry = 1)
 
+@inline get_parameter(parameters, name) =
+	get(parameters, name, _DEFAULT_PARAMETERS[name])
+
 # Circles««2
 
 round(m::Integer, x::Integer, ::typeof(RoundUp)) = x + m - mod1(x, m)
@@ -1212,11 +1221,12 @@ The base value `n` is given by the minimum of:
  - precision: s/r = 1-cos(2π/n)  not smaller than precision,
  or n = π /√(2*precision).
 """
-function sides(r::Real, parameters::NamedTuple = _DEFAULT_PARAMETERS)
-  ε = max(parameters.precision, parameters.accuracy/r)
+function sides(r::Real, parameters)
+  ε = max(get_parameter(parameters,:precision),
+		get_parameter(parameters,:accuracy)/r)
 	base = ceil(Int, π/√(2*ε))
 	# a circle always has at least 4 sides
-	return round(parameters.symmetry, max(4, base), RoundUp)
+	return round(get_parameter(parameters,:symmetry), max(4, base), RoundUp)
 end
 
 
@@ -1272,7 +1282,7 @@ Hence n ≈ 2 + (π/√3)/(precision).
 
 """
 function sphere_vertices(r::Real, parameters::NamedTuple = _DEFAULT_PARAMETERS)
-  ε = max(parameters.precision, parameters.accuracy/r)
+  ε = max(get_parameter(parameters,:precision), get_parameter(parameters,:accuracy)/r)
 	base = 2 + ceil(Int, (π/√3)/ε)
 	# a sphere always has at least 6 vertices
 	return max(6, base)
@@ -1932,7 +1942,7 @@ end
 function mesh(s::Offset, parameters)
 	T = coordtype(s)
 	m = mesh(s.child, parameters)
-	ε = max(parameters.accuracy, parameters.precision * s.data.r)
+	ε = max(get_parameter(parameters,:accuracy), get_parameter(parameters,:precision) * s.data.r)
 	return PolygonXor(offset(vertices.(paths(m)), s.data.r;
 		join = s.data.join,
 		ends = :fill,
@@ -1942,7 +1952,7 @@ end
 
 function mesh(s::Draw, parameters)
 	r = one_half(s.width)
-	ε = max(parameters.accuracy, parameters.precision * r)
+	ε = max(get_parameter(parameters,:accuracy), get_parameter(parameters,:precision) * r)
 	p = offset([s.path], r; join=s.join, ends=s.ends, miter_limit = s.miter_limit)
 	return PolygonXor(p...)
 end
@@ -3669,7 +3679,7 @@ function mesh(s::LinearExtrude, parameters)
 	pts2 = vertices(g)
 	tri = triangulate(g)
 	peri = perimeters(g)
-	# perimeters are oriented ↺, 
+	# perimeters are oriented ↺, holes ↻
 
 	n = length(pts2)
 	pts3 = vcat([[Point([coordinates(p); z]) for p in pts2]
@@ -3686,6 +3696,118 @@ function mesh(s::LinearExtrude, parameters)
 		vcat([[SA[j,j+n,i+n] for (i,j) in consecutives(p) ] for p in peri]...);
 	]
 	return Surface(pts3, faces)
+end
+# Rotate extrusion««2
+norm₁(s) = maximum(abs, [coordinates.(vertices(mesh(s)))...;])
+
+"""
+    _rotate_extrude(point, data, parameters)
+
+Extrudes a single `Point{2}`, returning a vector of `Point{3}`.
+(x,y) ↦ (x cosθ, x sinθ, y).
+"""
+function _rotate_extrude(p::Point{2}, data, parameters)
+	@assert p[1] ≥ 0
+	# special case: point is on the y-axis; returns a single point:
+	p[1] == 0 && return [Point(p[1], p[1], p[2])]
+	n = cld(sides(p[1], parameters) * data.angle, 360)
+
+	T = real_type(coordtype(p))
+	ω = Complex{T}(cosd(data.angle/n), sind(data.angle/n))
+	z = Vector{Complex{T}}(undef, n+1)
+	z[1] = one(T)
+	for i in 2:n
+		@inbounds z[i] = z[i-1]*ω; z[i]/= abs(z[i])
+	end
+	# close the loop:
+	z[n+1] = Complex{T}(cosd(data.angle), sind(data.angle))
+	return [Point{3,T}(p[1]*real(u), p[1]*imag(u), T(p[2])) for u in z]
+end
+"""
+    ladder_triangles(n1, n2, start1, start2)
+
+Given two integers m, n, triangulate as a ladder between these integers;
+example: ladder(5, 4, a, b)
+
+    a──a+1──a+2──a+3──a+4
+    │ ╱ ╲  ╱   ╲ ╱  ╲  │
+    b────b+1────b+2───b+3
+
+Returns the m+n-2 triangles (a,b,a+1), (b,b+1,a+1), (a+1,b+1,a+2)…
+"""
+function ladder_triangles(n1, n2, start1, start2)
+	p1 = p2 = 1
+	triangles = NTuple{3,Int}[]
+	while true
+		(p1 == n1) && (p2 == n2) && break
+		# put up to scale (n1-1)*(n2-1):
+		# front = (i,j) corresponds to ((n2-1)*i, (n1-1)*j)
+		c1 = (p1)*(n2-1)
+		c2 = (p2)*(n1-1)
+		if c1 < c2 || ((c1 == c2) && (n1 <= n2))
+			push!(triangles, (p1+start1-1, p2+start2-1, p1+start1))
+			p1+= 1
+		else
+			push!(triangles, (p1+start1-1, p2+start2-1, p2+start2))
+			p2+= 1
+		end
+	end
+	return triangles
+end
+function mesh(s::RotateExtrude, parameters)
+	@debug "mesh(rotate_extrude)««"
+	# take only right half of child:
+	m1 = mesh(s.child); N₁ = norm₁(m1)
+	g = mesh(intersect(m1,
+		polygon([SA[0,-N₁],SA[N₁,-N₁],SA[N₁,N₁],SA[0,N₁]])))
+	@assert g isa PolygonXor
+	pts2 = vertices(g)
+	tri = triangulate(g)
+	peri= perimeters(g) # oriented ↺	
+	n = length(pts2)
+	@debug "perimeters: $peri"
+	#
+	pts3 = _rotate_extrude(pts2[1], s.data, parameters)
+	firstindex = [1]
+	arclength = [length(pts3)]
+	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
+	for p in pts2[2:end]
+		push!(firstindex, length(pts3)+1)
+		newpoints = _rotate_extrude(p, s.data, parameters)
+		@debug "newpoints[$p] = $(length(newpoints))"
+		push!(arclength, length(newpoints))
+		pts3 = vcat(pts3, newpoints)
+	end
+	@debug "pts3: $pts3"
+	@debug "firstindex: $firstindex"
+	@debug "arclength: $arclength"
+	# point i ∈ polygonxor: firstindex[i]:(firstindex[i]-1+arclength[i])
+	triangles = vcat(
+		[ firstindex[t] for t in tri ],
+		[ firstindex[t] .+ arclength[t] .- 1 for t in reverse.(tri) ]
+	)
+	@debug "triangles: $(Vector.(triangles))"
+	for l in peri
+		@debug "triangulating perimeter l=$l««"
+		for (i1, p1) in pairs(l)
+			i2 = mod1(i1+1, length(l)); p2 = l[i2]
+			# point p1: firstindex[p1] .. firstindex[p1]-1+arclength[p1]
+			# point p2: etc.
+			@debug "triangulating between points $p1 and $p2:"
+			@debug "   $(firstindex[p1])..$(firstindex[p1]-1+arclength[p1])"
+			@debug "   $(firstindex[p2])..$(firstindex[p2]-1+arclength[p2])"
+			nt = SVector.(ladder_triangles(
+				arclength[p1], arclength[p2],
+				firstindex[p1], firstindex[p2],
+				))
+			push!(triangles, nt...)
+			@debug "new triangles: $nt"
+		end
+		@debug "(end perimeter)»»"
+	end
+	@debug "triangles = $triangles"
+	@debug "end rotate_extrude»»"
+	return Surface(pts3, triangles)
 end
 # Path extrusion ««2
 # triangulate_between: triangulate between two parallel paths««
@@ -3708,10 +3830,10 @@ value `start1`, and in `poly2` at `start2`.
 
 """
 function triangulate_between(
-		poly1::AbstractVector{<:Path{D,T}},
-		poly2::AbstractVector{<:Path{D,T}},
-		start1::Int = 1, start2::Int = 1) where {D,T}
-	Big = typemax(T)
+		poly1::AbstractVector{<:Path},
+		poly2::AbstractVector{<:Path},
+		start1::Int = 1, start2::Int = 1)
+	Big = typemax(coordtype(eltype(eltype(poly1))))
 # 	Triangle = SVector{3,Int}
 	triangles = SVector{3,Int}[]
 	# head is the marker of current leading edge
