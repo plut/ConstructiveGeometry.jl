@@ -2519,40 +2519,61 @@ where the boolean is `true` if the edge was reversed.
 Combines both triangulations, renumbering points of `s2` as needed.
 (Numbering in `s1` is preserved).
 """
-function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
-	@debug "merge: $(nvertices(s1)),$(nfaces(s1)) + $(nvertices(s2)),$(nfaces(s2))««"
-	renum = Vector{Int}(undef, nvertices(s2))
-	# renumber points:
-	p1 = nvertices(s1)
-	p2 = nvertices(s2)
-	newpoints = copy(vertices(s1))
-# 	newpoints = similar(vertices(s1), p1+p2)
-# 	newpoints[1:p1] = vertices(s1)
-	idx = p1
-	for (i, p) in pairs(vertices(s2))
-		k = findfirst(same(p), newpoints)
-		if k == nothing
-			push!(newpoints, p)
-			renum[i] = length(newpoints)
-			@debug "point $i of s2 renamed to $(renum[i])"
-		else
-			renum[i] = k
-			@debug "point $i of s2 is identical to point $k of s1"
+# function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
+# 	@debug "merge: $(nvertices(s1)),$(nfaces(s1)) + $(nvertices(s2)),$(nfaces(s2))««"
+# 	renum = Vector{Int}(undef, nvertices(s2))
+# 	# renumber points:
+# 	p1 = nvertices(s1)
+# 	p2 = nvertices(s2)
+# 	newpoints = copy(vertices(s1))
+# # 	newpoints = similar(vertices(s1), p1+p2)
+# # 	newpoints[1:p1] = vertices(s1)
+# 	idx = p1
+# 	for (i, p) in pairs(vertices(s2))
+# 		k = findfirst(same(p), newpoints)
+# 		if k == nothing
+# 			push!(newpoints, p)
+# 			renum[i] = length(newpoints)
+# 			@debug "point $i of s2 renamed to $(renum[i])"
+# 		else
+# 			renum[i] = k
+# 			@debug "point $i of s2 is identical to point $k of s1"
+# 		end
+# 	end
+# 	@debug join(["\nrenum[$i]=$r" for (i,r) in pairs(renum)], "")
+# 
+# 	# relabel faces
+# 	f1 = nfaces(s1)
+# 	f2 = nfaces(s2)
+# 	newfaces = similar(faces(s1), f1+f2)
+# 	newfaces[1:f1] = faces(s1)
+# 	for (i, f) in pairs(faces(s2))
+# 		@debug "renum face $i=$f to $(f1+i) = $(renum[f])"
+# 		newfaces[f1+i] = renum[f] # array indexed by array trick
+# 		@assert isunique(renum[f]) "face not unique: $f => $(renum[f])"
+# 	end
+# 	@debug "(merge done)»»"
+# 	return Surface(newpoints, newfaces)
+# end
+function merge(slist::AbstractSurface...; same = ==)
+# 	renum = [ Vector{Int}(undef, nvertices(s)) for s in slist ]
+	newpoints = Point{3,real_type(coordtype.(slist)...)}[]
+	newfaces = similar(faces(slist[1]), 0)
+	for s in slist
+		renum = Vector{Int}(undef, nvertices(s))
+		for (i, p) in pairs(vertices(s))
+			k = findfirst(same(p), newpoints)
+			if k == nothing
+				push!(newpoints, p)
+				renum[i] = length(newpoints)
+			else
+				renum[i] = k
+			end
 		end
+		# relabel faces of s
+		newfaces = vcat(newfaces,
+			[ renum[f] for f in faces(s) ])
 	end
-	@debug join(["\nrenum[$i]=$r" for (i,r) in pairs(renum)], "")
-
-	# relabel faces
-	f1 = nfaces(s1)
-	f2 = nfaces(s2)
-	newfaces = similar(faces(s1), f1+f2)
-	newfaces[1:f1] = faces(s1)
-	for (i, f) in pairs(faces(s2))
-		@debug "renum face $i=$f to $(f1+i) = $(renum[f])"
-		newfaces[f1+i] = renum[f] # array indexed by array trick
-		@assert isunique(renum[f]) "face not unique: $f => $(renum[f])"
-	end
-	@debug "(merge done)»»"
 	return Surface(newpoints, newfaces)
 end
 
@@ -3671,6 +3692,10 @@ function select_multiplicity(m, s::AbstractSurface...)
 	return select_faces(flist, t)
 end
 
+function simplify(s::AbstractSurface)
+	return mesh(CSGUnion{3}([s]))
+end
+
 # Extrusion ««1
 # Linear extrusion««2
 function mesh(s::LinearExtrude, parameters)
@@ -3807,7 +3832,9 @@ function mesh(s::RotateExtrude, parameters)
 	end
 	@debug "triangles = $triangles"
 	@debug "end rotate_extrude»»"
-	return Surface(pts3, triangles)
+	surf = Surface(pts3, triangles)
+	explain(surf, "/tmp/mu.scad", scale=30)
+	return simplify(surf)
 end
 # Path extrusion ««2
 # triangulate_between: triangulate between two parallel paths««
