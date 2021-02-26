@@ -1,6 +1,6 @@
 # Immediate work
  - [x] linear extrusion of PolygonXor
- - [ ] rotate extrusion
+ - [x] rotate extrusion
  - [ ] intersection with half-plane and half-space
  - [ ] Minkowski sum in 2d
    - [ ] and Minkowski difference

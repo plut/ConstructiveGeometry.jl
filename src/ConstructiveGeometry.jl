@@ -739,23 +739,24 @@ example) is to define a type and a constructor:
     Frobnicate = Transform{:frobnicate}
 		frobnicate(x::real, s...) = Frobnicate((x=x,), s...)
 """
-struct Transform{S,D,T,X} <: Geometry{D,T}
-	child::Geometry{D,T}
+struct Transform{S,D,D1,T,X} <: Geometry{D,T}
 	data::X
-	Transform{S}(data::X, child::Geometry{D,T}) where{S,X,D,T} =
-		new{S,D,T,X}(child, data)
+	child::Geometry{D1,T}
+	Transform{S,D,D1}(data, child::Geometry{D1}) where{S,D,D1} =
+		new{S,D,D1,coordtype(child),typeof(data)}(data, child)
+	Transform{S,D}(data, child::Geometry) where{S,D} =
+		Transform{S,D,embeddim(child)}(data, child)
+	# Default case: D = D1
+	Transform{S}(data, child::Geometry) where{S} =
+		Transform{S,embeddim(child)}(data, child)
 end
-# default values for I/O:
-# (parameters in `data` are assumed to be stored in a NamedTuple).
-@inline children(f::Transform) = [f.child]
-@inline scad_name(f::Transform{S}) where{S} = S
-@inline parameters(f::Transform) = f.data
-@inline (T::Type{Transform{S}})(f, s1::Geometry,
+# more constructors, including unary curryfied constructor:
+@inline (T::Type{<:Transform{S}})(f, s1::Geometry,
 		s2::Geometry, tail::Geometry...) where{S} =
 		T(f, union(s, s2, tail...))
-@inline (T::Type{Transform{S}})(f, s::Vector{<:Geometry}) where{S} =
+@inline (T::Type{<:Transform{S}})(f, s::Vector{<:Geometry}) where{S} =
 	T(f, s...)
-@inline (T::Type{Transform{S}})(f) where{S} = Curry{S}((s...)->T(f, s...))
+@inline (T::Type{<:Transform{S}})(f) where{S} = Curry{S}((s...)->T(f, s...))
 # We can extract the `f` value from the above in the following way:
 """
     extract(c::Curry)
@@ -766,6 +767,12 @@ recovers the parameter `f`.
 function extract end
 @inline (T::Type{<:Transform})(f, ::typeof(extract)) = f
 @inline extract(c::Curry) = c.f(extract)
+
+# default values for I/O:
+# (parameters in `data` are assumed to be stored in a NamedTuple).
+@inline children(f::Transform) = [f.child]
+@inline scad_name(f::Transform{S}) where{S} = S
+@inline parameters(f::Transform) = f.data
 
 # SetParameters««2
 SetParameters = Transform{:parameters}
@@ -796,7 +803,7 @@ Colors objects `s...` in the given color.
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
 
 # Linear extrusion««2
-LinearExtrude = Transform{:linear_extrude}
+LinearExtrude = Transform{:linear_extrude,3,2}
 """
     linear_extrude(h, s...)
     linear_extrude(h) * s...
@@ -820,7 +827,7 @@ Similar to OpenSCAD's `rotate_extrude` primitive.
 @inline rotate_extrude(s...) = rotate_extrude(360, s...)
 @inline rotate_extrude(angle::Real, s...) =
 	RotateExtrude((angle=angle,), s...)
-RotateExtrude = Transform{:rotate_extrude}
+RotateExtrude = Transform{:rotate_extrude,3,2}
 # Offset
 """
     offset(r, solid...; kwargs...)
@@ -2162,6 +2169,7 @@ pointing *outwards*.
 function supporting_plane(t::Triangle)
 	(p1, p2, p3) = t.vertices
 	c = cross(p2-p1, p3-p1)
+	n = norm(c, Inf); n ≠ 0 && ( c/= n)
 	b = dot(c, p1.coords)
 	return Polyhedra.HyperPlane(c, b)
 end
@@ -2814,7 +2822,7 @@ function self_intersect(s::AbstractSurfaceIncidence)
 	edge_points = Dict([ k=>Int[] for k in keys(inc_ef(s)) ])
 	edge_coords = Dict([ k=>T[] for k in keys(inc_ef(s)) ])# used for sorting
 	@inline function create_point!(p)
-		j = findfirst(isequal(p), new_points)
+		j = findfirst(isapprox(p;atol=1e-10), new_points)
 		if j isa Int; return j; end
 		push!(new_points, p)
 		return n + length(new_points)
@@ -2873,9 +2881,9 @@ function self_intersect(s::AbstractSurfaceIncidence)
 			end
 			# FIXME move this to a segment ∩ triangle function
 			(z1, z2) = plane.(vertices(segment))
-			if z1 * z2 >= 0
-				continue
-			end
+			# correct for some rounding errors for vertices in the plane
+			(z1*z2 ≥ 0 || abs(z1) <= 1e-10 || abs(z2) <= 1e-10 ) && continue
+
 			# the previous line ensures that z1 ≠ z2, so this never fails:
 			(a1, a2) = coordinates.(vertices(segment))
 			p2 = Point((z2*a1[proj] - z1*a2[proj])/(z2-z1))
@@ -2885,6 +2893,9 @@ function self_intersect(s::AbstractSurfaceIncidence)
 			p3 = lift(p2)
 			k = create_point!(p3)
 			@debug "edge $e intersects face $i=$f at $k"
+			@debug "plane = $plane"
+			@debug "segment = $(vertices(segment))"
+			@debug "z1, z2 = $z1, $z2"
 			@debug "adding point $k to face $i=$f"
 			@assert norm(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]])) <= 1e-3*norm(vertices(s)[e[1]]-vertices(s)[e[2]])
 # 			dprintln("cross: $(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]]))")
@@ -2933,13 +2944,18 @@ function self_intersect(s::AbstractSurfaceIncidence)
 			if !isempty(e ∩ e1) continue; end
 			p = inter(segment, seg1)
 			if p isa Nothing continue; end
-			if p ∈ vertices(s)[[e[1], e[2], e1[1], e1[2]]]
-				# this is an edge-vertex intersection
-				continue;
-			end
+			# check that this is not a vertex of one of the edges
+			(a1, b1, a2, b2) = vertices(s)[[e[1], e[2], e1[1], e1[2]]]
+			isapprox(p, a1; atol = 1e-10) && continue
+			isapprox(p, b1; atol = 1e-10) && continue
+			isapprox(p, a2; atol = 1e-10) && continue
+			isapprox(p, b2; atol = 1e-10) && continue
+
 			if eq2(p[proj]) ≠ 0 continue; end
 			# point p is a new point and on both edges e and e1
 			@debug "edges $e and $e1 intersect"
+			@debug "  at point $p, (p - $(e1[2])) = $(p-vertices(s)[e1[2]])"
+			@debug "  $(isapprox(p, vertices(s)[e1[2]]; atol=1e-10))"
 # 		@assert false
 			k = create_point!(p)
 			@debug "edge intersection: $e, $e1 => $k = $p"
@@ -3380,7 +3396,7 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 	println("self-intersect...")
 	self_int = self_intersect(s)
 	println("subtriangulate...")
-# 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
+	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	newpoints = [ vertices(s); self_int.points ]
 	newfaces = SVector{3,Int}[]
@@ -3399,10 +3415,11 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 			push!(newfaces, f)
 			continue
 		end
-		@debug "subtri f=$f: $extra, perim=$perimeter««"
+		@debug "subtri f=$f: $extra, perim=$(edge_points(f[1], f[2])) + $(edge_points(f[2],f[3])) + $(edge_points(f[3],f[1]))"
 		triangle = Triangle(vertices(s)[f]...)
 		plane = supporting_plane(triangle)
 		proj = project_2d(direction(plane))
+		@debug "triangle = $triangle, plane = $plane, proj = $proj"
 
 		plist = [ perimeter; extra] # indices of points in face
 		# as a matrix for `constrained_triangulation`:
@@ -3418,8 +3435,7 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 			LibTriangle.edges(perimeter))
 # 		println("triangulation = $tri")
 		push!(newfaces, tri...)
-		@debug "returned triangulation=$tri"
-		@debug "»»"
+		@debug "returned triangulation=$(Vector.(tri))"
 	end
 
 	@debug "(end subtriangulate)»»"
@@ -3458,8 +3474,18 @@ function faces_around_edge(s::AbstractSurfaceIncidence,
 		lt=(i, j) -> let b = circular_sign(face_vec2[i], face_vec2[j])
 			if !iszero(b) return (b > 0)
 			# the use of **signed** face numbers guarantees consistent ordering
-			# even if two faces are adjacent on two edges with reversed
-			# orientations
+			# even for coincident faces
+			# e.g. let 0 < f < g be two coincident faces
+			# on an edge for which both are positive:
+			# f < g, cell is f­(c)->g
+			# on an edge for which both are negative:
+			# -g < -f, cell is g<-(c)-f
+			#
+			# for opposite faces: 0 < f < g, opposite
+			# on an edge with f positive, order is -g < 0 < f
+			# cell is g<-(c)->f
+			# on an edge with g positive, order is -f < 0 < g
+			# cell is -f<-(c)->f
 			else return flist[i] < flist[j]
 			end end)
 	if !iszero(vec3)
@@ -3502,10 +3528,11 @@ struct LevelStructure
 		[Set(i) for i in 1:n])
 end
 function connect!(l::LevelStructure, i1, i2, delta)
+	@debug "connect($i1, $i2, $delta)"
 	(c1, r1) = l.level[i1]
 	(c2, r2) = l.level[i2]
 	if c1 == c2
-		@assert r1 + delta == r2
+		@assert r1 + delta == r2 "connect($l, $i1, $i2, $delta): faces are already connected and multiplicity should be $(r1+delta) (it is $r2). Faces are probably crossed around one edge."
 		return
 	end
 	# connect everything in component c = l.level[i2][1]
@@ -3610,7 +3637,7 @@ of `s`.
 function multiplicity_levels(s::AbstractSurfacePatches)
 	@debug "multiplicity_levels ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	@debug " Input surface:\n"*strscad(s)
-# 	explain(s, "/tmp/before-multiplicity.scad", scale=40)
+	explain(s, "/tmp/before-multiplicity.scad", scale=40)
 	println("multiplicity...")
 	@debug "regular components: $(components(s))"
 	@debug "  labeling: $(label(s))"
@@ -3646,6 +3673,7 @@ function multiplicity_levels(s::AbstractSurfacePatches)
 	# connected components of level structure;
 	# each component is arranged by multiplicity:
 	cc = components(levels)
+	@debug cc
 	# now we rearrange these connected components by inclusion
 	# vlist[i] = list of all vertices in connected component i:
 	# vmax[i] = index of an extremal vertex in cc i
@@ -3681,10 +3709,10 @@ function multiplicity_levels(s::AbstractSurfacePatches)
 end
 # Binary union and intersection««2
 function select_multiplicity(m, s::AbstractSurface...)
+	@debug "select_multiplicity««"
 	t = subtriangulate(SurfaceIncidence(merge(s...)))
 	face_idx = multiplicity_levels(SurfacePatches(SurfaceIncidence(t)))
 	flist = get(face_idx, m, Int[])
-	@debug "select_multiplicity««"
 	for f in flist
 		@debug "keeping face $f=$(faces(t)[f])"
 	end
@@ -3822,11 +3850,11 @@ function mesh(s::RotateExtrude, parameters)
 			@debug "   $(firstindex[p1])..$(firstindex[p1]-1+arclength[p1])"
 			@debug "   $(firstindex[p2])..$(firstindex[p2]-1+arclength[p2])"
 			nt = SVector.(ladder_triangles(
-				arclength[p1], arclength[p2],
-				firstindex[p1], firstindex[p2],
+				arclength[p2], arclength[p1],
+				firstindex[p2], firstindex[p1],
 				))
 			push!(triangles, nt...)
-			@debug "new triangles: $nt"
+			@debug "new triangles: $(Vector.(nt))"
 		end
 		@debug "(end perimeter)»»"
 	end
