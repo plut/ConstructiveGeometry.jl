@@ -1,4 +1,14 @@
 # Immediate work
+ - [x] implement ZGZJ's cluster triangulation to prevent crossing faces
+  - [x] “thicken” faces (and edges) wrt intersection (i.e. add small,
+		well-defined tolerance). As a parameter in `set_parameters`?
+ - [x] fix difference of two touching solids (e.g. noodle extrusion):
+ inclusion (as defined on connected components) does not work in this
+ case
+   - [x] solution could be in correctly counting opposite faces...
+ - [ ] see if `merge()` should remove opposite faces
+   - [ ] **NO**, they are needed to correctly compute multiplicity (e.g.
+		 `cube(2)\cube(1)`
  - [x] linear extrusion of PolygonXor
  - [x] rotate extrusion
  - [ ] intersection with half-plane and half-space
@@ -16,7 +26,7 @@
 |Clipper out| **hard**          |                   | easy             |
 |extrude    | easy              |                   |xor of extrusions |
 |minkowski  | easy-ish          | ?                 |quite hard (split)|
-|Makie      | easy              |                   |**hard**          |
+|Makie      | easy              |                   |**hard**?         |
 |svg        | easy              |                   |easy (`evenodd`)  |
 |openscad   | easy              | just works        | just works       |
 
@@ -56,6 +66,7 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
 # Dependencies
  - [ ] `CircularArrays.jl` ?
  - [ ] `Dictionaries.jl` ?
+ - [ ] `KeywordDispatch.jl` ?
  - [ ] `Reexport.jl` ?
 decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [x] `Meshes.jl`:
@@ -69,6 +80,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [ ] `Point` is bad
    - [ ] mesh types are awfully long and depend on bad `Point` type
 # Basic types
+ - [ ] use `sizehint!` for arrays
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
 	 types
 	  [ ] probably requires making `Vec` a separate type from `SArray`
@@ -128,6 +140,8 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
 	 square(3)
 ```
  - [ ] find something like OpenSCAD' # ! % operators.
+  - [ ] integer%solid (with various highlight colors)
+  - [ ] and find a way to propagate this through the hierarchy
    (a) prefix multiplication by integer constant
 	 (b) unary operators: + - ! √ ~ ¬
 	 (c) ad-hoc `Transform` with one-letter name, e.g. `H*square(1)`
@@ -181,8 +195,8 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    terribly useful (in particular with angles in radians).
 # Packaging
  - [?] write a full doc about how to define a new transform
- - [?] complete the list of exports
- - [?] write a minimal regression test
+ - [x] complete the list of exports
+ - [x] write a minimal regression test
  - [?] make this a proper package
  - [ ] distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
@@ -198,6 +212,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [ ] merge all structures and compute multiplicity with ray-shooting,
 	 - [x] or reduce with binary op
  - [ ] icosphere (from Blender)
+ - [ ] sphere made from extruding a half-circle
  - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
  - [ ] improve `unit_n_gon` to take advantage of symmetries
  - [x] investigate Fibonacci spheres

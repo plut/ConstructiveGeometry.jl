@@ -146,6 +146,12 @@ t3 = [3,0,0]+t1
 @test nvf(mesh(t2\t1)) == (8,8)
 
 end
+@testset "Difference of rotate_extrude()" begin# ««1
+m1=mesh(rotate_extrude(10,[2,0]+circle(1)))
+m2=mesh(rotate_extrude(11,[2,0]+circle(.5)))
+@debug "###### difference ######"
+m3=mesh(m1\m2)
+@test CG.nfaces(m3) == 2*CG.nvertices(m3)
+end
 #»»1
-
 # vim: noet ts=2 fmr=««,»»
