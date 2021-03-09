@@ -15,8 +15,7 @@ module AbstractMeshes
 # 	import Meshes: Geometry, Primitive, Point, Vec
 # 	import Meshes: Box
 	HyperSphere = Meshes.Sphere
-	export Geometry, Point, Vec, Segment, Triangle
-	export Box, HyperSphere
+	export Geometry, Point, Vec, Segment, Triangle, HyperSphere
 	export coordtype, coordinates, embeddim, vertices
 end; using .AbstractMeshes
 import .AbstractMeshes: vertices, coordtype
@@ -105,6 +104,7 @@ Base.getindex(p::Point, i::AbstractVector) = Point(getindex(coordinates(p), i))
 Base.iszero(p::Point) = iszero(coordinates(p))
 #»»
 coordtype(v::AbstractVector{<:Number}) = eltype(v)
+@inline coordinates(p::Point) = p.coords
 @inline function barycenter(points::Point...)
 	T = promote_type(coordtype.(points)...)
 	return Point(sum(points) / convert(real_type(T), length(points)))
@@ -262,13 +262,14 @@ end
 
 # Glue for types imported from Meshes.jl: Square, Cube, Circle, Sphere««2
 # --mesh
-@inline Box{D}(p1::AbstractVector, p2::AbstractVector) where{D} =
-	Box{D,promote_type(eltype.((p1,p2))...)}(Point{D}(p1), Point{D}(p2))
-@inline Box{D}(v::AbstractVector; origin=zero(v), center=false) where{D} =
+Ortho = AbstractMeshes.Box
+@inline Ortho{D}(p1::AbstractVector, p2::AbstractVector) where{D} =
+	Ortho{D,promote_type(eltype.((p1,p2))...)}(Point{D}(p1), Point{D}(p2))
+@inline Ortho{D}(v::AbstractVector; origin=zero(v), center=false) where{D} =
 	let p1 = center ? origin - one_half(v) : origin
-	Box{D}(p1, p1 + v)
+	Ortho{D}(p1, p1 + v)
 	end
-@inline width(b::Box) = b.max - b.min
+@inline width(b::Ortho) = b.max - b.min
 
 """
     square(size; origin, center=false)
@@ -279,7 +280,7 @@ An axis-parallel square or rectangle  with given `size`
 square(args...; kwargs...) = Square(args...; kwargs...)
 square(a::Number, b::Number; kwargs...) = square(SA[a,b]; kwargs...)
 square(a::Number; kwargs...) = square(a, a; kwargs...)
-Square = Box{2}
+Square = Ortho{2}
 
 """
     cube(size; origin, center=false)
@@ -290,7 +291,7 @@ A cube or parallelepiped  with given `size`
 cube(args...; kwargs...) = Cube(args...; kwargs...)
 cube(a::Number, b::Number, c::Number; kwargs...) = cube(SA[a,b,c]; kwargs...)
 cube(a::Number; kwargs...) = cube(a, a, a; kwargs...)
-Cube = Box{3}
+Cube = Ortho{3}
 
 @inline HyperSphere{D}(r::T) where{D,T} =
 	HyperSphere(Point(zero(SVector{D,T})), r)
@@ -1141,16 +1142,18 @@ end
 
 
 @inline scad_parameters(s::Geometry) = parameters(s)
-@inline scad_parameters(s::Box) = (size=Vector{Float64}(width(s)),)
+@inline scad_parameters(s::Ortho) = (size=Vector{Float64}(width(s)),)
 @inline scad_parameters(s::HyperSphere) = (r=s.radius,)
 @inline scad_parameters(s::Cylinder) = (h=s.height, r1=s.r1, r2=s.r2,)
 @inline scad_parameters(p::Polygon) = (points=p.points,)
 
 @inline scad_transform(s::Geometry) = ""
-@inline scad_transform(s::Box) = scad_origin(minimum(s))
+@inline scad_transform(s::Ortho) = scad_origin(minimum(s))
 @inline scad_transform(s::HyperSphere) = scad_origin(s.center)
 @inline scad_transform(s::Cylinder) = scad_origin(s.origin)
-@inline scad_origin(p) =
+
+@inline scad_origin(p::Point) = scad_origin(coordinates(p))
+@inline scad_origin(p::Vec) =
 	iszero(p) ? "" : string("translate(", Vector{Float64}(p), ")")
 
 @inline to_scad(x) = x
@@ -2240,17 +2243,18 @@ end
 
 
 # Using a Box as a bounding box««2
-Base.min(b::Box) = b.min; Base.max(b::Box) = b.max
-@inline ∈(x::AbstractVector, b::Box) = all(min(b) .≤ x .≤ max(b))
-# @inline ∈(x::Point, b::Box) = x.coords ∈ b
-@inline isempty(b::Box) = any(coordinates(min(b)) .> coordinates(max(b)))
-@inline intersect(a::Box, b::Box) =
-	Box(Point(max.(coordinates(min(a)), coordinates(min(b)))),
+BBox = AbstractMeshes.Box
+@inline Base.min(b::BBox) = b.min; @inline Base.max(b::BBox) = b.max
+@inline ∈(x::AbstractVector, b::BBox) = all(min(b) .≤ x .≤ max(b))
+# @inline ∈(x::Point, b::BBox) = x.coords ∈ b
+@inline isempty(b::BBox) = any(coordinates(min(b)) .> coordinates(max(b)))
+@inline intersect(a::BBox, b::BBox) =
+	BBox(Point(max.(coordinates(min(a)), coordinates(min(b)))),
 	    Point(min.(coordinates(max(a)), coordinates(max(b)))))
-boundingbox(p::Point...) = boundingbox(coordinates.(p)...)
-boundingbox(v::StaticVector{D,T}...) where{D,T} =
-	Box{D,T}(min.(v...), max.(v...))
-boundingbox(g::Geometry) = boundingbox(AbstractMeshes.vertices(g)...)
+@inline boundingbox(p::Point...) = boundingbox(coordinates.(p)...)
+@inline boundingbox(v::StaticVector{D,T}...) where{D,T} =
+	BBox{D,T}(min.(v...), max.(v...))
+@inline boundingbox(g::Geometry) = boundingbox(AbstractMeshes.vertices(g)...)
 
 # 3d -> 2d projections««2
 const plus1mod3 = SA[2,3,1]
@@ -2415,11 +2419,11 @@ _inv0(x::Real) = iszero(x) ? zero(real_type(x)) : inv(to_real(x))
 	AffineRayInv{D,real_type(T)}(a.origin, a.direction, _inv0.(a.direction))
 
 """
-    intersects(a::AffineRay{3}, b::Box)
+    intersects(a::AffineRay{3}, b::BBox)
 
 https://tavianator.com/2011/ray_box.html
 """
-function intersects(a::AffineRayInv{3}, b::Box; strict=false)
+function intersects(a::AffineRayInv{3}, b::BBox; strict=false)
 	tmin = zero(eltype(a.direction))
 	tmax = typemax(eltype(a.direction))
 	for i in 1:3

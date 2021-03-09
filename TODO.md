@@ -1,4 +1,9 @@
 # Immediate work
+ - [ ] split in several packages:
+  - `AbstractGeometry`
+	- `StrongIndices`
+	- `AABBTree`
+	- `Meshing`
  - [x] implement ZGZJ's cluster triangulation to prevent crossing faces
   - [x] “thicken” faces (and edges) wrt intersection (i.e. add small,
 		well-defined tolerance). As a parameter in `set_parameters`?
@@ -63,6 +68,11 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [x] fix `Offset` for polygon xor
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works
+# Performances
+ - [ ] try to use SIMD (e.g. bbox computation)
+ - [ ] `@inbounds` wherever possible
+ - [ ] use `sizehint!` for arrays
+ - [ ] use an AABB tree (bounding box tree) for intersection detection
 # Dependencies
  - [ ] `CircularArrays.jl` ?
  - [ ] `Dictionaries.jl` ?
@@ -80,7 +90,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [ ] `Point` is bad
    - [ ] mesh types are awfully long and depend on bad `Point` type
 # Basic types
- - [ ] use `sizehint!` for arrays
+ - [ ] use abstract types wherever possible
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
 	 types
 	  [ ] probably requires making `Vec` a separate type from `SArray`
@@ -99,7 +109,6 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    depending on the dimension.
  - [ ] add a LineNode reference to constructors
    (i.e. first thing in call stack outside module).
- - [ ] use an AABB tree (bounding box tree) for intersection detection
 # 2d vs 3d
  - [ ] add something for fake-3d objects (embedded in a subspace):
    this would represent both `mult_matrix` with zero determinant,
