@@ -149,35 +149,41 @@ end
     SpatialSorting.intersections(boxes)
 
 Returns the set of all non-empty intersections of given `boxes`,
-as a `Vector` of (increasing) pairs of indices.
-Complexity is quasi-linear in the number of boxes.
+as a `Vector` of pairs of indices.
+Complexity is quasi-linear in the number of boxes
+(but also depends on the number of intersecting pairs).
 """
 function intersections(boxes)
-	t = tree(boxes)
-	r = NTuple{2,Int}[]
-	for i in 1:length(boxes)
-		l = search(t, boxes[i])
-		push!(r, [(j, i) for j in filter(<(i), l)]...)
-	end
-	return r
-end
-
-function intersections2(boxes)
 	t = tree(boxes)
 	n = length(boxes)
 	r = NTuple{2,Int}[]
 	todo = [(1,1)]
 	while !isempty(todo)
 		(a,b) = pop!(todo)
-		# here (a,b) are always branches (never leaves)
-		if (2a) < n
-			if (2b) < n
-# 				intersects(t.box[2a-1], t.box[2b-1]) && 
-			else
+		# (a, b) are either branches (<n) or leaves (≥n)
+		if a < n
+			if b < n
+			# two branches
+				intersects(t.box[2a-1], t.box[2b-1]) && push!(todo, (2a, 2b))
+				intersects(t.box[2a], t.box[2b]) && push!(todo, (2a+1, 2b+1))
+				intersects(t.box[2a-1], t.box[2b]) && push!(todo, (2a, 2b+1))
+				# special case: remove duplicate pairs (i,j) and (j,i)
+				a≠b && intersects(t.box[2a], t.box[2b-1]) && push!(todo, (2a+1, 2b))
+			else # b is a node
+				intersects(t.box[2a-1], t.box[b-1]) && push!(todo, (2a, b))
+				intersects(t.box[2a], t.box[b-1]) && push!(todo, (2a+1, b))
 			end
 		else
+			if b < n
+				intersects(t.box[a-1], t.box[2b-1]) && push!(todo, (a, 2b))
+				intersects(t.box[a-1], t.box[2b]) && push!(todo, (a, 2b+1))
+			else
+				# we computed in the previous step that these two boxes intersect:
+				a ≠ b && push!(r, (to_leaf(t, a), to_leaf(t, b)))
+			end
 		end
 	end
+	return r
 end
 
 Base.show(io::IO, t::CompleteBinTree) = print_tree(io, t)
