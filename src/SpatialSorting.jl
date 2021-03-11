@@ -1,17 +1,24 @@
 """
     SpatialSorting
 
-Contains two useful functions:
+This module provides a way to compute intersections among a set of boxes.
+The two following functions are provided (not exported):
 
- * `tree = tree(boxes)`: returns a bounded volume hierarchy made from the given bounding boxes.
- * `search(tree, box)`: returns the vector of indices of those `boxes` which intersect the `box` parameter.
+ * `tree = SpatialSorting.tree(boxes)`: returns a bounded volume hierarchy
+   computed from the given bounding boxes.
+ * `search(tree, box)`: returns the vector of indices of those `boxes`
+   which intersect the `box` parameter.
+ * `intersections(boxes)`: returns the set of all intersecting pairs of boxes in   the list.
+
+The `tree` function has an average-time quasi-linear complexity
+(w.r.to the number of boxes), while `search(tree, box)` is quasi-constant.
 
 The `boxes` may be of any type, as long as the following operations exist:
- - `SpatialSorting.position(box)`: converts the box to point (`AbstractVector`)
- representing the position of the box (e.g. the box center);
+ - `SpatialSorting.position(box)`: converts the box to a point
+   (`AbstractVector`) representing the position of the box
+   (e.g. the box center, or any affine transformation thereof);
  - `Base.merge(box1, box2)`: (any superset of) the union of the two boxes;
- - `SpatialSorting.intersects(box1, box2)`: returns true iff intersection is not empty
- (default is `!isempty(box1 ∩ box2)`).
+ - `SpatialSorting.intersects(box1, box2)`: returns true iff intersection is not empty (default is `!isempty(box1 ∩ box2)`).
 """
 module SpatialSorting
 using StructArrays
@@ -28,34 +35,32 @@ function largest_spread_coord(points)
 	return findmax(s)[2]
 end
 
-# Complete-tree type««1
-
 """
-    CompleteAABBTree{B}
+    CompleteBinTree{B}
 
 A tree describing a bounded volume hierarchy, using boxes of type `B`.
 
-This hierarchy is implemented using a complete binary tree:
+This hierarchy is represented using a complete binary tree:
 inner node `k` has children `2k` and `2k+1`.
-In addition, a `leaf` table indicates the rearrangement of boxes
-along the tree.
+In addition, a `leaf` table indicates the permutation of the leaves of the tree.
 """
-struct CompleteAABBTree{B}
-# this is a complete binary tree, i.e. inner node k has children 2k and
-# 2k+1. The `leaf` vector indicates the renumbering of leaf nodes.
-# lbox[i] and rbox[i] are the bounding boxes for the two subtrees.
-	lbox::Vector{B}
-	rbox::Vector{B}
-	leaf::Vector{Int}
+struct CompleteBinTree{B}
+# replace lbox[i] by box[2i-1] and rbox[i] by box[2i]
+	box::Vector{B}
+# 	lbox::Vector{B} # left-side bbox at this point
+# 	rbox::Vector{B} # right-side bbox
+	leaf::Vector{Int} # permutation of leaves
 	firstleaf::Int # precomputation
-	@inline CompleteAABBTree{B}(::UndefInitializer, n::Int) where{B} =
-		new{B}(Vector{B}(undef, n-1), Vector{B}(undef, n-1), collect(1:n),
+	@inline CompleteBinTree{B}(::UndefInitializer, n::Int) where{B} =
+		new{B}(Vector{B}(undef, 2n-2), 
+# 		Vector{B}(undef, n-1),
+		collect(1:n),
 		prevpow(2, n-1)<<1)
 end
 
-@inline nleaves(t::CompleteAABBTree) = length(t.leaf)
+@inline nleaves(t::CompleteBinTree) = length(t.leaf)
 
-function to_leaf(t::CompleteAABBTree, i::Integer)
+function to_leaf(t::CompleteBinTree, i::Integer)
 	d = t.firstleaf
 	i ≥ d && return t.leaf[i-d+1]
 	return t.leaf[i-d+1+nleaves(t)]
@@ -85,7 +90,7 @@ function tree(boxes; position=position)
 		(k ≥ firstleaf) ? 2(k-firstleaf)+1 : n-2(firstleaf-k)+1
 
 	# initialize the tree structure
-	tree = CompleteAABBTree{eltype(boxes)}(undef, n)
+	tree = CompleteBinTree{eltype(boxes)}(undef, n)
 	# `interval[k]` is the range of leaves accessed by inner node `k`.
 	interval = Vector{UnitRange{Int}}(undef, n-1)
 	interval[1] = 1:n
@@ -103,28 +108,37 @@ function tree(boxes; position=position)
 		partialsort!(subtree, k; by=i->points[i][j])
 	end
 	@inline box(x) = x ≥ n ? boxes[to_leaf(tree, x)] :
-			merge(tree.lbox[x], tree.rbox[x])
+		merge(tree.box[2x-1], tree.box[2x])
+# 			merge(tree.lbox[x], tree.rbox[x])
 	@inbounds for i in n-1:-1:1
-		tree.lbox[i] = box(2i)
-		tree.rbox[i] = box(2i+1)
+		tree.box[2i] = box(2i+1)
+		tree.box[2i-1] = box(2i)
+# 		tree.lbox[i] = box(2i)
+# 		tree.rbox[i] = box(2i+1)
 	end
 	return tree
 end
 
-function search(t::CompleteAABBTree, box)
+"""
+    SpatialSorting.search(tree, box)
+
+Returns the list of indices of given `tree` which
+non-trivially intersect the `box`.
+"""
+function search(t::CompleteBinTree, box)
 	todo = [1]
 	leaves = Int[]
 	n = nleaves(t)
 	while !isempty(todo)
 		i = pop!(todo)
-		if intersects(t.lbox[i], box)
+		if intersects(t.box[2i-1], box)
 			if 2i ≥ n
 				push!(leaves, to_leaf(t, 2i))
 			else
 				push!(todo, 2i)
 			end
 		end
-		if intersects(t.rbox[i], box)
+		if intersects(t.box[2i], box)
 			if 2i+1 ≥ n
 				push!(leaves, to_leaf(t, 2i+1))
 			else
@@ -135,10 +149,10 @@ function search(t::CompleteAABBTree, box)
 	return leaves
 end
 
-function print_tree(io::IO, t::CompleteAABBTree, i=1)
+function print_tree(io::IO, t::CompleteBinTree, i=1)
 	print(io, " "^ndigits(i, base=2))
-	if i ≤ length(t.lbox)
-		println(io, "node(",i,"):", t.lbox[i], t.rbox[i])
+	if i < length(t.leaf)
+		println(io, "node(",i,"):", t.box[2i-1], t.box[2i])
 		print_tree(io, t, 2i)
 		print_tree(io, t, 2i+1)
 	else
@@ -146,8 +160,42 @@ function print_tree(io::IO, t::CompleteAABBTree, i=1)
 	end
 end
 
-Base.show(io::IO, t::CompleteAABBTree) = print_tree(io, t)
-print_tree(t::CompleteAABBTree) = print_tree(stdout, t)
+"""
+    SpatialSorting.intersections(boxes)
 
-#»»1
+Returns the set of all non-empty intersections of given `boxes`,
+as a `Vector` of (increasing) pairs of indices.
+Complexity is quasi-linear in the number of boxes.
+"""
+function intersections(boxes)
+	t = tree(boxes)
+	r = NTuple{2,Int}[]
+	for i in 1:length(boxes)
+		l = search(t, boxes[i])
+		push!(r, [(j, i) for j in filter(<(i), l)]...)
+	end
+	return r
+end
+
+function intersections2(boxes)
+	t = tree(boxes)
+	n = length(boxes)
+	r = NTuple{2,Int}[]
+	todo = [(1,1)]
+	while !isempty(todo)
+		(a,b) = pop!(todo)
+		# here (a,b) are always branches (never leaves)
+		if (2a) < n
+			if (2b) < n
+# 				intersects(t.box[2a-1], t.box[2b-1]) && 
+			else
+			end
+		else
+		end
+	end
+end
+
+Base.show(io::IO, t::CompleteBinTree) = print_tree(io, t)
+print_tree(t::CompleteBinTree) = print_tree(stdout, t)
+
 end # module
