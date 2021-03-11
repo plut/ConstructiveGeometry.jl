@@ -42,13 +42,13 @@ A tree describing a bounded volume hierarchy, using boxes of type `B`.
 
 This hierarchy is represented using a complete binary tree:
 inner node `k` has children `2k` and `2k+1`.
+Left-side box of node `i` is `box[2i-1]` and right-side is `box[2i]`.
+
 In addition, a `leaf` table indicates the permutation of the leaves of the tree.
 """
 struct CompleteBinTree{B}
 # replace lbox[i] by box[2i-1] and rbox[i] by box[2i]
 	box::Vector{B}
-# 	lbox::Vector{B} # left-side bbox at this point
-# 	rbox::Vector{B} # right-side bbox
 	leaf::Vector{Int} # permutation of leaves
 	firstleaf::Int # precomputation
 	@inline CompleteBinTree{B}(::UndefInitializer, n::Int) where{B} =
@@ -109,12 +109,8 @@ function tree(boxes; position=position)
 	end
 	@inline box(x) = x ≥ n ? boxes[to_leaf(tree, x)] :
 		merge(tree.box[2x-1], tree.box[2x])
-# 			merge(tree.lbox[x], tree.rbox[x])
-	@inbounds for i in n-1:-1:1
-		tree.box[2i] = box(2i+1)
-		tree.box[2i-1] = box(2i)
-# 		tree.lbox[i] = box(2i)
-# 		tree.rbox[i] = box(2i+1)
+	@inbounds for i in 2n-2:-1:1
+		tree.box[i] = box(i+1)
 	end
 	return tree
 end
@@ -131,20 +127,9 @@ function search(t::CompleteBinTree, box)
 	n = nleaves(t)
 	while !isempty(todo)
 		i = pop!(todo)
-		if intersects(t.box[2i-1], box)
-			if 2i ≥ n
-				push!(leaves, to_leaf(t, 2i))
-			else
-				push!(todo, 2i)
-			end
-		end
-		if intersects(t.box[2i], box)
-			if 2i+1 ≥ n
-				push!(leaves, to_leaf(t, 2i+1))
-			else
-				push!(todo, 2i+1)
-			end
-		end
+		for j in (2i, 2i+1) if intersects(t.box[j-1], box)
+			if j ≥ n push!(leaves, to_leaf(t, j)); else push!(todo, j); end
+		end end
 	end
 	return leaves
 end
