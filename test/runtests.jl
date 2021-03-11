@@ -4,7 +4,10 @@ using StaticArrays
 using ConstructiveGeometry: _FIXED, Vec, Point, Path
 using ConstructiveGeometry: from_clipper, to_clipper
 using ConstructiveGeometry: children, vertices
+using ConstructiveGeometry.SpatialSorting
+
 CG = ConstructiveGeometry
+
 
 function test_from_to(T, x)
 	return @test from_clipper(T, to_clipper(T, x)) == x
@@ -154,4 +157,49 @@ m3=mesh(m1\m2)
 @test CG.nfaces(m3) == 2*CG.nvertices(m3)
 end
 #»»1
+@testset "Spatial sorting" begin#««
+# Bounding box««
+struct BoundingBox{N,T}
+	min::SVector{N,T}
+	max::SVector{N,T}
+end
+
+BoundingBox{N}(min::AbstractVector, max::AbstractVector) where{N} =
+	BoundingBox{N,promote_type(eltype(min), eltype(max))}(min, max)
+BoundingBox(min::StaticVector{N}, max::StaticVector{N}) where{N} =
+	BoundingBox{N}(min, max)
+function BoundingBox(min::AbstractVector, max::AbstractVector)
+	length(min) == length(max) || throw(DimensionMismatch(
+	"min and max must have same length ($(length(min)),$(length(max)))"))
+	return BoundingBox{length(min)}(min, max)
+end
+
+@inline Base.merge(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
+	BoundingBox{N}(min.(box1.min, box2.min), max.(box1.max, box2.max))
+@inline Base.:∩(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
+	BoundingBox{N}(max.(box1.min, box2.min), min.(box1.max, box2.max))
+@inline Base.isempty(box::BoundingBox) = any(box.min .> box.max)
+@inline SpatialSorting.position(box::BoundingBox) = box.min + box.max
+
+function rbb(int1, int2, n)
+	v = rand(int1, n)
+	w = rand(int2, n)
+	return BoundingBox(v, v+w)
+end
+boxes=[ rbb(1:500, 1:10, 3) for _ in 1:3000 ]
+
+function validate(boxes)
+	int = extrema.(SpatialSorting.intersections(boxes))
+	for i = 1:length(boxes), j = 1:i-1
+		a = SpatialSorting.intersects(boxes[i], boxes[j])
+		b = (j,i) ∈ int
+		(a ≠ b) && return false
+	end
+	return true
+end
+
+@test validate(boxes)
+
+#»»
+end#»»
 # vim: noet ts=2 fmr=««,»»
