@@ -7,7 +7,6 @@ using FixedPointNumbers
 using SparseArrays
 using Logging
 
-
 import Polyhedra # for convex hull
 import GLPK
 module AbstractMeshes
@@ -1193,6 +1192,9 @@ function scad(io::IO, s::SetParameters)
 end
 
 #————————————————————— Meshing (2d) —————————————————————————————— ««1
+
+include("SpatialSorting.jl")
+
 #»»1
 # Generic code for 2d and 3d meshing««1
 mesh(s::Geometry) = mesh(s, _DEFAULT_PARAMETERS)
