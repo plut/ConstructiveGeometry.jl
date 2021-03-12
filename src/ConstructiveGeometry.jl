@@ -1198,6 +1198,9 @@ include("SpatialSorting.jl")
 #»»1
 # Generic code for 2d and 3d meshing««1
 mesh(s::Geometry) = mesh(s, _DEFAULT_PARAMETERS)
+# “thickness” of points, edges etc. for computing intersections:
+const _THICKNESS = 1e-8
+
 # Transformations««2
 function mesh(s::AffineTransform{3}, parameters)
 	g = mesh(s.child, parameters)
@@ -1532,9 +1535,6 @@ end
 # we need a couple of functions in the particular case of simplexes.
 # `Polyhedra.jl` is a bit slow for these simple cases, so we write them
 # here:
-
-# “thickness” of points, edges etc. for computing intersections:
-const _THICKNESS = 1e-8
 
 standardize(x::Float64) = (x == -0.0) ? 0.0 : x
 """
@@ -2253,11 +2253,18 @@ BBox = AbstractMeshes.Box
 @inline intersect(a::BBox, b::BBox) =
 	BBox(Point(max.(coordinates(min(a)), coordinates(min(b)))),
 	    Point(min.(coordinates(max(a)), coordinates(max(b)))))
-@inline boundingbox(p::Point...) = boundingbox(coordinates.(p)...)
 @inline boundingbox(v::StaticVector{D,T}...) where{D,T} =
 	BBox{D,T}(min.(v...), max.(v...))
+@inline boundingbox(p::Point...) = boundingbox(coordinates.(p)...)
 @inline boundingbox(g::Geometry) = boundingbox(AbstractMeshes.vertices(g)...)
 
+# SpatialSorting interface:
+@inline Base.min(p::Point...) = Point(min.(coordinates.(p)...))
+@inline Base.max(p::Point...) = Point(max.(coordinates.(p)...))
+@inline SpatialSorting.position(b::BBox) =
+	coordinates(b.min) + coordinates(b.max)
+@inline SpatialSorting.merge(b1::BBox, b2::BBox) =
+	BBox(min(b1.min, b2.min), max(b1.max, b2.max))
 # 3d -> 2d projections««2
 const plus1mod3 = SA[2,3,1]
 const plus2mod3 = SA[3,1,2]
@@ -2547,68 +2554,62 @@ where the boolean is `true` if the edge was reversed.
 
 # Merging and selecting««2
 """
+    same_points(points; ε)
+
+Returns all pairs of coincident points (up to ε in ‖⋅‖∞) in this set.
+"""
+function same_points(points::AbstractVector{<:Point{3}}; ε=_THICKNESS)
+	boxes = [ BBox(p, p+SA[ε,ε,ε]) for p in points ]
+	return SpatialSorting.intersections(boxes)
+end
+"""
     merge(s1::AbstractSurface, s2::AbstractSurface)
 
 Combines both triangulations, renumbering points of `s2` as needed.
 (Numbering in `s1` is preserved).
 """
-# function merge(s1::AbstractSurface, s2::AbstractSurface, same = ==)
-# 	@debug "merge: $(nvertices(s1)),$(nfaces(s1)) + $(nvertices(s2)),$(nfaces(s2))««"
-# 	renum = Vector{Int}(undef, nvertices(s2))
-# 	# renumber points:
-# 	p1 = nvertices(s1)
-# 	p2 = nvertices(s2)
-# 	newpoints = copy(vertices(s1))
-# # 	newpoints = similar(vertices(s1), p1+p2)
-# # 	newpoints[1:p1] = vertices(s1)
-# 	idx = p1
-# 	for (i, p) in pairs(vertices(s2))
-# 		k = findfirst(same(p), newpoints)
-# 		if k == nothing
-# 			push!(newpoints, p)
-# 			renum[i] = length(newpoints)
-# 			@debug "point $i of s2 renamed to $(renum[i])"
-# 		else
-# 			renum[i] = k
-# 			@debug "point $i of s2 is identical to point $k of s1"
-# 		end
-# 	end
-# 	@debug join(["\nrenum[$i]=$r" for (i,r) in pairs(renum)], "")
-# 
-# 	# relabel faces
-# 	f1 = nfaces(s1)
-# 	f2 = nfaces(s2)
-# 	newfaces = similar(faces(s1), f1+f2)
-# 	newfaces[1:f1] = faces(s1)
-# 	for (i, f) in pairs(faces(s2))
-# 		@debug "renum face $i=$f to $(f1+i) = $(renum[f])"
-# 		newfaces[f1+i] = renum[f] # array indexed by array trick
-# 		@assert isunique(renum[f]) "face not unique: $f => $(renum[f])"
-# 	end
-# 	@debug "(merge done)»»"
-# 	return Surface(newpoints, newfaces)
-# end
-function merge(slist::AbstractSurface...; same = ==)
-# 	renum = [ Vector{Int}(undef, nvertices(s)) for s in slist ]
-	newpoints = Point{3,real_type(coordtype.(slist)...)}[]
-	newfaces = similar(faces(slist[1]), 0)
-	for s in slist
-		renum = Vector{Int}(undef, nvertices(s))
-		for (i, p) in pairs(vertices(s))
-			k = findfirst(same(p), newpoints)
-			if k == nothing
-				push!(newpoints, p)
-				renum[i] = length(newpoints)
-			else
-				renum[i] = k
-			end
-		end
-		# relabel faces of s
-		newfaces = vcat(newfaces,
-			[ renum[f] for f in faces(s) ])
+function merge(slist::AbstractSurface...; ε=_THICKNESS)
+# 	renum = [ collect(offset[i]+1:offset[i]+nvertices(s))
+# 		for (i,s) in pairs(slist) ]
+	newfaces = sizehint!(copy(faces(first(slist))), sum(nfaces.(slist)))
+	newpoints= sizehint!(copy(vertices(first(slist))), sum(nvertices.(slist)))
+	offset = 0
+	for i in 2:length(slist)
+		offset+= nvertices(slist[i-1])
+		push!(newfaces, [ f .+ offset for f in faces(slist[i]) ]...)
+		push!(newpoints, vertices(slist[i])...)
 	end
-	return Surface(newpoints, newfaces)
+	s = Surface(newpoints, newfaces)
+	return simplify(s; ε)
 end
+
+"""
+    simplify(s::AbstractSurface)
+
+Removes duplicate points in `s`, renumbering as needed.
+"""
+function simplify(s::AbstractSurface; ε=_THICKNESS)
+	n = length(vertices(s))
+	samepoints= extrema.(same_points(vertices(s); ε))
+	merged = collect(1:n)
+	# merged[j]: oldindex of point replacing this one
+	for (i, j) in samepoints
+		(merged[j] > merged[i]) && (merged[j] = merged[i])
+	end
+	newindex = zeros(Int, n)
+	newpoints = sizehint!(similar(vertices(s), 0), nvertices(s))
+	count = 0
+	for (i, j) in pairs(merged)
+		if i == j # this is a kept point
+			newindex[i] = (count += 1)
+			push!(newpoints, vertices(s)[i])
+		else # this is a relabeled point
+			newindex[i] = newindex[j]
+		end
+	end
+	return Surface(newpoints, [ newindex[f] for f in faces(s) ])
+end
+
 
 """
     select_faces(f, s::AbstractSurface)
@@ -3248,9 +3249,9 @@ Point indices are returned as indices in `vertices(s)` ∪ {new points}.
 
 """
 function self_intersect(s::AbstractSurfaceIncidence)
-	println("incidence...")
+# 	println("incidence...")
 # 	inc = incidence(s; vf=false) # we only need edge_faces
-	println("planes...")
+# 	println("planes...")
 	@debug "self-intersect ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	@debug " Input surface:\n"*strscad(s)
 	# we precompute all planes: we need them later for edge intersections
@@ -3294,7 +3295,7 @@ function self_intersect(s::AbstractSurfaceIncidence)
 		@debug "  now edge_points[$e] = $(edge_points[e])\n»»"
 	end#»»
 
-	println("faces...")
+# 	println("faces...")
 	@debug "face-edge and face-vertex intersections: ««\n"
 	# face-edge and face-vertex intersections
 	for (i, f) in pairs(faces(s))
@@ -3347,7 +3348,7 @@ function self_intersect(s::AbstractSurfaceIncidence)
 		end#»»
 	end
 	@debug "»»\n"
-	println("edges...")
+# 	println("edges...")
 	@debug "edge-edge and edge-vertex intersections:««\n"
 	# edge-edge and edge-vertex intersections
 	for (e, flist) in pairs(inc_ef(s))
@@ -3415,7 +3416,7 @@ function self_intersect(s::AbstractSurfaceIncidence)
 end
 function self_int2(s::AbstractSurfaceIncidence)
 	boxes = [ boundingbox(t...) for t in triangles(s) ]
-	for (i, j) in intersections(boxes)
+	for (i1, i2) in intersections(boxes)
 	# we know that the bounding boxes of faces (i) and (j) intersect,
 	# now determine the intersection type of those two triangles
 	# possible types:
@@ -3456,10 +3457,10 @@ Returns a refined triangulation of `s` with vertices at all
 self-intersection points.
 """
 function subtriangulate(s::AbstractSurfaceIncidence)
-	println("self-intersect...")
+# 	println("self-intersect...")
 	self_int = self_intersect(s)
-	println("subtriangulate...")
-	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
+# 	println("subtriangulate...")
+# 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
 	newpoints = [ vertices(s); self_int.points ]
 	newfaces = SVector{3,Int}[]
@@ -3774,9 +3775,9 @@ of `s`.
 """
 function multiplicity_levels(s::AbstractSurfacePatches)
 	@debug "multiplicity_levels ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
-	@debug " Input surface:\n"*strscad(s)
-	explain(s, "/tmp/before-multiplicity.scad", scale=40)
-	println("multiplicity...")
+# 	@debug " Input surface:\n"*strscad(s)
+# 	explain(s, "/tmp/before-multiplicity.scad", scale=40)
+# 	println("multiplicity...")
 	@debug "regular components: $(components(s))"
 	@debug "  labeling: $(label(s))"
 	@debug "  adjacency: $(adjacency(s))"
@@ -3857,10 +3858,6 @@ function select_multiplicity(m, s::AbstractSurface...)
 	end
 	@debug "(end select_multiplicity)»»"
 	return select_faces(flist, t)
-end
-
-function simplify(s::AbstractSurface)
-	return mesh(CSGUnion{3}([s]))
 end
 
 # Extrusion ««1
@@ -4000,7 +3997,7 @@ function mesh(s::RotateExtrude, parameters)
 	@debug "triangles = $triangles"
 	@debug "end rotate_extrude»»"
 	surf = Surface(pts3, triangles)
-	explain(surf, "/tmp/mu.scad", scale=30)
+# 	explain(surf, "/tmp/mu.scad", scale=30)
 	return simplify(surf)
 end
 # Path extrusion ««2
