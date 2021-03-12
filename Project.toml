@@ -17,7 +17,6 @@ Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
 SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
-StructArrays = "09ab397b-f2b6-538f-b94a-2f83cf4a842a"
 Triangle = "56f361f5-126b-55db-87fb-1c71988fcde4"
 
 [compat]

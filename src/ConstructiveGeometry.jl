@@ -3413,6 +3413,20 @@ function self_intersect(s::AbstractSurfaceIncidence)
 		edge_points = edge_points,
 		face_points = face_points)
 end
+function self_int2(s::AbstractSurfaceIncidence)
+	boxes = [ boundingbox(t...) for t in triangles(s) ]
+	for (i, j) in intersections(boxes)
+	# we know that the bounding boxes of faces (i) and (j) intersect,
+	# now determine the intersection type of those two triangles
+	# possible types:
+	# vv:
+	# ve:
+	# vf: 6 cases (vertices of i in face j, and conversely)
+	# ee: 9 possibilities (3 × 3 edges)
+	# ef: 6 cases (edges of i in face j)
+	# ff: coincident supporting planes; counted as “vf” or “ve”
+	end
+end
 
 # Sub-triangulation««2
 # FIXME: return a list of **oriented** faces

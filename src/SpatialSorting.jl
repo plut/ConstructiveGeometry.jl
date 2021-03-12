@@ -2,13 +2,14 @@
     SpatialSorting
 
 This module provides a way to compute intersections among a set of boxes.
-The two following functions are provided (not exported):
+The following functions are provided (not exported):
 
- * `tree = SpatialSorting.tree(boxes)`: returns a bounded volume hierarchy
-   computed from the given bounding boxes.
+ * `intersections(boxes)`: returns the set of all indexes of
+   intersecting pairs of boxes in   the list.
+ * `t = tree(boxes)`: returns a bounded volume hierarchy
+   computed from the given boxes.
  * `search(tree, box)`: returns the vector of indices of those `boxes`
    which intersect the `box` parameter.
- * `intersections(boxes)`: returns the set of all intersecting pairs of boxes in   the list.
 
 The `tree` function has an average-time quasi-linear complexity
 (w.r.to the number of boxes), while `search(tree, box)` is quasi-constant.
@@ -21,22 +22,30 @@ The `boxes` may be of any type, as long as the following operations exist:
  - `SpatialSorting.intersects(box1, box2)`: returns true iff intersection is not empty (default is `!isempty(box1 ∩ box2)`).
 """
 module SpatialSorting
-using StructArrays
 using StaticArrays
 
 @inline intersects(box1, box2) = !isempty(box1 ∩ box2)
-@inline position(box) = error("`position` not implemented for $(typeof(box))")
+@inline position(box) =
+	error("you must implement `position` for type $(typeof(box))")
 
 @inline spread(v) = (e = extrema(v); e[2]-e[1])
 
-function largest_spread_coord(points)
+@inline function largest_spread_coord(points)
 	N = length(first(points))
 	@inbounds s = [spread(p[i] for p in points) for i in 1:N]
 	return findmax(s)[2]
 end
+@inline function largest_spread_coord(points::AbstractVector{<:StaticVector{3}})
+	# unrolling this loop saves about 10% running time on `intersections()`:
+	@inbounds s= (spread(p[1] for p in points),
+		spread(p[2] for p in points),
+		spread(p[3] for p in points))
+	return s[1] < s[2] ? (s[2] < s[3] ? 3 : 2) : (s[1] < s[3] ? 3 : 1)
+end
+
 
 """
-    CompleteBinTree{B}
+    BoxTree{B}
 
 A tree describing a bounded volume hierarchy, using boxes of type `B`.
 
@@ -46,21 +55,21 @@ Left-side box of node `i` is `box[2i-1]` and right-side is `box[2i]`.
 
 In addition, a `leaf` table indicates the permutation of the leaves of the tree.
 """
-struct CompleteBinTree{B}
+struct BoxTree{B}
 # replace lbox[i] by box[2i-1] and rbox[i] by box[2i]
 	box::Vector{B}
 	leaf::Vector{Int} # permutation of leaves
 	firstleaf::Int # precomputation
-	@inline CompleteBinTree{B}(::UndefInitializer, n::Int) where{B} =
+	@inline BoxTree{B}(::UndefInitializer, n::Int) where{B} =
 		new{B}(Vector{B}(undef, 2n-2), 
 # 		Vector{B}(undef, n-1),
 		collect(1:n),
 		prevpow(2, n-1)<<1)
 end
 
-@inline nleaves(t::CompleteBinTree) = length(t.leaf)
+@inline nleaves(t::BoxTree) = length(t.leaf)
 
-function to_leaf(t::CompleteBinTree, i::Integer)
+@inline function to_leaf(t::BoxTree, i::Integer)
 	d = t.firstleaf
 	i ≥ d && return t.leaf[i-d+1]
 	return t.leaf[i-d+1+nleaves(t)]
@@ -75,42 +84,44 @@ Returns a tree representing the spatial disposition of the boxes.
  the spatial disposition of the boxes.
 """
 function tree(boxes; position=position)
-	n = length(boxes)
-	@inline leftpart(r::Integer) =
+	# splitting a complete binary tree in two
+	@inline leftcount(r::Integer) = # https://oeis.org/A006165
 		let m = 1 << ((sizeof(r)<<3)-leading_zeros(r-1)-1)
 			min(m, r-m>>1)
 		end
 	@inline leftpart(r::UnitRange) =
-		first(r):first(r) + leftpart(length(r))-1
+		first(r):first(r) + leftcount(length(r))-1
 	@inline rightpart(r::UnitRange) =
-		first(r)+leftpart(length(r)) : last(r)
-
-	firstleaf = prevpow(2, n-1)
-	@inline leftleaf(k::Integer) =
-		(k ≥ firstleaf) ? 2(k-firstleaf)+1 : n-2(firstleaf-k)+1
+		first(r)+leftcount(length(r)) : last(r)
 
 	# initialize the tree structure
-	tree = CompleteBinTree{eltype(boxes)}(undef, n)
+	n = length(boxes)
+	tree = BoxTree{eltype(boxes)}(undef, n)
 	# `interval[k]` is the range of leaves accessed by inner node `k`.
 	interval = Vector{UnitRange{Int}}(undef, n-1)
 	interval[1] = 1:n
 	@inbounds for i in 2:n-1
-		interval[i] =
-			iseven(i) ? leftpart(interval[i>>1]) : rightpart(interval[i>>1])
+		parent = interval[i>>1]
+		interval[i] = iseven(i) ? leftpart(parent) : rightpart(parent)
 	end
-	points = position.(boxes)
 
-	# spatial sort of indices
-	for i in 1:n-1
-		subtree = view(tree.leaf, @inbounds interval[i])
+	# spatial sort of leaves
+	points = position.(boxes)
+	@inbounds for i in 1:n-1
+		subtree = view(tree.leaf, interval[i])
 		j = largest_spread_coord(view(points, subtree))
-		k = leftpart(length(subtree))
+		k = leftcount(length(subtree))
+		# fixme: this line (which dominates the overall complexity)
+		# could be made faster when `points` is a StridedArray
+		# (=> simple pointer arithmetic)
 		partialsort!(subtree, k; by=i->points[i][j])
 	end
-	@inline box(x) = x ≥ n ? boxes[to_leaf(tree, x)] :
-		merge(tree.box[2x-1], tree.box[2x])
-	@inbounds for i in 2n-2:-1:1
-		tree.box[i] = box(i+1)
+	# computing boxes
+	@inbounds for i in n:2n-1
+		tree.box[i-1] = boxes[to_leaf(tree, i)]
+	end
+	@inbounds for i in n-1:-1:2
+		tree.box[i-1] = merge(tree.box[2i-1], tree.box[2i])
 	end
 	return tree
 end
@@ -121,7 +132,7 @@ end
 Returns the list of indices of given `tree` which
 non-trivially intersect the `box`.
 """
-function search(t::CompleteBinTree, box)
+function search(t::BoxTree, box)
 	todo = [1]
 	leaves = Int[]
 	n = nleaves(t)
@@ -134,7 +145,7 @@ function search(t::CompleteBinTree, box)
 	return leaves
 end
 
-function print_tree(io::IO, t::CompleteBinTree, i=1)
+function print_tree(io::IO, t::BoxTree, i=1)
 	print(io, " "^ndigits(i, base=2))
 	if i < length(t.leaf)
 		println(io, "node(",i,"):", t.box[2i-1], t.box[2i])
@@ -186,7 +197,7 @@ function intersections(boxes)
 	return r
 end
 
-Base.show(io::IO, t::CompleteBinTree) = print_tree(io, t)
-print_tree(t::CompleteBinTree) = print_tree(stdout, t)
+Base.show(io::IO, t::BoxTree) = print_tree(io, t)
+print_tree(t::BoxTree) = print_tree(stdout, t)
 
 end # module
