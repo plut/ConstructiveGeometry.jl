@@ -77,7 +77,7 @@ The type of real numbers to which objects of type `T` are promoted.
 
 # Dict of lists
 DictOfLists{A,B} = Dict{A,Vector{B}}
-function listpush!(d::DictOfLists, (key, val))
+@inline function listpush!(d::DictOfLists, (key, val)) # listpush!(l, k=>v)
 	!haskey(d, key) && (d[key] = [])
 	push!(d[key], val)
 end
@@ -1504,6 +1504,11 @@ end
 @inline polyhedra_lib(T::Type{<:Real}) =
 	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
 
+# fixing an oversight in Polyhedra.jl: it has multiplications but no
+# divisions
+@inline Base.:(/)(h::Polyhedra.HyperPlane, α::Real) =
+	Polyhedra.HyperPlane(h.a / α, h.β / α)
+
 # converts path to matrix with points as rows:
 @inline poly_vrep(points::AnyPath) = vcat(transpose.(Vector.(points))...)
 @inline poly_vrep(points::Matrix) = points
@@ -1526,6 +1531,10 @@ end
 
 # HRepElement is the supertype of HalfSpace and HyperPlane
 @inline direction(h::Polyhedra.HRepElement) = h.a
+@inline function normalize(h::Polyhedra.HRepElement)
+	n = norm(direction(h))
+	(n ≠ 0) ? (h / n) : h
+end
 @inline (h::Polyhedra.HRepElement)(p::Point) = h.a ⋅ coordinates(p) - h.β
 @inline ∈(p::Point, h::Polyhedra.HyperPlane) = iszero(h(p))
 @inline convert(T::Type{<:Polyhedra.HRepElement}, h::Polyhedra.HRepElement) =
@@ -2194,7 +2203,6 @@ pointing *outwards*.
 function supporting_plane(t::Triangle)
 	(p1, p2, p3) = t.vertices
 	c = cross(p2-p1, p3-p1)
-	n = norm(c, Inf); n ≠ 0 && ( c/= n)
 	b = dot(c, p1.coords)
 	return Polyhedra.HyperPlane(c, b)
 end
@@ -2334,22 +2342,124 @@ function project_2d(plane::Polyhedra.HyperPlane)
 end
 
 # Intersections (3d)««2
-function inter(s1::Segment{3}, s2::Segment{3}; thickness = 0)
-	(a1, b1) = vertices(s1)
-	(a2, b2) = vertices(s2)
-# 	d = det3(a1, b1, a2, b2)
-# 	@debug "inter: d=$d"
-# 	!iszero(d) && return nothing
-	# compute supporting plane
-	plane = supporting_plane(Triangle(a1, b1, a2))
-	# check all points are coplanar
-	abs(plane(b2)) > thickness && return nothing
-	iszero(direction(plane)) && return a2
-	(proj, lift) = project_2d(plane)
-	int2 = inter(Segment(a1[proj],b1[proj]), Segment(a2[proj],b2[proj]);
-		thickness)
-	int2 == nothing && return nothing
-	return lift(int2)
+# function inter(s1::Segment{3}, s2::Segment{3}; thickness = 0)
+# 	(a1, b1) = vertices(s1)
+# 	(a2, b2) = vertices(s2)
+# # 	d = det3(a1, b1, a2, b2)
+# # 	@debug "inter: d=$d"
+# # 	!iszero(d) && return nothing
+# 	# compute supporting plane
+# 	plane = supporting_plane(Triangle(a1, b1, a2))
+# 	# check all points are coplanar
+# 	abs(plane(b2)) > thickness && return nothing
+# 	iszero(direction(plane)) && return a2
+# 	(proj, lift) = project_2d(plane)
+# 	int2 = inter(Segment(a1[proj],b1[proj]), Segment(a2[proj],b2[proj]);
+# 		thickness)
+# 	int2 == nothing && return nothing
+# 	return lift(int2)
+# end
+
+function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)
+	# Devillers, Guigue, Faster triangle-triangle intersection tests
+	# https://hal.inria.fr/inria-00072100/document
+	(p1, q1, r1) = vertices(t1)
+	(p2, q2, r2) = vertices(t2)
+
+	normal2 = cross(q2-p2, r2-p2)
+	dp1 = dot(normal2, p1-p2)
+	dq1 = dot(normal2, q1-p2)
+	dr1 = dot(normal2, r1-p2)
+	
+	# test for coplanarity
+	(dp1 == 0) && (dq1 == 0) && (dr1 == 0) && return inter_coplanar(t1, t2)
+
+	# the permutation applied to points is stored in an integer
+	# low part: {1,2,3} indicates which point is put first (3-cycle);
+	# high part: +{0,3} indicates whether to then transpose two last points
+	i1 = 1; i2 = 1
+	# rotate triangle 1 as needed so that t2 separates p1 from (q1, r1)««
+	if dp1 > 0
+		if dq1 > 0
+			if dr1 > 0 return nothing # +++, no intersection
+			else i1+= 2; i2+= 3       # ++-: put r1 first; swap q2, r2
+			end
+		else
+			if dr1 > 0 i1+=1; i2+= 3  # +-+: q1 first, swap q2, r2
+			else                      # +--: do nothing
+			end
+		end
+	else
+		if dq1 < 0
+			if dr1 < 0 return nothing # ---, no intersection
+			else       i1+= 2         # --+: r1 first
+			end
+		else
+			if dr1 < 0 i1+= 1         # -+-: q1 first
+			else       i2+= 3         # -++: swap p2, q2
+			end
+		end
+	end #»»
+	# likewise for triangle 2««
+	normal1 = cross(q1-p1, r1-p1)
+	dp2 = dot(normal1, p2-p1)
+	dq2 = dot(normal1, q2-p1)
+	dr2 = dot(normal1, r2-p1)
+	if dp2 > 0
+		if dq2 > 0
+			if dr2 > 0 return nothing # +++, no intersection
+			else i2+= 2; i1+= 3       # ++-: put r2 first; swap q1, r1
+			end
+		else
+			if dr2 > 0 i2+=1; i1+= 3  # +-+: q2 first, swap q1, r1
+			else                      # +--: do nothing
+			end
+		end
+	else
+		if dq2 < 0
+			if dr2 < 0 return nothing # ---, no intersection
+			else       i2+= 2         # --+: r2 first
+			end
+		else
+			if dr2 < 0 i2+= 1         # -+-: q2 first
+			else       i1+= 3         # -++: swap p1, q1
+			end
+		end
+	end #»»
+	# apply both permutations ««
+	perm_table = ((1,2,3),(2,3,1),(3,1,2),(1,3,2),(2,1,3),(3,2,1))
+	σ1 = perm_table[i1]
+	σ2 = perm_table[i2]
+	# 1,2,3 are even permutations; 4,5,6 are odd:
+	(i1 > 3) && (normal1 = -normal1)
+	(i2 > 3) && (normal2 = -normal2)
+
+	(a1, b1, c1) = (vertices(t1)[i] for i in σ1)
+	(a2, b2, c2) = (vertices(t2)[i] for i in σ2)
+	# the permutations σ1 and σ2 will allow us to recover the real indices
+	# of points (edges, etc):
+	# e.g. assume a1 = q1, which means σ1(1) = 2
+	# if the algorithm returns a value x=1 (meaning a1),
+	# then indexing σ1[x] returns 2 (meaning this is really q1).
+
+	# a laundry list of assertions to check that we are in a standard
+	# configuration:
+	@assert normal1 ≈ cross(b1-a1, c1-a1)
+	@assert normal2 ≈ cross(b2-a2, c2-a2)
+	@assert dot(normal2, a1-a2) ≥ 0
+	@assert dot(normal2, b1-a2) ≤ 0
+	@assert dot(normal2, c1-a2) ≤ 0
+	@assert dot(normal1, a2-a1) ≥ 0
+	@assert dot(normal1, b2-a1) ≤ 0
+	@assert dot(normal1, c2-a1) ≤ 0
+	# »»
+	# what remains to compute:
+	# - coordinates of four intersection points bb1, cc1, bb2, cc2
+	#   (all four are aligned on the intersection of the two planes)
+	# - relative position of these points on the line
+	#   (project on best coordinate, i.e. largest abs. value of vector)
+	# https://github.com/yusuketomoto/ofxCGAL/blob/master/libs/CGAL/include/CGAL/Triangle_3_Triangle_3_intersection.h
+	# https://fossies.org/linux/CGAL/include/CGAL/Intersections_3/internal/Triangle_3_Triangle_3_do_intersect.h
 end
 
 
@@ -2552,7 +2662,7 @@ where the boolean is `true` if the edge was reversed.
 	(e[1] < e[2]) ? (false, SA[e[1],e[2]]) : (true, SA[e[2],e[1]])
 # this must return an array because we use array[array] shorthand
 
-# Merging and selecting««2
+# Merging, simplifying and selecting««2
 """
     same_points(points; ε)
 
@@ -2568,7 +2678,10 @@ end
 Combines both triangulations, renumbering points of `s2` as needed.
 (Numbering in `s1` is preserved).
 """
-function merge(slist::AbstractSurface...; ε=_THICKNESS)
+@inline function merge(slist::AbstractSurface...; ε=_THICKNESS)
+	return simplify(concatenate(slist...); ε)
+end
+function concatenate(slist::AbstractSurface...)
 # 	renum = [ collect(offset[i]+1:offset[i]+nvertices(s))
 # 		for (i,s) in pairs(slist) ]
 	newfaces = sizehint!(copy(faces(first(slist))), sum(nfaces.(slist)))
@@ -2579,8 +2692,7 @@ function merge(slist::AbstractSurface...; ε=_THICKNESS)
 		push!(newfaces, [ f .+ offset for f in faces(slist[i]) ]...)
 		push!(newpoints, vertices(slist[i])...)
 	end
-	s = Surface(newpoints, newfaces)
-	return simplify(s; ε)
+	return Surface(newpoints, newfaces)
 end
 
 """
@@ -2589,25 +2701,35 @@ end
 Removes duplicate points in `s`, renumbering as needed.
 """
 function simplify(s::AbstractSurface; ε=_THICKNESS)
-	n = length(vertices(s))
-	samepoints= extrema.(same_points(vertices(s); ε))
+	(newpoints, reindex) = simplify_points(vertices(s); ε)
+	return Surface(newpoints, [ reindex[f] for f in faces(s) ])
+end
+
+"""
+    simplify_points(points; ε)
+
+Removes duplicates from the set of points, returning (list of new points,
+map from old index to new index).
+"""
+function simplify_points(points; ε=_THICKNESS)
+	n = length(points)
+	samepoints= extrema.(same_points(points; ε))
 	merged = collect(1:n)
 	# merged[j]: oldindex of point replacing this one
 	for (i, j) in samepoints
 		(merged[j] > merged[i]) && (merged[j] = merged[i])
 	end
-	newindex = zeros(Int, n)
-	newpoints = sizehint!(similar(vertices(s), 0), nvertices(s))
-	count = 0
+	newindex = similar(merged)
+	newpoints = sizehint!(similar(points, 0), n)
 	for (i, j) in pairs(merged)
 		if i == j # this is a kept point
-			newindex[i] = (count += 1)
-			push!(newpoints, vertices(s)[i])
+			push!(newpoints, points[i])
+			newindex[i] = length(newpoints)
 		else # this is a relabeled point
 			newindex[i] = newindex[j]
 		end
 	end
-	return Surface(newpoints, [ newindex[f] for f in faces(s) ])
+	return (newpoints, newindex)
 end
 
 
@@ -2678,7 +2800,7 @@ abstract type AbstractSurfaceIncidence{T} <: AbstractSurface{T} end
 struct SurfaceIncidence{T, S<:AbstractSurface{T}} <: AbstractSurfaceIncidence{T}
 	surface::S
 	inc_pf:: Vector{Vector{Int}}
-	inc_ef::Dict{SVector{2,Int}, Vector{Int}}
+	inc_ef::DictOfLists{SVector{2,Int}, Int}
 	inc_ff::Vector{Vector{Int}}
 end
 
@@ -2709,13 +2831,12 @@ function SurfaceIncidence(s::AbstractSurface;
 			push!(inc_pf[p], i)
 		end
 	end
-	inc_ef = Dict{SVector{2,Int}, Vector{Int}}()
+	inc_ef = DictOfLists{SVector{2,Int}, Int}()
 	if ef
 		for (i, f) in pairs(faces(s)), u in 1:3
 			e = (f[u], f[plus1mod3[u]])
 			(b, c) = edge_can(e)
-			if !haskey(inc_ef, c) inc_ef[c] = []; end
-			push!(inc_ef[c], b ? -i : i)
+			listpush!(inc_ef, c => b ? -i : i)
 		end
 	end
 	inc_ff = [Int[] for f in faces(s)]
@@ -2927,21 +3048,6 @@ function SurfacePatches(s::AbstractSurfaceIncidence)
 end
 
 # # DirectedEdgesTriMesh««1
-# # Utilities««2
-# # struct DictOfList{A,B}
-# # 	data::Dict{A,Vector{B}}
-# # end
-# # @inline keytype(::Type{DictOfList{A,B}}) where{A,B} = A
-# # @inline valtype(::Type{DictOfList{A,B}}) where{A,B} = B
-# # @inline keytype(d::DictOfList) = keytype(typeof(d))
-# # @inline valtype(d::DictOfList) = valtype(typeof(d))
-# # 
-# # function Base.push!(d::DictOfList, key, value)
-# # 	if !haskey(d.data, key) d.data[key] = valtype(d)[]; end
-# # 	return push!(d.data[key], value)
-# # end
-# # @inline Base.getindex(d::DictOfList, key) = getindex(d.data, key)
-# 
 # # Basic types««2
 # struct DirectedEdgesTriMesh{T}
 # 	opposite::Vector{Int} # 3×n
@@ -3414,13 +3520,15 @@ function self_intersect(s::AbstractSurfaceIncidence)
 		edge_points = edge_points,
 		face_points = face_points)
 end
-function self_int2(s::AbstractSurfaceIncidence)
+function self_int2(s::AbstractSurfaceIncidence; ε=_THICKNESS)
 	boxes = [ boundingbox(t...) for t in triangles(s) ]
 	for (i1, i2) in intersections(boxes)
+		tri1 = triangle(s, i1)
+		tri2 = triangle(s, i2)
 	# we know that the bounding boxes of faces (i) and (j) intersect,
 	# now determine the intersection type of those two triangles
 	# possible types:
-	# vv:
+	# vv: ignore this (we will simplify points in the next step)
 	# ve:
 	# vf: 6 cases (vertices of i in face j, and conversely)
 	# ee: 9 possibilities (3 × 3 edges)
@@ -3430,7 +3538,7 @@ function self_int2(s::AbstractSurfaceIncidence)
 end
 
 # Sub-triangulation««2
-# FIXME: return a list of **oriented** faces
+# FIXME: thickness -> ε
 function coplanar_faces(s::AbstractSurfaceIncidence,
 		hyperplane::Polyhedra.HyperPlane,
 		thickness = 0)
@@ -3478,7 +3586,7 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 		join(["\n $i=$(faces(s)[i])" for i in faces_todo])
 	while !isempty(faces_todo)
 		i = first(faces_todo)
-		plane = supporting_plane(triangles(s)[i])
+		plane = normalize(supporting_plane(triangles(s)[i]))
 		@debug "from face $i=$(faces(s)[i]): $plane"
 		cluster = coplanar_faces(s, plane, _THICKNESS)
 		push!(cluster, i)
