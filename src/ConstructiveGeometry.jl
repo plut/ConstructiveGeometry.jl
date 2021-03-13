@@ -1549,7 +1549,7 @@ standardize(x::Float64) = (x == -0.0) ? 0.0 : x
 """
     inter(path, hyperplane::Polyhedra.HyperPlane)
 
-    intersection of simplex and hyperplane
+intersection of simplex and hyperplane
 """
 function inter(path::AnyPath, hyperplane::Polyhedra.HyperPlane)
 	n = length(path)
@@ -2360,9 +2360,26 @@ end
 # 	return lift(int2)
 # end
 
-function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)
-	# Devillers, Guigue, Faster triangle-triangle intersection tests
-	# https://hal.inria.fr/inria-00072100/document
+"""
+    inter(triangle1, triangle2; ε)
+
+Returns a description of the intersection of two 3-dimensional triangles.
+The description is given as a pair `(newpoints, newedges)`, where:
+ * `newpoints[i] = (coordinates, position1, position2)`
+  - `coordinates` is a `Point` object
+  - `position1` is the position relative to triangle 1, encoded as:
+    {1,2,3} for points on edges {(2,3),(3,1),(1,2)};
+    4 for point inside the face; 0 for point outside the face;
+  - `position2` is the same relative to triangle 2;
+ * `newedges` is a list of added edges, represented as pairs (i,j),
+   where -1,-2,-3 represent the vertices of t1;
+   -4,-5,-6 the vertices of t2; and 1,2,3,... the new points.
+"""
+function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)#««
+	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
+	#   https://hal.inria.fr/inria-00072100/document]
+	# https://github.com/yusuketomoto/ofxCGAL/blob/master/libs/CGAL/include/CGAL/Triangle_3_Triangle_3_intersection.h
+	# https://fossies.org/linux/CGAL/include/CGAL/Intersections_3/internal/Triangle_3_Triangle_3_do_intersect.h
 	(p1, q1, r1) = vertices(t1)
 	(p2, q2, r2) = vertices(t2)
 
@@ -2379,20 +2396,43 @@ function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)
 	# high part: +{0,3} indicates whether to then transpose two last points
 	i1 = 1; i2 = 1
 	# rotate triangle 1 as needed so that t2 separates p1 from (q1, r1)««
-	if dp1 > 0
-		if dq1 > 0
-			if dr1 > 0 return nothing # +++, no intersection
-			else i1+= 2; i2+= 3       # ++-: put r1 first; swap q2, r2
+	if abs(dp1) ≤ ε
+		if abs(dq1) ≤ ε
+			if abs(dr1) ≤ ε return inter_coplanar(t1, t2) # 000
+			elseif dr1 > 0  i2+=3     # 00+: change to 00-
+			else            nothing   # 00-
+			end
+		elseif dq1 > 0
+		  if dr1 < -ε     i1+=1     # 0+-: put q1 first
+			else            i2+=3     # 0++ or 0+0: swap to 0-- or 0-0
+			end
+		else # dq1 < 0
+			if dr1 > ε  i1+=2     # 0-+: put r1 first
+			else            nothing   # 0-- or 0-0
+			end
+		end
+	elseif dp1 > 0
+		if abs(dq1) ≤ ε
+			if dr1 > ε  i1+=1; i2+=3 # +0+: put q first and swap
+			else            nothing   # +0- or +00: do nothing
+			end
+		elseif dq1 > 0
+			if dr1 > ε  return ((),()) # +++, no intersection
+			else        i1+= 2; i2+= 3 # ++- or ++0: put r1 first; swap q2, r2
 			end
 		else
-			if dr1 > 0 i1+=1; i2+= 3  # +-+: q1 first, swap q2, r2
-			else                      # +--: do nothing
+			if dr1 > ε i1+=1; i2+= 3  # +-+: q1 first, swap q2, r2
+			else                      # +-- or +-0: do nothing
 			end
 		end
 	else
-		if dq1 < 0
-			if dr1 < 0 return nothing # ---, no intersection
-			else       i1+= 2         # --+: r1 first
+	  if abs(dq1) ≤ ε
+			if dr1 > ε  i1+= 2 # -0+: put r first
+			else        i1+= 1 # -0- or -00: put q first
+			end
+		elseif dq1 < 0
+			if dr1 < -ε return ((),()) # ---, no intersection
+			else        i1+= 2         # --+ or --0: r1 first
 			end
 		else
 			if dr1 < 0 i1+= 1         # -+-: q1 first
@@ -2400,14 +2440,14 @@ function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)
 			end
 		end
 	end #»»
-	# likewise for triangle 2««
+	# likewise for second triangle  ««
 	normal1 = cross(q1-p1, r1-p1)
 	dp2 = dot(normal1, p2-p1)
 	dq2 = dot(normal1, q2-p1)
 	dr2 = dot(normal1, r2-p1)
 	if dp2 > 0
 		if dq2 > 0
-			if dr2 > 0 return nothing # +++, no intersection
+			if dr2 > 0 return ((),()) # +++, no intersection
 			else i2+= 2; i1+= 3       # ++-: put r2 first; swap q1, r1
 			end
 		else
@@ -2417,7 +2457,7 @@ function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)
 		end
 	else
 		if dq2 < 0
-			if dr2 < 0 return nothing # ---, no intersection
+			if dr2 < 0 return ((),()) # ---, no intersection
 			else       i2+= 2         # --+: r2 first
 			end
 		else
@@ -2428,39 +2468,127 @@ function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)
 	end #»»
 	# apply both permutations ««
 	perm_table = ((1,2,3),(2,3,1),(3,1,2),(1,3,2),(2,1,3),(3,2,1))
-	σ1 = perm_table[i1]
-	σ2 = perm_table[i2]
-	# 1,2,3 are even permutations; 4,5,6 are odd:
-	(i1 > 3) && (normal1 = -normal1)
-	(i2 > 3) && (normal2 = -normal2)
+	@inbounds σ1 = perm_table[i1]
+	@inbounds σ2 = perm_table[i2]
 
-	(a1, b1, c1) = (vertices(t1)[i] for i in σ1)
-	(a2, b2, c2) = (vertices(t2)[i] for i in σ2)
+	@inbounds (a1, b1, c1) = (vertices(t1)[i] for i in σ1)
+	@inbounds (a2, b2, c2) = (vertices(t2)[i] for i in σ2)
 	# the permutations σ1 and σ2 will allow us to recover the real indices
 	# of points (edges, etc):
 	# e.g. assume a1 = q1, which means σ1(1) = 2
 	# if the algorithm returns a value x=1 (meaning a1),
 	# then indexing σ1[x] returns 2 (meaning this is really q1).
 
+	# re-use already computed determinants as z-coordinates:
+	@inbounds (za1, zb1, zc1) = ((dp1, dq1, dr1)[i] for i in σ1)
+	@inbounds (za2, zb2, zc2) = ((dp2, dq2, dr2)[i] for i in σ2)
+	
+	# 1,2,3 represent even permutations, and 4,5,6 odd ones:
+	(i1 > 3) && (normal1 = -normal1; za2 = -za2; zb2 = -zb2; zc2 = -zc2)
+	(i2 > 3) && (normal2 = -normal2; za1 = -za1; zb1 = -zb1; zc1 = -zc1)
+
 	# a laundry list of assertions to check that we are in a standard
 	# configuration:
 	@assert normal1 ≈ cross(b1-a1, c1-a1)
 	@assert normal2 ≈ cross(b2-a2, c2-a2)
-	@assert dot(normal2, a1-a2) ≥ 0
-	@assert dot(normal2, b1-a2) ≤ 0
-	@assert dot(normal2, c1-a2) ≤ 0
-	@assert dot(normal1, a2-a1) ≥ 0
-	@assert dot(normal1, b2-a1) ≤ 0
-	@assert dot(normal1, c2-a1) ≤ 0
+	@assert dot(normal2, a1-a2) ≈ za1
+	@assert dot(normal2, b1-a2) ≈ zb1
+	@assert dot(normal2, c1-a2) ≈ zc1
+	@assert dot(normal1, a2-a1) ≈ za2
+	@assert dot(normal1, b2-a1) ≈ zb2
+	@assert dot(normal1, c2-a1) ≈ zc2
+	@assert za1 ≥ 0
+	@assert zb1 ≤ 0
+	@assert zc1 ≤ 0
+	@assert za2 ≥ 0
+	@assert zb2 ≤ 0
+	@assert zc2 ≤ 0
 	# »»
-	# what remains to compute:
-	# - coordinates of four intersection points bb1, cc1, bb2, cc2
-	#   (all four are aligned on the intersection of the two planes)
-	# - relative position of these points on the line
-	#   (project on best coordinate, i.e. largest abs. value of vector)
-	# https://github.com/yusuketomoto/ofxCGAL/blob/master/libs/CGAL/include/CGAL/Triangle_3_Triangle_3_intersection.h
-	# https://fossies.org/linux/CGAL/include/CGAL/Intersections_3/internal/Triangle_3_Triangle_3_do_intersect.h
-end
+	# coordinates of four intersection points bb1, cc1, bb2, cc2
+	# (all four are aligned on the intersection of the two planes)
+	@inline barycenter(p1, p2, λ) = p2 + λ*(p1-p2) # λp1+(1-λ)p2
+	bb1 = barycenter(b1, a1, za1/(za1-zb1))
+	cc1 = barycenter(c1, a1, za1/(za1-zc1))
+	bb2 = barycenter(b2, a2, za2/(za2-zb2))
+	cc2 = barycenter(c2, a2, za2/(za2-zc2))
+	@assert abs(dot(normal2, bb1-a2)) ≤ 1e-10
+	@assert abs(dot(normal2, cc1-a2)) ≤ 1e-10
+	@assert abs(dot(normal1, bb2-a1)) ≤ 1e-10
+	@assert abs(dot(normal1, cc2-a1)) ≤ 1e-10
+
+	# relative position of these points on the line:
+	# project on best coordinate, i.e. largest abs. value of direction
+	# and flip sign if needed so that bb1 is before cc1:
+	v = cc1 - bb1
+	e = abs(v[1]) > abs(v[2]) ? (abs(v[1]) > abs(v[3]) ? 1 : 3) :
+	    abs(v[2]) > abs(v[3]) ? 2 : 3
+	# and map b1 to 0, c1 to 1:
+	α = 1/(cc1[e]-bb1[e])
+	xb2 = α*(bb2[e]-bb1[e]); xc2 = α*(cc2[e]-bb1[e])
+
+	# we know _a priori_ that the ordering of (bb1, cc1) is opposed to that
+	# of (bb2, cc2):
+	@assert xc2 ≤ xb2
+	@inline aligned(p,q,r) = norm(cross(q-p, r-p)) < ε
+	@inline monotonic(p,q,r) = dot(p-q, r-q) < 0
+	@inline bb1() = barycenter(cc2, bb2, -xb2/(xc2-xb2))
+	@inline cc1() = barycenter(cc2, bb2, (1-xb2)/(xc2-xb2))
+
+	if xc2 < 0-ε
+		if xb2 < 0-ε return ((),())
+		elseif xb2 ≤ 0+ε # bb2 ∈ edge [a1, b1]
+			return (
+				((cc2, 0, σ2[2]), (bb2, σ1[3], σ2[3])),
+				((1,2),))
+		elseif xb2 < 1-ε # [cc2, bb2] intersects [a1, b1]
+			return (
+				((cc2, 0, σ2[2]), (bb1(), σ1[3], 4), (bb2, 4, σ2[3])),
+				((1,2), (2,3),))
+		elseif xb2 ≤ 1+ε # bb2 ∈ edge [a1, c1]
+			return (
+				((cc2, 0, σ2[2]), (bb1(), σ1[3], 4), (bb2, 2, σ2[3])),
+				((1,2), (2,3),))
+		else               # [cc2, bb2] intersects [a1, b1] and [a1, c1]
+			return (
+				((bb1(), σ1[3], 4), (cc1(), σ1[2], 4)),
+				((1,2),))
+		end
+	elseif xc2 ≤ 0+ε   # cc2 ∈ edge [a1, b1]...
+		if xb2 < 1-ε     # ... and is the single intersection point
+			return (
+				((cc2, σ1[3], σ2[2]), (bb2, 4, σ2[3])),
+				((1,2),))
+		elseif xb2 ≤ 1+ε # ... and bb2 ∈ [a1, c1]
+			return (
+				((cc2, σ1[3], σ2[2]), (bb2, σ1[2], σ2[3])),
+				((1,2),))
+		else               # ... and [cc2, bb2] intersects [a1, c1]
+			return (
+				((cc2, σ1[3], σ2[2]), (cc1(), σ1[2], 4), (bb2, 0, σ2[3])),
+				((1,2),(2,3),))
+		end
+	elseif xc2 < 1-ε
+		if xb2 < 1-ε     # [cc2, bb2] is an inner segment of triangle t1
+			return (
+				((cc2, 4, σ2[2]), (bb2, 4, σ2[2])),
+				((1,2),))
+		elseif xb2 ≤ 1+ε # bb2 ∈ edge [a1, c1]
+			return (
+				((cc2, 4, σ2[2]), (bb2, σ1[2], σ2[3])),
+				((1,2),))
+		else               # [cc2, bb2] intersects [a1, c1]
+			return (
+				((cc2, 4, σ2[2]), (cc1(), σ1[2], 4), (bb2, 0, σ2[3])),
+				((1,2),(2,3),))
+		end
+	elseif xc2 ≤ 1+ε   # cc2 ∈ edge [a1, c1]
+		return (
+			((cc2, σ1[2], σ2[2]), (bb2, 0, σ2[3])),
+			((1,2),(2,3),))
+	else # 1 < xc2 ≤ xb2, no intersection
+		return ((),())
+	end
+end#»»
 
 
 # Rays««2
