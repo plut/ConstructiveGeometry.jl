@@ -2321,9 +2321,9 @@ end
 """
     project_2d(plane::Polyhedra.HyperPlane)
 
-Returns a (named) tuple `(coordinates, linear, origin)` where
+Returns a (named) tuple `(coordinates, lift)` where
  - `coordinates` is the set of coordinates to keep for projection,
- - `linear`*x+`origin` is an affine section.
+ - `lift` is an affine section (`Affine` map).
 """
 function project_2d(plane::Polyhedra.HyperPlane)
 	v = direction(plane)
@@ -2360,22 +2360,103 @@ end
 # 	return lift(int2)
 # end
 
+function _build_triangle3_decision_tree(
+	changes::Pair{<:AbstractString,<:AbstractString}...)
+	@inline to_idx(s::AbstractString) =
+		[ c == '+' ? 1 : c == '-' ? 2 : 0 for c in s ]
+	@inline function apply_perm3(i, j, s)
+		tmp=s[[i+1, mod1(i+2,3), mod1(i+3, 3)]]
+		(j == 0) ? tmp : map(x->mod(3-x,3), tmp)
+	end
+	@inline function find_perm3(s1, s2)
+		for i in 0:2, j in (0,3)
+			apply_perm3(i, j, s1) == s2 && return (i, j)
+		end
+		error("No permutation found transforming \"$s1\" to \"$s2\"")
+	end
+	tree = fill((0,0), 27)
+	for (s1, s2) in changes
+		(u1, u2) = to_idx(s1), to_idx(s2)
+		@assert s2 ∈ ("+--", "+0-", "+00", "0--", "---", "+++", "000") "bad output: $s2"
+		i = mod1( sum((9,3,1) .* u1), 27)
+		(j1, j2) = find_perm3(u1, u2)
+		@assert (s2[1] == '0') == (i ∈ (27, 4,8,10,12,20,24)) "$s2: $i"
+		println("[$i] $s1 ⇒ $s2 by ($j1, $j2)")
+		tree[i] = (j1, j2)
+	end
+	return tree
+end
+const _triangle3_decision_tree = _build_triangle3_decision_tree(
+	"000" => "000", "00+" => "+00", "00-" => "+00", 
+	"0+0" => "+00", "0++" => "0--", "0+-" => "+0-", 
+	"0-0" => "+00", "0-+" => "+0-", "0--" => "0--", 
+	"+00" => "+00", "+0+" => "0--", "+0-" => "+0-", 
+	"++0" => "0--", "+++" => "+++", "++-" => "+--", 
+	"+-0" => "+0-", "+-+" => "+--", "+--" => "+--", 
+	"-00" => "+00", "-0+" => "+0-", "-0-" => "0--", 
+	"-+0" => "+0-", "-++" => "+--", "-+-" => "+--", 
+	"--0" => "0--", "--+" => "+--", "---" => "---", 
+)
+==#
+
+
+struct TriangleIntersection{T}
+	# vf case: (v, 1 or 2, 0)
+	# ve case: (v, 1 or 2, edge)
+	# otherwise v == 0
+	# special: isempty() represented by v==-1
+	vertex::NTuple{3,Int}
+	# up to 6 new points:
+	# (new point, edge1 or 0, edge2 or 0)
+	newpoints::Vector{Tuple{Point{3,T},Int,Int}}
+	# cross case: one new edge max
+	# coplanar case: new edges are all implicit (they are segments of old
+	# edges); no need to fill this structure (hence (0,0))
+	edge::NTuple{2,Int}
+	@inline TriangleIntersection(v::NTuple{3,Int},
+		p,e) = new{coordtype(eltype(newpoints).parameters[1])}(v,p,e)
+	@inline TriangleIntersection{T}(v::NTuple{3,Int}, p,e) where{T} =
+		new{T}(v,p,e)
+end
+
+@inline (T::Type{<:TriangleIntersection})(::typeof(empty)) =
+	T((-1,0,0),[], (0,0))
+@inline isempty(t::TriangleIntersection) = (t.vertex[1] < 0)
+# vf case
+@inline (T::Type{<:TriangleIntersection})(n::Int, f::Int) =
+	T((n,f,0),[],(0,0))
+# ve case
+@inline (T::Type{<:TriangleIntersection})(n::Int, f::Int, e::Int) =
+	T((n,f,e),[],(0,0))
+# polygon case
+# which also includes the edge-edge “cross” case...
+@inline (T::Type{<:TriangleIntersection})(e::NTuple{2,Int}, point...) =
+	T((0,0,0), [point...], e)
+
+
 """
-    inter(triangle1, triangle2; ε)
+    inter(triangle1, triangle2; ε, indices, count)
 
 Returns a description of the intersection of two 3-dimensional triangles.
-The description is given as a pair `(newpoints, newedges)`, where:
- * `newpoints[i] = (coordinates, position1, position2)`
-  - `coordinates` is a `Point` object
-  - `position1` is the position relative to triangle 1, encoded as:
-    {1,2,3} for points on edges {(2,3),(3,1),(1,2)};
-    4 for point inside the face; 0 for point outside the face;
-  - `position2` is the same relative to triangle 2;
- * `newedges` is a list of added edges, represented as pairs (i,j),
-   where -1,-2,-3 represent the vertices of t1;
-   -4,-5,-6 the vertices of t2; and 1,2,3,... the new points.
+`indices` is the list of names of vertices of the two triangles
+(default `(1,2,3,4,5,6)`) and `count` the total number of points
+(default `6`).
+The description is given as a list with the following entries:
+ * `newpoints[i]` : list of new `Point` objects added after `count`;
+ * `edges`: list of edges between these points (as `(v1,v2)`);
+ * `edge_insert`: list of points to insert on edges (as `(point_index, v1,v2)`);
+ * `face1`: isolated point to add on face1 (at most 1) or 0;
+ * `face2`: same.
+
+FIXME: missing
+ - adjacent faces
+ - edge-inside-edge (Fig 3a: edge_edgeCollinear)
 """
-function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)#««
+function inter(t1::Triangle{3}, t2::Triangle{3};
+	idx1=(1,2,3), idx2=(4,5,6), count=6,
+	ε=_THICKNESS, common_edge=0)#««
+	# return types:
+	TI = TriangleIntersection{real_type(coordtype(t1),coordtype(t2))}
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
 	#   https://hal.inria.fr/inria-00072100/document]
 	# https://github.com/yusuketomoto/ofxCGAL/blob/master/libs/CGAL/include/CGAL/Triangle_3_Triangle_3_intersection.h
@@ -2383,89 +2464,59 @@ function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)#««
 	(p1, q1, r1) = vertices(t1)
 	(p2, q2, r2) = vertices(t2)
 
-	normal2 = cross(q2-p2, r2-p2)
+# 	normal2 = cross(q2-p2, r2-p2)
+	plane2 = (supporting_plane(t2))
+	normal2= direction(plane2)
 	dp1 = dot(normal2, p1-p2)
 	dq1 = dot(normal2, q1-p2)
 	dr1 = dot(normal2, r1-p2)
 	
-	# test for coplanarity
-	(dp1 == 0) && (dq1 == 0) && (dr1 == 0) && return inter_coplanar(t1, t2)
+	# TODO: early detection of adjacent faces
+	# permute both triangles as needed so that t2 separates p1 from q1, r1««
+	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
+	@inline sign2int(a) = (a > ε ? 1 : a < -ε ? 2 : 0)
+	@inline sign2int(a,b,c) = 9*sign2int(a)+3*sign2int(b)+sign2int(c)
+	sign1 = sign2int(dp1, dq1, dr1)
+# 	println("  sign1=$sign1")
+	if sign1 == 0
+		(coord, lift) = project_2d(plane2)
+		t1proj = Triangle(p1[coord], q1[coord], r1[coord])
+		t2proj = Triangle(p2[coord], q2[coord], r2[coord])
+		intproj = inter(t1proj, t2proj; ε, common_edge)
+		(newpoints2, newedges) = intproj
+		newpoints3 = map((point,p1,p2)->(lift(point),p1,p2), newpoints2)
+		# FIXME: lift polygon
+		return TI(empty)
+# 		return (newpoints3, newedges)
+	end
+	# frequent case: faces with a common edge (detected prior to entering
+	# this function) and not coplanar are simply adjacent faces.
+	(common_edge != 0) && return TI(empty)
+	# +++ or ---: no intersection
+	(sign1 == 13 || sign1 == 26) && return TI(empty)
 
+	decision_tree = (
+	(2, 0), (2, 3), (1, 0), (0, 3), (2, 3), (1, 3), (2, 0), (0, 0), (0, 0),
+	(1, 3), (0, 0), (2, 3), (0, 0), (2, 3), (1, 3), (1, 3), (0, 0), (0, 3),
+	(0, 3), (1, 0), (1, 0), (0, 3), (1, 0), (2, 0), (2, 0), (0, 0), (0, 0))
 	# the permutation applied to points is stored in an integer
 	# low part: {1,2,3} indicates which point is put first (3-cycle);
 	# high part: +{0,3} indicates whether to then transpose two last points
 	i1 = 1; i2 = 1
-	# rotate triangle 1 as needed so that t2 separates p1 from (q1, r1)««
-	if abs(dp1) ≤ ε
-		if abs(dq1) ≤ ε
-			if abs(dr1) ≤ ε return inter_coplanar(t1, t2) # 000
-			elseif dr1 > 0  i2+=3     # 00+: change to 00-
-			else            nothing   # 00-
-			end
-		elseif dq1 > 0
-		  if dr1 < -ε     i1+=1     # 0+-: put q1 first
-			else            i2+=3     # 0++ or 0+0: swap to 0-- or 0-0
-			end
-		else # dq1 < 0
-			if dr1 > ε  i1+=2     # 0-+: put r1 first
-			else            nothing   # 0-- or 0-0
-			end
-		end
-	elseif dp1 > 0
-		if abs(dq1) ≤ ε
-			if dr1 > ε  i1+=1; i2+=3 # +0+: put q first and swap
-			else            nothing   # +0- or +00: do nothing
-			end
-		elseif dq1 > 0
-			if dr1 > ε  return ((),()) # +++, no intersection
-			else        i1+= 2; i2+= 3 # ++- or ++0: put r1 first; swap q2, r2
-			end
-		else
-			if dr1 > ε i1+=1; i2+= 3  # +-+: q1 first, swap q2, r2
-			else                      # +-- or +-0: do nothing
-			end
-		end
-	else
-	  if abs(dq1) ≤ ε
-			if dr1 > ε  i1+= 2 # -0+: put r first
-			else        i1+= 1 # -0- or -00: put q first
-			end
-		elseif dq1 < 0
-			if dr1 < -ε return ((),()) # ---, no intersection
-			else        i1+= 2         # --+ or --0: r1 first
-			end
-		else
-			if dr1 < 0 i1+= 1         # -+-: q1 first
-			else       i2+= 3         # -++: swap p2, q2
-			end
-		end
-	end #»»
-	# likewise for second triangle  ««
+	@inbounds (i1, i2) = (1,1) .+ decision_tree[sign1]
+
+	# likewise for second triangle
 	normal1 = cross(q1-p1, r1-p1)
 	dp2 = dot(normal1, p2-p1)
 	dq2 = dot(normal1, q2-p1)
 	dr2 = dot(normal1, r2-p1)
-	if dp2 > 0
-		if dq2 > 0
-			if dr2 > 0 return ((),()) # +++, no intersection
-			else i2+= 2; i1+= 3       # ++-: put r2 first; swap q1, r1
-			end
-		else
-			if dr2 > 0 i2+=1; i1+= 3  # +-+: q2 first, swap q1, r1
-			else                      # +--: do nothing
-			end
-		end
-	else
-		if dq2 < 0
-			if dr2 < 0 return ((),()) # ---, no intersection
-			else       i2+= 2         # --+: r2 first
-			end
-		else
-			if dr2 < 0 i2+= 1         # -+-: q2 first
-			else       i1+= 3         # -++: swap p1, q1
-			end
-		end
-	end #»»
+	sign2 = sign2int(dp2, dq2, dr2)
+# 	println("  sign2=$sign2")
+	
+	@assert sign2 ≠ 0 # coplanarity has already been detected by sign1
+	(sign2 == 13 || sign2 == 26) && return TI(empty)
+	@inbounds (i2, i1) = (i2, i1) .+ decision_tree[sign2] #»»
+
 	# apply both permutations ««
 	perm_table = ((1,2,3),(2,3,1),(3,1,2),(1,3,2),(2,1,3),(3,2,1))
 	@inbounds σ1 = perm_table[i1]
@@ -2504,90 +2555,79 @@ function inter(t1::Triangle{3}, t2::Triangle{3}; ε=_THICKNESS)#««
 	@assert zb2 ≤ 0
 	@assert zc2 ≤ 0
 	# »»
+	# two cases where we know that the intersection is empty:
+	# db1b2 is a determinant comparing the positions of b1 and b2
+	a1a2b1 = cross(a2-a1, b1-a1)
+	db1b2 = dot(a1a2b1, b2-a1)
+# 	println("  db1b2=$db1b2")
+	db1b2 < -ε && return TI(empty)
+
+	a1a2c1 = cross(a2-a1, c1-a1)
+	dc1c2 = dot(a1a2c1, c2-a1)
+# 	println("  dc1c2=$dc1c2")
+	dc1c2 > ε && return TI(empty)
+
 	# coordinates of four intersection points bb1, cc1, bb2, cc2
 	# (all four are aligned on the intersection of the two planes)
 	@inline barycenter(p1, p2, λ) = p2 + λ*(p1-p2) # λp1+(1-λ)p2
-	bb1 = barycenter(b1, a1, za1/(za1-zb1))
-	cc1 = barycenter(c1, a1, za1/(za1-zc1))
-	bb2 = barycenter(b2, a2, za2/(za2-zb2))
-	cc2 = barycenter(c2, a2, za2/(za2-zc2))
-	@assert abs(dot(normal2, bb1-a2)) ≤ 1e-10
-	@assert abs(dot(normal2, cc1-a2)) ≤ 1e-10
-	@assert abs(dot(normal1, bb2-a1)) ≤ 1e-10
-	@assert abs(dot(normal1, cc2-a1)) ≤ 1e-10
+	@inline bb1() = barycenter(b1, a1, za1/(za1-zb1))
+	@inline cc1() = barycenter(c1, a1, za1/(za1-zc1))
+	@inline bb2() = barycenter(b2, a2, za2/(za2-zb2))
+	@inline cc2() = barycenter(c2, a2, za2/(za2-zc2))
 
-	# relative position of these points on the line:
-	# project on best coordinate, i.e. largest abs. value of direction
-	# and flip sign if needed so that bb1 is before cc1:
-	v = cc1 - bb1
-	e = abs(v[1]) > abs(v[2]) ? (abs(v[1]) > abs(v[3]) ? 1 : 3) :
-	    abs(v[2]) > abs(v[3]) ? 2 : 3
-	# and map b1 to 0, c1 to 1:
-	α = 1/(cc1[e]-bb1[e])
-	xb2 = α*(bb2[e]-bb1[e]); xc2 = α*(cc2[e]-bb1[e])
+	# give symbolic names to what we return...
+	inside=0; a1b1=σ1[3]; a1c1=σ1[2]; a2b2=σ2[3]; a2c2=σ2[2]
+	@inline B1(t) = (bb1(), a1b1, t)
+	@inline B2(t) = (bb2(), t, a2b2)
+	@inline C1(t) = (cc1(), a1c1, t)
+	@inline C2(t) = (cc2(), t, a2c2)
 
-	# we know _a priori_ that the ordering of (bb1, cc1) is opposed to that
-	# of (bb2, cc2):
-	@assert xc2 ≤ xb2
-	@inline aligned(p,q,r) = norm(cross(q-p, r-p)) < ε
-	@inline monotonic(p,q,r) = dot(p-q, r-q) < 0
-	@inline bb1() = barycenter(cc2, bb2, -xb2/(xc2-xb2))
-	@inline cc1() = barycenter(cc2, bb2, (1-xb2)/(xc2-xb2))
-
-	if xc2 < 0-ε
-		if xb2 < 0-ε return ((),())
-		elseif xb2 ≤ 0+ε # bb2 ∈ edge [a1, b1]
-			return (
-				((cc2, 0, σ2[2]), (bb2, σ1[3], σ2[3])),
-				((1,2),))
-		elseif xb2 < 1-ε # [cc2, bb2] intersects [a1, b1]
-			return (
-				((cc2, 0, σ2[2]), (bb1(), σ1[3], 4), (bb2, 4, σ2[3])),
-				((1,2), (2,3),))
-		elseif xb2 ≤ 1+ε # bb2 ∈ edge [a1, c1]
-			return (
-				((cc2, 0, σ2[2]), (bb1(), σ1[3], 4), (bb2, 2, σ2[3])),
-				((1,2), (2,3),))
-		else               # [cc2, bb2] intersects [a1, b1] and [a1, c1]
-			return (
-				((bb1(), σ1[3], 4), (cc1(), σ1[2], 4)),
-				((1,2),))
-		end
-	elseif xc2 ≤ 0+ε   # cc2 ∈ edge [a1, b1]...
-		if xb2 < 1-ε     # ... and is the single intersection point
-			return (
-				((cc2, σ1[3], σ2[2]), (bb2, 4, σ2[3])),
-				((1,2),))
-		elseif xb2 ≤ 1+ε # ... and bb2 ∈ [a1, c1]
-			return (
-				((cc2, σ1[3], σ2[2]), (bb2, σ1[2], σ2[3])),
-				((1,2),))
-		else               # ... and [cc2, bb2] intersects [a1, c1]
-			return (
-				((cc2, σ1[3], σ2[2]), (cc1(), σ1[2], 4), (bb2, 0, σ2[3])),
-				((1,2),(2,3),))
-		end
-	elseif xc2 < 1-ε
-		if xb2 < 1-ε     # [cc2, bb2] is an inner segment of triangle t1
-			return (
-				((cc2, 4, σ2[2]), (bb2, 4, σ2[2])),
-				((1,2),))
-		elseif xb2 ≤ 1+ε # bb2 ∈ edge [a1, c1]
-			return (
-				((cc2, 4, σ2[2]), (bb2, σ1[2], σ2[3])),
-				((1,2),))
-		else               # [cc2, bb2] intersects [a1, c1]
-			return (
-				((cc2, 4, σ2[2]), (cc1(), σ1[2], 4), (bb2, 0, σ2[3])),
-				((1,2),(2,3),))
-		end
-	elseif xc2 ≤ 1+ε   # cc2 ∈ edge [a1, c1]
-		return (
-			((cc2, σ1[2], σ2[2]), (bb2, 0, σ2[3])),
-			((1,2),(2,3),))
-	else # 1 < xc2 ≤ xb2, no intersection
-		return ((),())
+	if sign1 ∈ (4,8,10,12,20,24) # "0--": vertex a1 touches triangle t2
+		println("dc1c2=$dc1c2; db1b2=$db1b2 $sign1")
+		# we know that vertex a1 touches triangle t2, it remains to see if
+		# this is on an edge
+		return TI(idx1[σ1[1]], 2, db1b2 ≤ ε ? a2c2 : dc1c2 ≥- ε ? a2b2 : 0)
 	end
+	if sign2 ∈ (4,8,10,12,20,24) # same: a2 touches triangle t1
+		# TODO: this should require no more computations...
+	end
+	# TODO: +00 cases (3a or 3b in https://www.polibits.gelbukh.com/2013_48/Triangle-Triangle%20Intersection%20Determination%20and%20Classification%20to%20Support%20Qualitative%20Spatial%20Reasoning.pdf)
+	db1c2 = dot(a1a2b1, c2-a1)
+	if db1c2 < -ε
+		db1b2 ≤ ε && return TI((0,0), B2(a1b1))
+		dc1b2 = dot(a1a2c1, b2-a1)
+		dc1b2 <-ε && return TI((count,count+1), B1(inside), B2(inside))
+		dc1b2 ≤ ε && return TI((count,count+1), B1(inside), B2(a1c1))
+		             return TI((count,count+1), B1(inside), C1(inside))
+	elseif db1c2 ≤ ε # cc2 ∈ edge [a1,b1]
+		dc1b2 = dot(a1a2c1, b2-a1)
+		dc1b2 <-ε && return TI((count,count+1), C2(a1b1), B2(inside))
+		dc1b2 ≤ ε && return TI((count,count+1), C2(a1b1), B2(a1c1))
+		             return TI((count,count+1), C2(a1b1), C1(inside))
+	elseif dc1c2 <-ε
+		dc1b2 = dot(a1a2c1, b2-a1)
+		dc1b2 <-ε && return TI((count,count+1), C2(inside), B2(inside))
+		dc1b2 ≤ ε && return TI((count,count+1), C2(inside), B2(a1c1))
+		             return TI((count,count+1), C2(inside), C1(inside))
+	end
+	@assert dc1c2 ≤ ε # empty case was already detected above
+	return TI((0,0), C2(a1c1)) # cc2 ∈ edge [a1,c1]
+end#»»
+@inline det(t::Triangle{2}) =
+	det(vertices(t)[2]-vertices(t)[1], vertices(t)[3]-vertices(t)[1])
+
+function inter(t1::Triangle{2}, t2::Triangle{2};
+	ε=_THICKNESS, d2=det(t2), common_edge = 0)#««
+	(p1, q1, r1) = vertices(t1)
+	(p2, q2, r2) = vertices(t2)
+	u2 = q2-p2; v2=r2-p2
+
+	# FIXME: this is already computed in inter(::Triangle{3}),
+	# as one of the components of the `normal2` vector...
+	# and, since we projected on the “right” coordinates, we know that area2>0
+	@assert d2 == det(t2)
+	@assert d2 == det(u2, v2)
+	@assert d2 > ε
 end#»»
 
 
