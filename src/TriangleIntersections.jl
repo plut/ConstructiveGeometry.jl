@@ -70,7 +70,7 @@ macro tree27(vars,args...)#««2
 		haskey(expr, "$d$e$f") && return (:($ij=(1,4)),expr["$d$e$f"]...)
 		haskey(expr, "$e$f$d") && return (:($ij=(2,4)),expr["$e$f$d"]...)
 		haskey(expr, "$f$d$e") && return (:($ij=(3,4)),expr["$f$d$e"]...)
-		(:(error("case not implemented: "*$s)),)
+		() # :(error("case not implemented: "*$s)),)
 	end
 	build(i,f,p) = quote
 		if     $(vars[i]) > $ε; $(f(p*'+')...)
@@ -88,14 +88,34 @@ macro cycle3(i,vars)#««2
 	n = length(vars.args)
 	@assert n % 3 == 0
 	v1 = esc(vars)
-	v2 = Expr(:tuple,
-		[esc(vars.args[i+1-3*(i%3==0)]) for i in 1:length(vars.args)]...)
-	v3 = Expr(:tuple,
-		[esc(vars.args[i+2-3*(i%3!=1)]) for i in 1:length(vars.args)]...)
+	v2 = Expr(:tuple, [esc(vars.args[i+1-3*(i%3==0)]) for i in 1:n]...)
+	v3 = Expr(:tuple, [esc(vars.args[i+2-3*(i%3!=1)]) for i in 1:n]...)
 	quote
 		@assert $i ∈ (1,2,3)
 		if $i == 2; $v1 = $v2
 		elseif $i == 3; $v1 = $v3
+		end
+	end
+end
+macro permute3(i,vars)#««2
+	i = esc(i)
+	@assert Meta.isexpr(vars, :tuple)
+	n = length(vars.args)
+	@assert n % 3 == 0
+	v1 = esc(vars)
+	@inline permute(f) = Expr(:tuple, [esc(vars.args[f(i)]) for i in 1:n]...)
+	v2 = permute(i->i+1-3*(i%3==0))
+	v3 = permute(i->i+2-3*(i%3!=1))
+	v4 = permute(i->i+(i%3==2)-(i%3==0))
+	v5 = permute(i->i+(i%3==1)-(i%3==2))
+	v6 = permute(i->i-2(i%3==0)+2(i%3==1))
+	quote
+		@assert $i ∈ (1,2,3,4,5,6)
+		if $i == 2; $v1 = $v2
+		elseif $i == 3; $v1 = $v3
+		elseif $i == 4; $v1 = $v4
+		elseif $i == 5; $v1 = $v5
+		elseif $i == 6; $v1 = $v6
 		end
 	end
 end
@@ -114,7 +134,8 @@ Returns an `IntersectionType` structure, encoded in the following way:
 """
 function inter2_segment_triangle((u1,v1),(p2,q2,r2),i2=1;
 	dpqr = missing, ε=_THICKNESS)
-	(dpqr isa Missing) && (dpqr = det2(p2,q2,r2)) # FIXME, this causes 2 compilations...
+	(dpqr isa Missing) && (dpqr = det2(p2,q2,r2)) # FIXME, make something cleaner
+	@debug "segment($u1,$v1) - triangle ($p2,$q2,$r2) d=$dpqr"
 	IT=IntersectionType{2,typeof(u1)}
 	# compute position of u:
 	dpq_u = det2(p2,q2,u1)
@@ -346,7 +367,6 @@ end
 # 	@assert d2 > ε
 # end#»»
 
-end # module
 # 3d intersections««1
 # basic geometry stuff««2
 
@@ -385,81 +405,102 @@ end # module
     SA[plus2mod3(k), plus1mod3(k)]
 	return (p, k)
 end
+
 # @inline Base.getindex(p::Point, i...) = getindex(coordinates(p), i...)
+@inline permute3(i, (p,q,r)) =
+	i==1 ? (p,q,r) : i==2 ? (q,r,p) : i==3 ? (r,p,q) :
+	i==4 ? (p,r,q) : i==5 ? (q,p,r) :        (r,q,p)
 
-# # Permuting a triangle
-# @inline permute3(i, (p,q,r)) =
-# 	i==1 ? (p,q,r) : i==2 ? (q,r,p) : i==3 ? (r,p,q) :
-# 	i==4 ? (p,r,q) : i==5 ? (q,p,r) :        (r,q,p)
 
-# TriangleIntersection: structure containing intersection info ««2
-"""
-    struct TriangleIntersection
-
-Describes the intersection of two 3d triangles, in a way which is
-independent from permutations of both triangles.
-Possibilities:
- - empty: indicated by `vertex[1] < 0`, tested by `isempty()`;
- - vertex-adjacent and edge-adjacent: represented as empty;
- - vertex-in-edge: `vertex` = (v, e1, e2);
- - vertex-in-face: `vertex` = (v, face, 0)
- (this is the single case depending on permutation, and only of faces);
- - any new points are represented with the info about the edge(s)
- to which they belong: (e1, e2) or (0,0) for interior points;
- - if a new edge (i.e. not a segment of an existing edge) is created,
- it is given as (e1, e2), indices of two points.
-"""
-struct TriangleIntersection{T} # T is a point type
-	face_insert::NTuple{2,Int} # at most 1 point in 1 face
-	edge_insert::Vector{NTuple{3,Int}}
-	new_edge::NTuple{2,Int} # at most 1 new edge (not part of previous edge)
-	newpoints::Vector{T} # added new points with coordinates
-	@inline TriangleIntersection{T}(f::NTuple{2,Int},
-		e::AbstractVector, ne::NTuple{2,Int}, np::AbstractVector) where{T} =
-		new{T}(f, e, ne, np)
+# Projector ««2
+struct Projector{T}
+	dir::Int8
+	lift::NTuple{3,T}
+end
+struct FormalInv{X}
+	x::X
+end
+@inline function Projector(direction::AbstractVector) # no lift
+	@inbounds u1 = direction[1]
+	@inbounds u2 = direction[2]
+	@inbounds u3 = direction[3]
+  @inbounds a1 = abs(u1)
+	@inbounds a2 = abs(u2)
+	@inbounds a3 = abs(u3)
+	P = Projector{eltype(direction)}
+	if a1 < a2
+		if a2 < a3 @goto max3; end
+		u2 > 0 && return P( 2, (0,0,0))
+		          return P(-2, (0,0,0))
+	elseif a3 < a3
+		@label max3
+		# (x,y) lifts to (y,x,z) st ay+bx+cz=d i.e. z=(d-bx-ay)/c
+		u3 > 0 && return P( 3, (0,0,0))
+		          return P(-3, (0,0,0))
+	else # max1
+		# (x,y) lifts to (z,x,y) st az+bx+cy=d i.e. z=(d-bx-cy)/a
+		u1 > 0 && return P( 1, (0,0,0))
+		          return P(-1, (0,0,0))
+	end
 end
 
-@inline (T::Type{<:TriangleIntersection})(::typeof(empty)) =
-	T((-1,-1), [], (0,0), [])
-@inline Base.isempty(t::TriangleIntersection) = t.face_insert[1] < 0
-# vf case
-@inline (T::Type{<:TriangleIntersection})(v::Int, f::Int) =
-	T((v,f), [], (0,0), [])
-# ve case
-@inline (T::Type{<:TriangleIntersection})(v::Int, e::NTuple{2,Int}) =
-	T((0,0), [(v,e[1],e[2])], (0,0), [])
-# polygon constructor:
-# start = number of first point
-# edge = new edge added (if any)
-# points: of the form (point-object => ((edge1), (edge2))),
-# with edge2 == (0,0) if point is on a single edge
-@inline _insert_edges(i, e1, e2) =
-	iszero(e2[1]) ? [(i, e1...)] : [(i, e1...), (i, e2...)]
-@inline function (T::Type{<:TriangleIntersection})(
-		start::Int, edge::NTuple{2,Int}, points::Pair...)
-	inserts = vcat((_insert_edges(i, pt[2]...)
-		for (i,pt) in zip(start:start+5, points))...)
-	return T((0,0), inserts, edge, [ first(p) for p in points ])
+@inline function Projector(direction::AbstractVector, point)
+	@inbounds u1 = direction[1]
+	@inbounds u2 = direction[2]
+	@inbounds u3 = direction[3]
+  @inbounds a1 = abs(u1)
+	@inbounds a2 = abs(u2)
+	@inbounds a3 = abs(u3)
+	d = dot(direction, point)
+	@debug "a1,a2,a3 = $a1,$a2,$a3"
+	P = Projector{eltype(direction)}
+	if a1 < a2
+		if a2 < a3 @goto max3; end
+		# (x,y) lifts to (y,z,x) st ay+bz+cx=d, ie z=(d-cx-ay)/b
+		u2 > 0 && return P( 2, (-u3/u2, -u1/u2, d/u2))
+		# (x,y) lifts to (x,z,y) st ax+bz+cy=d, ie z=(d-ax-cy)/b
+		          return P(-2, (-u1/u2, -u3/u2, d/u2))
+	elseif a1 < a3
+		@label max3
+		@debug "we are in @max3"
+		# (x,y) lifts to (y,x,z) st ay+bx+cz=d i.e. z=(d-bx-ay)/c
+		u3 > 0 && return P( 3, (-u1/u3, -u2/u3, d/u3))
+		          return P(-3, (-u2/u3, -u1/u3, d/u3))
+	else # max1
+		# (x,y) lifts to (z,x,y) st az+bx+cy=d i.e. z=(d-bx-cy)/a
+		u1 > 0 && return P( 1, (-u2/u1, -u3/u1, d/u1))
+		          return P(-1, (-u3/u1, -u2/u1, d/u1))
+	end
 end
-# which also includes the edge-edge “cross” case, and planar cases:
-# @inline (T::Type{<:TriangleIntersection})(e::NTuple{2,Int},
-# 	start, points::Pair...) =
-# 	T(false, (0,0),
-# 	# new_edges:
-# 	[(i, last(p)[1]..., last(p)[2]...) for (i,p) in zip(start:start+5, point)],
-# 	e, collect(first.(point)))
+@inline function lift(p::Projector, u)
+	z = p.lift[1]*u[1]+p.lift[2]*u[2]+p.lift[3]
+	p.dir == 1 && return (z, u[1], u[2])
+	p.dir == 2 && return (u[2], z, u[1])
+	p.dir == 3 && return (u[1], u[2], z)
+	p.dir ==-1 && return (z, u[2], u[1])
+	p.dir ==-2 && return (u[1], z, u[2])
+	p.dir ==-3 && return (u[2], u[1], z)
+	@assert false
+end
+@inline function project(p::Projector, u)
+	p.dir == 1 && return (u[2], u[3])
+	p.dir == 2 && return (u[3], u[1])
+	p.dir == 3 && return (u[1], u[2])
+	p.dir ==-1 && return (u[3], u[2])
+	p.dir ==-2 && return (u[1], u[3])
+	p.dir ==-3 && return (u[2], u[1])
+	@assert false
+end
+# syntactic sugar: p(u) and inv(p)(u)
+@inline (p::Projector)(u) = project(p,u)
+Base.inv(p::Projector) = FormalInv{typeof(p)}(p)
+@inline (l::FormalInv{<:Projector})(u) = lift(l.x, u)
 
-# SegmentTriangleInter««2
-# for uv ∩ pqr = [ij] (in same order):
-#  each point is either: a segment extremity 12 / interior0
-#  a triangle vertex 123/edge 456/interior 0 (not exterior)
-#  so 21^2 possibilities (representable on 4 octets)
-#  in segment: inter = ∅, {u}, [u?], [uv], {?}, [??], [?v], {v} (8 cases)
-#  i is either a vertex (123), an edge, or inner
-#  j: same
-#
-#  if i, j == same vertex: equal
-#  if i, j == same edge: 
+@inline lift(p::Projector, u::AbstractVector) = [lift(p,(u...,))...]
+@inline project(p::Projector, u::AbstractVector) = [project(p,(u...,))...]
+@inline lift(p::Projector, u::StaticVector{2}) = SVector(lift(p,(u...,)))
+@inline project(p::Projector, u::StaticVector{3}) = SVector(project(p,(u...,)))
+
 # inter(triangle1, triangle2) ««2
 """
     inter(triangle1, triangle2; ε, indices, count)
@@ -475,19 +516,16 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=_THICKNESS)
 	#   https://hal.inria.fr/inria-00072100/document]
 	# https://github.com/yusuketomoto/ofxCGAL/blob/master/libs/CGAL/include/CGAL/Triangle_3_Triangle_3_intersection.h
 	# https://fossies.org/linux/CGAL/include/CGAL/Intersections_3/internal/Triangle_3_Triangle_3_do_intersect.h
-	(p1, q1, r1) = vertices(t1)
-	(p2, q2, r2) = vertices(t2)
 	@debug "computing triangle-triangle intersection"
 
 	# return types:
 	IT = IntersectionType{6,typeof(p1)}
 
-	normal2= normalize(cross(q2-p2, r2-p2))
+	normal2= (cross(q2-p2, r2-p2))
 
 	dp1 = dot(normal2, p1-p2)
 	dq1 = dot(normal2, q1-p2)
 	dr1 = dot(normal2, r1-p2)
-# 	println("dp1 dq1 dr1 = $dp1 $dq1 $dr1")
 
 	# filter for adjacent faces: these have opposed edges (detected with
 	# vertex labels) and are not collinear
@@ -501,9 +539,7 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=_THICKNESS)
 # 	end
 
 	@inline _touch1(i1,i2) =
-		inter_touch1(permute3(i1, (p1,q1,r1)), i1,
-		             permute3(i2, (p2,q2,r2)), i2, 2,
-								 (i2 ≤ 3) ? normal2 : -normal2, ε)
+		inter_touch1(permute3(i1, (p1,q1,r1)), i1, (p2,q2,r2), normal2, ε)
 	@inline _arrow1(i1,i2) =
 		inter_arrow1(permute3(i1, (p1,q1,r1)), i1,
 		             permute3(i2, (p2,q2,r2)), i2,
@@ -557,87 +593,79 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=_THICKNESS)
 	@debug "now i1,i2 = $((i1,i2))"
 
 	# apply both permutations ««
-	@inbounds (a1, b1, c1) = permute3(i1, (p1,q1,r1))
-	@inbounds (a2, b2, c2) = permute3(i2, (p2,q2,r2))
-	# give symbolic names to what we return...
-	(la1,lb1,lc1)= i1==1 ? (1,2,3) : i1==2 ? (2,3,1) : (3,1,2)
-	(la2,lb2,lc2)= i2==1 ? (1,2,3) : i2==2 ? (2,3,1) : (3,1,2)
-	# re-use already computed determinants as z-coordinates:
-	@inbounds (za1, zb1, zc1) = permute3(i1, (dp1, dq1, dr1))
-	@inbounds (za2, zb2, zc2) = permute3(i2, (dp2, dq2, dr2))
+	(lp1,lq1,lr1) = (1,2,3)
+	(lp2,lq2,lr2) = (1,2,3)
+	@permute3 i1 (p1,q1,r1, dp1,dq1,dr1, lp1,lq1,lr1)
+	@permute3 i2 (p2,q2,r2, dp2,dq2,dr2, lp2,lq2,lr2)
 	# 1,2,3 represent even permutations, and 4,5,6 odd ones:
-	(i1 > 3) && (normal1 = -normal1; za2 = -za2; zb2 = -zb2; zc2 = -zc2)
-	(i2 > 3) && (normal2 = -normal2; za1 = -za1; zb1 = -zb1; zc1 = -zc1)
+	(i1 > 3) && (normal1 = -normal1; dp2 = -dp2; dq2 = -dq2; dr2 = -dr2)
+	(i2 > 3) && (normal2 = -normal2; dp1 = -dp1; dq1 = -dq1; dr1 = -dr1)
 
 	# a laundry list of assertions to check that we are in a standard
 	# configuration:
-	@assert normal1 ≈ cross(b1-a1, c1-a1)
-	@assert normal2 ≈ cross(b2-a2, c2-a2)
-	@assert dot(normal2, a1-a2) ≈ za1
-	@assert dot(normal2, b1-a2) ≈ zb1
-	@assert dot(normal2, c1-a2) ≈ zc1
-	@assert dot(normal1, a2-a1) ≈ za2
-	@assert dot(normal1, b2-a1) ≈ zb2
-	@assert dot(normal1, c2-a1) ≈ zc2
-	@assert za1 ≥ 0; @assert zb1 ≤ 0; @assert zc1 ≤ 0
-	@assert za2 ≥ 0; @assert zb2 ≤ 0; @assert zc2 ≤ 0
+	@assert normal1 ≈ cross(q1-p1, r1-p1)
+	@assert normal2 ≈ cross(q2-p2, r2-p2)
+	@assert dot(normal2, p1-p2) ≈ dp1
+	@assert dot(normal2, q1-p2) ≈ dq1
+	@assert dot(normal2, r1-p2) ≈ dr1
+	@assert dot(normal1, p2-p1) ≈ dp2
+	@assert dot(normal1, q2-p1) ≈ dq2
+	@assert dot(normal1, r2-p1) ≈ dr2
+	@assert dp1 ≥ 0; @assert dq1 ≤ 0; @assert dr1 ≤ 0
+	@assert dp2 ≥ 0; @assert dq2 ≤ 0; @assert dr2 ≤ 0
 	# »»
 	# two cases where we know that the intersection is empty:
-	# db1b2 is a determinant comparing the positions of b1 and b2
-	a1a2b1 = cross(a2-a1, b1-a1)
-	db1b2 = dot(a1a2b1, b2-a1)
-	@debug "db1b2=$db1b2"
-	db1b2 < -ε && return IT()
+	# dq1q2 is a determinant comparing the positions of q1 and q2
+	p1p2q1 = cross(p2-p1, q1-p1)
+	dq1q2 = dot(p1p2q1, q2-p1)
+	@debug "dq1q2=$dq1q2"
+	dq1q2 < -ε && return IT()
 
-	a1a2c1 = cross(a2-a1, c1-a1)
-	dc1c2 = dot(a1a2c1, c2-a1)
-	@debug "dc1c2=$dc1c2"
-	dc1c2 > ε && return IT()
+	p1p2r1 = cross(p2-p1, r1-p1)
+	dr1r2 = dot(p1p2r1, r2-p1)
+	@debug "dr1r2=$dr1r2"
+	dr1r2 > ε && return IT()
 
-	# coordinates of four intersection points bb1, cc1, bb2, cc2
-	# (all four are aligned on the intersection of the two planes)
-	@inline bb1() = barycenter(b1, a1, za1/(za1-zb1))
-	@inline cc1() = barycenter(c1, a1, za1/(za1-zc1))
-	@inline bb2() = barycenter(b2, a2, za2/(za2-zb2))
-	@inline cc2() = barycenter(c2, a2, za2/(za2-zc2))
+	P1Q1=lr1; P1R1=lq1; P2Q2=lr2; P2R2=lq2
+	@inline Q1(x)= barycenter(q1, p1, dp1/(dp1-dq1))=>(P1Q1,x)
+	@inline R1(x)= barycenter(r1, p1, dp1/(dp1-dr1))=>(P1R1,x)
+	@inline Q2(x)= barycenter(q2, p2, dp2/(dp2-dq2))=>(x,P2Q2)
+	@inline R2(x)= barycenter(r2, p2, dp2/(dp2-dr2))=>(x,P2R2)
 
-	@inline segment(p1,p2) = TI(count+1, (count+1, count+2), p1, p2)
-	@inline B1(t1,t2) = bb1() => ((la1, lb1), (t1,t2))
-	@inline B2(t1,t2) = bb2() => ((la2, lb2), (t1,t2))
-	@inline C1(t1,t2) = cc1() => ((la1, lc1), (t1,t2))
-	@inline C2(t1,t2) = cc2() => ((la2, lc2), (t1,t2))
-
-	# TODO: +00 cases (3a or 3b in https://www.polibits.gelbukh.com/2013_48/Triangle-Triangle%20Intersection%20Determination%20and%20Classification%20to%20Support%20Qualitative%20Spatial%20Reasoning.pdf)
-	db1c2 = dot(a1a2b1, c2-a1)
-	@debug "db1c2 = $db1c2"
-	if db1c2 < -ε
-		db1b2 ≤ ε && return single(B2(la1,lb1))
-		dc1b2 = dot(a1a2c1, b2-a1)
-		dc1b2 <-ε && return segment(B1(0,0), B2(0,0))
-		dc1b2 ≤ ε && return segment(B1(0,0), B2(la1,lc1))
-		             return segment(B1(0,0), C1(0,0))
-	elseif db1c2 ≤ ε # cc2 ∈ edge [a1,b1]
-		dc1b2 = dot(a1a2c1, b2-a1)
-		dc1b2 <-ε && return segment(C2(la1,lb1), B2(0,0))
-		dc1b2 ≤ ε && return segment(C2(la1,lb1), B2(la1,lc1))
-		             return segment(C2(la1,lb1), C1(0,0))
-	elseif dc1c2 <-ε
-		dc1b2 = dot(a1a2c1, b2-a1)
-		dc1b2 <-ε && return segment(C2(0,0), B2(0,0))
-		dc1b2 ≤ ε && return segment(C2(0,0), B2(la1,lc1))
-		             return segment(C2(0,0), C1(0,0))
+	# TODO: +00 cases (3a or 3b in https://www.polibits.gelbukh.com/2013_48/Triangle-Triangle%20Intersection%20Determination%20and%20Rlassification%20to%20Support%20Qualitative%20Spatial%20Reasoning.pdf)
+	dq1r2 = dot(p1p2q1, r2-p1)
+	@debug "dq1r2 = $dq1r2"
+	if dq1r2 < -ε
+		dq1q2 ≤ ε && return IT(Q2(P1Q1))
+		dr1q2 = dot(p1p2r1, q2-p1)
+		dr1q2 <-ε && return IT(Q1(0),Q2(0))
+		dr1q2 ≤ ε && return IT(Q1(0),Q2(P1R1))
+		             return IT(Q1(0),R1(0))
+	elseif dq1r2 ≤ ε # cc2 ∈ edge [a1,q1]
+		@assert collinear3(p1,R2(0)[1],q1)
+		@assert monotonic(p1,R2(0)[1],q1)
+		dr1q2 = dot(p1p2r1, q2-p1)
+		dr1q2 <-ε && return IT(R2(P1Q1),Q2(0))
+		dr1q2 ≤ ε && return IT(R2(P1Q1),Q2(P1R1))
+		             return IT(R2(P1Q1),R1(0))
+	elseif dr1r2 <-ε
+		dr1q2 = dot(p1p2r1, q2-p1)
+		dr1q2 <-ε && return IT(R2(0),Q2(0))
+		dr1q2 ≤ ε && return IT(R2(0),Q2(P1R1))
+		             return IT(R2(0),R1(0))
 	end
-	@assert dc1c2 ≤ ε # empty case was already detected above
-	return single(C2(a1c1)) # cc2 ∈ edge [a1,c1]
+	@assert dr1r2 ≤ ε # empty case was already detected above
+	return IT(R2(P1R1)) # cc2 ∈ edge [a1,r1]
 end
 # inter_touch1««2
 """
     inter_touch1
 
 Returns intersection in the case where triangle `t1` touches plane of `t2`
-at the single point `p1` (oriented so that q1, r1 are *below* the plane).
+at the single point `p1`
+# (oriented so that q1, r1 are *below* the plane).
 """
-function inter_touch1((p1,q1,r1), i1, (p2,q2,r2), i2, face, normal2, ε)
+function inter_touch1((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	# Possible cases here:
 	# - nothing
 	# - vertex-vertex (return empty)
@@ -645,50 +673,45 @@ function inter_touch1((p1,q1,r1), i1, (p2,q2,r2), i2, face, normal2, ε)
 	# - vertex1 inside face2
 	# To decide: project everything on the plane of face2
 	# and compute three 2d determinants
-	(coord, e) = project_2d(normal2, Val(true))
+	proj = Projector(normal2)
 	@debug "entering inter_touch1 $i1, $i2"
-# 	println("point $p1 touches other plane:")
-# 	println("tri2 = ($p2,$q2,$r2) $idx2")
-# 	println("tri1 = ($p1,$q1,$r1) $idx1")
 	IT=IntersectionType{6,typeof(p1)}
 
-	a1 = p1[coord]
-	a2 = p2[coord]
-	b2 = q2[coord]
-	c2 = r2[coord]
-	dabc = abs(normal2[e])
-	@assert cross(b2-a2,c2-a2) ≈ dabc
+	a1 = proj(p1)
+	(a2,b2,c2) = proj.((p2,q2,r2))
+	dabc = abs(normal2[abs(proj.dir)])
+	@assert det2(a2,b2,c2) ≈ dabc
+
 	dab = cross(b2-a2, a1-a2)
 	dab < -ε && return IT()
 	dbc = cross(c2-b2, a1-b2)
 	dbc < -ε && return IT()
 	dca = dabc - dab - dbc
-# 	println("proj = ($coord, $e) from $normal2")
-# 	println("projections: $p1 => $a1 vs. ($a2, $b2, $c2)")
-# 	println("determinants: $dabc =  $dab, $dbc, $dca")
-	dca < -ε && return IT()
 	@assert abs(dca-cross(a2-c2,a1-c2)) < 1e-9
+	dca < -ε && return IT()
+
 	@debug "point $a1 in ($a2,$b2,$c2): $dab, $dbc, $dca"
 	if dab ≤ ε # it cannot be <-ε, so a1 ∈ [a2,b2]
-		if dbc ≤ ε # a1 == b2
-			@assert norm(a1-b2) ≤ ε
-			return IT(a1 => (i1+3, plus1mod3(i2, 3)))
+		if dbc ≤ ε
+			@assert samepoint(a1,b2)
+			return IT(p1 => (i1+3, 5))
 		elseif dca ≤ ε
-			@assert norm(a1-a2) ≤ ε
-			return IT(a1 => (i1+3, i2+3))
+			@assert samepoint(a1,a2)
+			return IT(p1 => (i1+3, 4))
+		end
 		# a1 ∈ open segment ]a2, b2[
-		return IT(a1 => (i1+3, plus2mod3(i2)))
+		return IT(p1 => (i1+3, 3))
 	elseif dbc ≤ ε # a1 ∈ ]b2,c2] (b2 was already treated above)
 		if ca ≤ ε # a1 == c2
-			@assert norm(a1-c2) ≤ ε
-			return IT(a1 => (i1+3, plus2mod3(i2, 3)))
+			@assert samepoint(a1,c2)
+			return IT(p1 => (i1+3, 6))
 		end # open segment ]b2,c2[
-		return IT(a1 => (i1+3, i2))
+		return IT(p1 => (i1+3, 1))
 	elseif dca ≤ ε
-		return IT(a1 => (i1+3, plus1mod3(i2)))
+		return IT(p1 => (i1+3, 2))
 	end
 	# a1 ∈ interior of other face
-	return IT(a1 => (i1+3, 0))
+	return IT(p1 => (i1+3, 0))
 end
 # inter_arrow1 ««2
 """
@@ -696,45 +719,40 @@ end
 
 Computes intersection, assuming that the plane of one triangle cuts the
 other through vertex `p1` (with `q1` on the + side and `r1` on the - side).
-
-The difference with the generic case is that this has a symmetry:
-(q1↔r1, q2↔r2) leaves '0+-' unchanged.
 """
-function inter_arrow1(((p1,q1,r1),idx1), ((p2,q2,r2),idx2),
+function inter_arrow1((p1,q1,r1), i1, (p2,q2,r2), i2,
 	(zp1, zq1, zr1), normal2, count, ε)
-	(coord, e) = project_2d(normal2, Val(true))
-	println("point $p1 crosses other plane (normal=$normal2, $coord, $e):")
-	println("tri2 = ($p2,$q2,$r2) $idx2")
-	println("tri1 = ($p1,$q1,$r1) $idx1")
-	TI = TriangleIntersection{typeof(p1)}
+	proj = Projector(normal2, p2)
+	@debug typeof(p1)
+	IT = IntersectionType{6,typeof(p1)}
+	@debug IT
 
 	@assert abs(zp1) ≤ ε
 	@assert zq1 > ε
 	@assert zr1 <-ε
+	@debug "arrow($i1,$i2): $p2,$q2,$r2; $normal2 -> $(proj.dir)"
 
-	p1b = p1[coord]; q1b = q1[coord]; r1b = r1[coord]
-	p2b = p2[coord]; q2b = q2[coord]; r2b = r2[coord]
+	(a1,b1,c1,a2,b2,c2) = proj.((p1,q1,r1,p2,q2,r2))
+	@debug "$a2,$b2,$c2"
+	dpqr = abs(normal2[abs(proj.dir)])
 	# we know that interior of segment (q1,r1) intersects plane 2:
-	u = barycenter(q1b, r1b, zr1/(zr1-zq1))
-	println("projection on plane 2: ($p1b, $q1b, $r1b), ($p2b, $q2b, $r2b)")
-	println("other segment is $u")
-	dpqr = abs(normal2[e])
-	@assert cross(q2b-p2b,r2b-p2b) ≈ dpqr
-	# the position of u w.r.t the triangle is given by these three determinants:
-	dpq_p = cross(q2b-p2b, p1b-p2b)
-	dqr_p = cross(r2b-q2b, p1b-q2b)
-	drp_p = dpqr - dpq_p - dqr_p
-	@assert abs(drp_p-cross(p2b-r2b,p1b-r2b)) < 1e-9
-	# likewise for p1b:
-	dpq_u = cross(q2b-p2b, u-p2b)
-	dqr_u = cross(r2b-q2b, u-q2b)
-	drp_u = dpqr - dpq_u - dqr_u
-	@assert abs(drp_u-cross(p2b-r2b,u-r2b)) < 1e-9
-	# Sutherland-Cohen to intersect segment [a,u] with triangle a2b2c2:
-	# trivial reject cases
-	dpq_p < -ε && dpq_u < -ε && return IT()
-	dqr_p < -ε && dqr_u < -ε && return IT()
-	drp_p < -ε && drp_u < -ε && return IT()
-	
-	
+	v = barycenter(b1, c1, zr1/(zr1-zq1))
+	it = inter2_segment_triangle((a1, v), (a2,b2,c2), i2; dpqr, ε)
+	length(it) == 0 && return IT()
+	pt1 = inv(proj)(it[1][1])
+	@inbounds (u1,v1) = it[1][2] # type associated to pt1
+	w1 = (u1 == 0) ? 0 : (u1 == 1) ? (i1+3) : i1
+	if length(it) == 1
+		# possible types from start: (0,1,2) * (0,edge,vertex), except (0,0)
+		# first vertex is either interior, p1, or on edge q1r1
+		# type in triangle 2 does not change
+		return IT(pt1 => (w1, v1))
+	end
+	pt2 = inv(proj)(it[2][1])
+	@inbounds (u2,v2) = it[2][2] # type associated to pt1
+	w2 = (u2 == 0) ? 0 : (u2 == 1) ? (i1+3) : i1
+	@debug typeof(pt1)
+	@debug IT
+	return IT(pt1 => (w1, v1), pt2 => (w2, v2))
 end
+end # module
