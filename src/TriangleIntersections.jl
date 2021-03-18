@@ -1,19 +1,52 @@
 module TriangleIntersections
-import Meshes: Point, Triangle, coordtype, vertices, coordinates
+# import Meshes: Point, Triangle, coordtype, vertices, coordinates
 using LinearAlgebra
 using StaticArrays
 
+# Preamble««1
+# Generic stuff««2
 # predicates for assertions:
 @inline barycenter(p1, p2, λ) = p2 + λ*(p1-p2) # λp1+(1-λ)p2
-@inline collinear(a,b,c) = norm(cross(a-b,c-b),1) ≤ ε
+@inline collinear3(a,b,c) = norm(cross(a-b,c-b),1) ≤ 1e-8
+@inline collinear2(a,b,c) = abs(det2(a,b,c)) ≤ 1e-8
 @inline monotonic(a,b,c) = dot(a-b,c-b) ≤ 0
-@inline samepoint(a,b) = norm(a-b,1) ≤ ε
+@inline samepoint(a,b) = norm(a-b,1) ≤ 1e-8
 
 @inline real_type(x...)=Float64
-@inline det(t::Triangle{2}) =
-	cross(vertices(t)[2]-vertices(t)[1], vertices(t)[3]-vertices(t)[1])
+_THICKNESS=1e-8
+@inline plus1mod3(i,j=0)=(i==1) ? 2+j : (i==2) ? 3+j : 1+j
+@inline plus2mod3(i,j=0)=(i==1) ? 3+j : (i==2) ? 1+j : 2+j
 
-macro tree27(vars,args...)#««
+# struct IntersectionType««2
+"""
+    struct IntersectionType
+
+Describes an intersection. Each point of the returned polygon
+is marked with its type w.r.t the two input simplexes.
+"""
+struct IntersectionType{N,P} <: AbstractVector{Tuple{P,NTuple{2,Int8}}}
+# maximum of N points, constant-size
+	npoints::Int
+	pttype::MVector{N,NTuple{2,Int8}}
+	points::MVector{N,P}
+	@inline function IntersectionType{N,P}(pt::Pair...) where{N,P}
+		it = new{N,P}(length(pt), MVector{N,NTuple{2,Int8}}(undef),
+			MVector{N,P}(undef))
+		it.pttype[1:length(pt)] .= last.(pt)
+		it.points[1:length(pt)] .= first.(pt)
+		return it
+	end
+end
+@inline Base.size(it::IntersectionType) = (it.npoints,)
+@inline Base.getindex(it::IntersectionType, i) = (it.points[i], it.pttype[i])
+@inline function Base.show(io::IO, it::IntersectionType)
+	if isempty(it) print(io, "ø"); return; end
+	print(io, length(it), " points:",
+		join(["\n  $a => $b" for (a,b) in it]))
+end
+
+
+macro tree27(vars,args...)#««2
 	@assert Meta.isexpr(vars, :tuple)
 	@assert length(vars.args) == 3
 	vars = esc.(vars.args); ε = esc(:ε)
@@ -47,91 +80,298 @@ macro tree27(vars,args...)#««
 	end
 	expr1(p) = (build(3,exprfor,p),)
 	expr2(p) = (build(2,expr1,p),)
-	println(build(1,expr2,""))
 	build(1,expr2,"")
-# 	quote#««
-# 		if $(vars[1]) > $ε
-# 			if $(vars[2]) > $ε
-# 				if     $(vars[3]) > $ε; $(exprfor("+++")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("++-")...)
-# 				else                  ; $(exprfor("++0")...)
-# 				end
-# 			elseif $(vars[2]) <-$ε
-# 				if     $(vars[3]) > $ε; $(exprfor("+-+")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("+--")...)
-# 				else                  ; $(exprfor("+-0")...)
-# 				end
-# 			else
-# 				if     $(vars[3]) > $ε; $(exprfor("+0+")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("+0-")...)
-# 				else                  ; $(exprfor("+00")...)
-# 				end
-# 			end
-# 		elseif $(vars[1]) <-$ε
-# 			if $(vars[2]) > $ε
-# 				if     $(vars[3]) > $ε; $(exprfor("-++")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("-+-")...)
-# 				else                  ; $(exprfor("-+0")...)
-# 				end
-# 			elseif $(vars[2]) <-$ε
-# 				if     $(vars[3]) > $ε; $(exprfor("--+")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("---")...)
-# 				else                  ; $(exprfor("--0")...)
-# 				end
-# 			else
-# 				if     $(vars[3]) > $ε; $(exprfor("-0+")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("-0-")...)
-# 				else                  ; $(exprfor("-00")...)
-# 				end
-# 			end
-# 		else
-# 			if $(vars[2]) > $ε
-# 				if     $(vars[3]) > $ε; $(exprfor("0++")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("0+-")...)
-# 				else                  ; $(exprfor("0+0")...)
-# 				end
-# 			elseif $(vars[2]) <-$ε
-# 				if     $(vars[3]) > $ε; $(exprfor("0-+")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("0--")...)
-# 				else                  ; $(exprfor("0-0")...)
-# 				end
-# 			else
-# 				if     $(vars[3]) > $ε; $(exprfor("00+")...)
-# 				elseif $(vars[3]) <-$ε; $(exprfor("00-")...)
-# 				else                  ; $(exprfor("000")...)
-# 				end
-# 			end
-# 		end
-# 	end#»»
-end#»»
-
-_THICKNESS=1e-8
-
+end
+macro cycle3(i,vars)#««2
+	i = esc(i)
+	@assert Meta.isexpr(vars, :tuple)
+	n = length(vars.args)
+	@assert n % 3 == 0
+	v1 = esc(vars)
+	v2 = Expr(:tuple,
+		[esc(vars.args[i+1-3*(i%3==0)]) for i in 1:length(vars.args)]...)
+	v3 = Expr(:tuple,
+		[esc(vars.args[i+2-3*(i%3!=1)]) for i in 1:length(vars.args)]...)
+	quote
+		@assert $i ∈ (1,2,3)
+		if $i == 2; $v1 = $v2
+		elseif $i == 3; $v1 = $v3
+		end
+	end
+end
+# 2d intersections««1
+@inline det2(u,v)=u[1]*v[2]-u[2]*v[1]
+@inline det2(p,q,r)=det2(q-p,r-p)
+# inter2_segment_triangle««2
 """
-    supporting_plane(t::Triangle)
+    Computes the intersection between 2d segment and triangle
 
-Returns an equation (`a*x = b`) of the supporting plane, with `a`
-pointing *outwards*.
+Returns an `IntersectionType` structure, encoded in the following way:
+ - if there are 2 points, they are guaranteed to be in the same order as the segments;
+ - on segment, (1,2) are vertices (u,v), 0 is interior
+ - on triangle, (i2,i2+1,i2+2)(mod3) are edges (qr, rp, pq),
+   and likewise (+3) for vertices (p,q,r); 0 is interior
 """
+function inter2_segment_triangle((u1,v1),(p2,q2,r2),i2=1;
+	dpqr = missing, ε=_THICKNESS)
+	(dpqr isa Missing) && (dpqr = det2(p2,q2,r2)) # FIXME, this causes 2 compilations...
+	IT=IntersectionType{2,typeof(u1)}
+	# compute position of u:
+	dpq_u = det2(p2,q2,u1)
+	dqr_u = det2(q2,r2,u1)
+	drp_u = dpqr - dpq_u - dqr_u
+	@assert abs(drp_u-det2(r2,p2,u1)) ≤ 1e-9
+	# likewise for v:
+	dpq_v = det2(p2,q2,v1)
+	dqr_v = det2(q2,r2,v1)
+	drp_v = dpqr - dpq_v - dqr_v
+	# easy reject cases: segment lies fully outside one side of triangle
+	dpq_u < -ε && dpq_v < -ε && return IT()
+	dqr_u < -ε && dqr_v < -ε && return IT()
+	drp_u < -ε && drp_v < -ε && return IT()
 
-function supporting_plane(t::Triangle)
-	(p1, p2, p3) = t.vertices
-	c = cross(p2-p1, p3-p1)
-	b = dot(c, p1.coords)
-	return HyperPlane(c, b)
+	# symbolic names for returned points: ««3
+	@inline P2(x)=p2=>(x,3+i2)
+	@inline Q2(x)=q2=>(x,3+plus1mod3(i2))
+	@inline R2(x)=r2=>(x,3+plus2mod3(i2))
+	@inline U1(x)=u1=>(1,x)
+	@inline V1(x)=v1=>(2,x)
+	@inline QR() = i2
+	@inline RP() = plus1mod3(i2)
+	@inline PQ() = plus2mod3(i2)
+	@inline UVQR()= barycenter(v1, u1, dqr_u/(dqr_u-dqr_v))=>(0,QR())
+	@inline UVRP()= barycenter(v1, u1, drp_u/(drp_u-drp_v))=>(0,RP())
+	@inline UVPQ()= barycenter(v1, u1, dpq_u/(dpq_u-dpq_v))=>(0,PQ())
+
+	# rotate triangle to standard configuration: ««3
+	@debug "position of u: $dqr_u $drp_u $dpq_u"
+	@tree27((dqr_u, drp_u, dpq_u),
+		"+++" => (@goto inside),
+		"-++" => (@goto outside_p),
+		"--+" => (@goto outside_p),
+		"0++" => (@goto edge_qr),
+		"00+" => (@goto vertex_p),
+		"-+0" => (@goto outside_p),
+		"-0+" => (@goto outside_p),
+		"000" => (error("impossible case")),
+		"00-" => (error("impossible case")),
+		"0--" => (error("impossible case")),
+		"---" => (error("impossible case")),
+	)
+	@assert false "not reachable"
+
+	@label inside #««3
+	@tree27((dqr_v, drp_v, dpq_v),
+		"+++" => (return IT(U1(0), V1(0))),
+		"000" => (error("impossible case")),
+		"00-" => (error("impossible case")),
+		"0--" => (error("impossible case")),
+		"---" => (error("impossible case")),
+		# v is a triangle vertex:
+		"00+" => (return IT(U1(0), i == 1 ? P2(2) : i == 2 ? Q2(2) : R2(2))),
+		# v is inside a triangle edge:
+		"0++" => (return IT(U1(0), V1(i == 1 ? QR() : i == 2 ? RP() : PQ()))),
+		"-0+" => (return IT(U1(0), i==1 ? UVQR()  : i == 2 ? UVRP() : UVPQ())),
+		"-++" => (return IT(U1(0), i==1 ? UVQR()  : i == 2 ? UVRP() : UVPQ())),
+		"--+" => begin
+		@cycle3 i (p2,q2,r2, dqr_u,drp_u,dpq_u, dqr_v,drp_v,dpq_v)
+		i2 = mod1(i2+i-1,3)
+		# which side is crossed depends on ruv
+		druv = det2(r2,u1,v1)
+		druv > ε && return IT(U1(0), UVQR())
+		druv <-ε && return IT(U1(0), UVRP())
+		return IT(U1(0), R2(0))
+		end
+	)
+	@assert false "not reachable"
+
+	@label vertex_p #««3
+	@cycle3 i (p2,q2,r2, dqr_u,drp_u,dpq_u, dqr_v,drp_v,dpq_v)
+	@assert samepoint(u1, p2)
+	i2 = mod1(i2+i-1,3)
+	dpq_v < -ε && return IT(P2(1))
+	drp_v < -ε && return IT(P2(1))
+	if dpq_v ≤ ε
+		dqr_v > ε && return IT(P2(1), V1(PQ()))
+		dqr_v <-ε && return IT(P2(1), Q2(0))
+		@assert samepoint(v1, q2)
+		return IT(P2(1), Q2(2))
+	end
+	if drp_v ≤ ε
+		dqr_v > ε && return IT(P2(1), V1(RP()))
+		dqr_v <-ε && return IT(P2(1), R2(0))
+		@assert samepoint(v1, r2)
+		return IT(P2(1), R2(2))
+	end
+	dqr_v > ε && return IT(P2(1), V1(0))
+	dqr_v <-ε && return IT(P2(1), UVQR())
+	@assert collinear2(q,v,r)
+	@assert monotonic(q,v,r)
+	return IT(P2(1), V1(QR()))
+
+	@label edge_qr #««3
+	@cycle3 i (p2,q2,r2, dqr_u,drp_u,dpq_u, dqr_v,drp_v,dpq_v)
+	@assert dqr_v ≥ -ε
+	if dqr_v ≤ ε # u, v on same edge qr
+		dpq_v <-ε && return IT(U1(PQ()), Q2(0))
+		drp_v <-ε && return IT(U1(PQ()), R2(0))
+		dpq_v ≤ ε && return IT(U1(PQ()), Q2(2))
+		drp_v ≤ ε && return IT(U1(PQ()), R2(2))
+		return IT(U1(PQ()), V1(PQ()))
+	end
+	@assert dqr_v > ε
+	dpq_v > ε && drp_v > ε && return IT(U1(PQ()), V1(0))
+	dpuv = det2(u1,v1,p2)
+	dpuv > ε && return IT(U1(PQ()), UVRP())
+	dpuv <-ε && return IT(U1(PQ()), UVPQ())
+	@assert collinear2(u1,v1,p2)
+	dpq_v <-ε && return IT(U1(PQ()), P2(0))
+	@assert samepoint(v1,p2)
+	return IT(U1(PQ()), P2(2))
+
+	@label outside_p #««3
+	@cycle3 i (p2,q2,r2, dqr_u,drp_u,dpq_u, dqr_v,drp_v,dpq_v)
+	i2 = mod1(i2+i-1,3)
+
+	@assert dqr_u < -ε # u1 is far from p
+	@assert dpq_u > ε
+	@assert dqr_v ≥ -ε
+	
+	if dqr_v ≤ ε # edge case: v1 on (qr) line««
+		if dpq_v > ε
+			drp_v > ε && return IT(V1(QR())) # ]qr[ segment
+			drp_v <-ε && return IT() # outside on r-side
+			@assert samepoint(v1, r2)
+			return IT(R2(2))
+		end
+		dpq_v <-ε && return IT() # outside on q-side
+		@assert samepoint(v1, q2)
+		return IT(Q2(2))
+	end#»»
+	# generic case: v1 is on close side of (qr)
+	# we might cross (in this order) two of (qr), (rp), (pq)
+	@debug "position of v: $dqr_v $drp_v $dpq_v"
+	@assert dqr_v > ε
+	# start by examining what happens on the u side:
+	# given that ]uv[ crosses (qr), it crosses [qr[ iff ruv < 0
+	druv = det2(r2,u1,v1)
+	if druv > ε # don't cross [qr[
+		# easy case: if u is on the -++ side and uv misses r:
+		drp_u ≥ -ε && return IT()
+		@assert drp_v ≥ -ε # because of easy reject
+		# since drp_u <-ε and drp_v ≥-ε, uv crosses rp. Where does this happen?
+		if drp_v > ε # generic case: v is (stricly) inside (rp).
+			dpuv = drp_u - drp_v + druv
+			dpuv > ε && return IT() # missed p and the triangle
+			dpuv ≥-ε && return IT(P2(0)) # touched p
+
+			@assert dpuv <-ε # we hit the ]rp[ side, and thus the triangle
+			dpq_v > ε && return IT(UVRP(), V1(0)) # v is an inner point
+			dpq_v <-ε && return IT(UVRP(), UVPQ()) # v is outside (pq)
+			@assert collinear2(p2,v1,q2)
+			@assert monotonic(p2,v1,q2)
+			return IT(UVRP(), V1(PQ()))
+		end
+		@assert collinear2(r2,p2,v1)
+		dpq_v > ε && return IT(V1(PQ()))
+		dpq_v < ε && return IT()
+		@assert samepoint(v1,p2)
+		return IT(P2(2))
+	elseif druv ≥ -ε # (uv) touches r
+		@assert collinear2(u1,r2,v1)
+		@assert monotonic(u1,r2,v1)
+		drp_v <-ε && return IT(R2(0))
+		if drp_v ≤ ε # (uv) == (rp)
+			@assert collinear2(u1,v1,p2)
+			dpq_v > ε && return IT(R2(0),V1(RP()))
+			dpq_v <-ε && return IT(R2(0),P2(0))
+			@assert samepoint(v1,p2)
+			return IT(R2(0),P2(2))
+		end
+		@assert drp_v > ε # (uv) might yet cross (pq):
+		dpq_v > ε && return IT(R2(0),V1(0))
+		dpq_v < ε && return IT(R2(0),UVPQ())
+		@assert collinear2(p2,q2,v1)
+		return IT(R2(0),V1(PQ()))
+	end
+	# now check on the q-side:
+	dquv = dqr_v - dqr_u + druv
+	dquv < -ε && return IT() # we missed on the q-side
+	if dquv ≤ ε # (uv) touches q
+		@assert collinear2(u1,q2,v1)
+		@assert monotonic(u1,q2,v1)
+		@assert dpq_v ≤ ε
+		dpq_v <-ε && return IT(Q2(0)) # far
+		@assert samepoint(v1,q2)
+		return IT(Q2(2))
+	end
+	@assert dquv > ε # uv crosses the ]q,r[ segment...
+	if dpq_v > ε
+		drp_v > ε && return IT(UVQR(), V1(0)) # inner point
+		drp_v <-ε && return IT(UVQR(), UVRP())
+		@assert collinear2(r2,v1,p2)
+		@assert monotonic(r2,v1,p2)
+		return IT(UVQR(), V1(RP()))
+	elseif dpq_v ≥-ε
+		drp_v > ε && return IT(UVQR(), V1(PQ())) # pq edge
+		drp_v <-ε && return IT(UVQR(), UVRP()) # outside p on pq edge
+		@assert samepoint(v1,p2)
+		return IT(UVQR(), P2(2)) # 
+	end
+	@assert dpq_v <-ε
+	# easy reject case where we don't cross rp:
+	drp_v ≥-ε && return IT(UVQR(), UVPQ())
+	@assert drp_v <-ε
+	# worst case: we cross diagonally from (-++) to (+--) region;
+	# decide which way around p we go:
+	dpuv = drp_u - drp_v + druv
+	dpuv > ε && return IT(UVQR(), UVRP())
+	dpuv <-ε && return IT(UVQR(), UVPQ())
+	@assert collinear2(u1,p2,v1)
+	@assert monotonic(u1,p2,v1)
+	return IT(UVQR(), P2(0))
 end
 
-struct HyperPlane{X,Y}
-	a::X
-	b::Y
-	HyperPlane(a,b) = new{typeof(a),typeof(b)}(a,b)
-end
-direction(h::HyperPlane) = h.a
+# function inter(t1::Triangle{2}, t2::Triangle{2};
+# 	ε=_THICKNESS, d2=det(t2), common_edge = 0)#««
+# 	(p1, q1, r1) = vertices(t1)
+# 	(p2, q2, r2) = vertices(t2)
+# 	u2 = q2-p2; v2=r2-p2
+# 
+# 	# FIXME: this is already computed in inter(::Triangle{3}),
+# 	# as one of the components of the `normal2` vector...
+# 	# and, since we projected on the “right” coordinates, we know that area2>0
+# 	@assert d2 == det(t2)
+# 	@assert d2 == det(u2, v2)
+# 	@assert d2 > ε
+# end#»»
 
-const plus1mod3 = SA[2,3,1]
-const plus2mod3 = SA[3,1,2]
+end # module
+# 3d intersections««1
+# basic geometry stuff««2
 
-@inline function project_2d(direction::AbstractVector, index::Val = Val(false))
+
+# """
+#     supporting_plane(t::Triangle)
+# 
+# Returns an equation (`a*x = b`) of the supporting plane, with `a`
+# pointing *outwards*.
+# """
+# function supporting_plane(t::Triangle)
+# 	(p1, p2, p3) = t.vertices
+# 	c = cross(p2-p1, p3-p1)
+# 	b = dot(c, p1.coords)
+# 	return HyperPlane(c, b)
+# end
+
+# struct HyperPlane{X,Y}
+# 	a::X
+# 	b::Y
+# 	HyperPlane(a,b) = new{typeof(a),typeof(b)}(a,b)
+# end
+# direction(h::HyperPlane) = h.a
+
+@inline function project_2d(direction::AbstractVector)
   # we inline the `findmax` call since we know the length is 3:
   # (doing this about halves the running time of this function. Besides,
   # since the value `k` only takes three possible values, it enables the
@@ -141,61 +381,18 @@ const plus2mod3 = SA[3,1,2]
 	@inbounds a3 = abs(direction[3])
   k = (a1 < a2) ? ((a2 < a3) ? 3 : 2) : ((a1 < a3) ? 3 : 1)
   v = direction[k]
-  @inbounds p = (v > 0) ? SA[plus1mod3[k], plus2mod3[k]] :
-    SA[plus2mod3[k], plus1mod3[k]]
-	return _project_2d(index, p, k)
+  @inbounds p = (v > 0) ? SA[plus1mod3(k), plus2mod3(k)] :
+    SA[plus2mod3(k), plus1mod3(k)]
+	return (p, k)
 end
-@inline _project_2d(::Val{false}, p, _) = p
-@inline _project_2d(::Val{true}, p, e) = (p, e)
-@inline Base.getindex(p::Point, i...) = getindex(coordinates(p), i...)
+# @inline Base.getindex(p::Point, i...) = getindex(coordinates(p), i...)
 
+# # Permuting a triangle
+# @inline permute3(i, (p,q,r)) =
+# 	i==1 ? (p,q,r) : i==2 ? (q,r,p) : i==3 ? (r,p,q) :
+# 	i==4 ? (p,r,q) : i==5 ? (q,p,r) :        (r,q,p)
 
-#=
-function _build_triangle3_decision_tree(
-	changes::Pair{<:AbstractString,<:AbstractString}...)
-	@inline to_idx(s::AbstractString) =
-		[ c == '+' ? 1 : c == '-' ? 2 : 0 for c in s ]
-	@inline function apply_perm3(i, j, s)
-		tmp=s[[i+1, mod1(i+2,3), mod1(i+3, 3)]]
-		(j == 0) ? tmp : map(x->mod(3-x,3), tmp)
-	end
-	@inline function find_perm3(s1, s2)
-		for i in 0:2, j in (0,3)
-			apply_perm3(i, j, s1) == s2 && return (i, j)
-		end
-		error("No permutation found transforming \"$s1\" to \"$s2\"")
-	end
-	tree = fill((0,0), 27)
-	for (s1, s2) in changes
-		(u1, u2) = to_idx(s1), to_idx(s2)
-		@assert s2 ∈ ("+--", "+0-", "+00", "0--", "---", "+++", "000") "bad output: $s2"
-		i = mod1( sum((9,3,1) .* u1), 27)
-		(j1, j2) = find_perm3(u1, u2)
-		@assert (s2[1] == '0') == (i ∈ (27, 4,8,10,12,20,24)) "$s2: $i"
-		println("[$i] $s1 ⇒ $s2 by ($j1, $j2)")
-		tree[i] = (j1, j2)
-	end
-	return tree
-end
-const _triangle3_decision_tree = _build_triangle3_decision_tree(
-	"000" => "000", "00+" => "+00", "00-" => "+00", 
-	"0+0" => "+00", "0++" => "0--", "0+-" => "+0-", 
-	"0-0" => "+00", "0-+" => "+0-", "0--" => "0--", 
-	"+00" => "+00", "+0+" => "0--", "+0-" => "+0-", 
-	"++0" => "0--", "+++" => "+++", "++-" => "+--", 
-	"+-0" => "+0-", "+-+" => "+--", "+--" => "+--", 
-	"-00" => "+00", "-0+" => "+0-", "-0-" => "0--", 
-	"-+0" => "+0-", "-++" => "+--", "-+-" => "+--", 
-	"--0" => "0--", "--+" => "+--", "---" => "---", 
-)
-==#
-
-# Permuting a triangle
-@inline permute3(i, (p,q,r)) =
-	i==1 ? (p,q,r) : i==2 ? (q,r,p) : i==3 ? (r,p,q) :
-	i==4 ? (p,r,q) : i==5 ? (q,p,r) :        (r,q,p)
-
-# TriangleIntersection: structure containing intersection info ««
+# TriangleIntersection: structure containing intersection info ««2
 """
     struct TriangleIntersection
 
@@ -217,17 +414,6 @@ struct TriangleIntersection{T} # T is a point type
 	edge_insert::Vector{NTuple{3,Int}}
 	new_edge::NTuple{2,Int} # at most 1 new edge (not part of previous edge)
 	newpoints::Vector{T} # added new points with coordinates
-# end
-# # 	vertex::NTuple{3,Int}
-# 	# up to 6 new points:
-# 	# (new point, edge1 or 0, edge2 or 0)
-# 	newpoints::Vector{Tuple{T,Int,Int,Int,Int}}
-# 	# cross case: one new edge max
-# 	# coplanar case: new edges are all implicit (they are segments of old
-# 	# edges); no need to fill this structure (hence (0,0))
-# 	edge::NTuple{2,Int}
-# 	@inline TriangleIntersection(v::NTuple{3,Int},
-# 		p,e) = new{coordtype(eltype(newpoints).parameters[1])}(v,p,e)
 	@inline TriangleIntersection{T}(f::NTuple{2,Int},
 		e::AbstractVector, ne::NTuple{2,Int}, np::AbstractVector) where{T} =
 		new{T}(f, e, ne, np)
@@ -262,36 +448,41 @@ end
 # 	# new_edges:
 # 	[(i, last(p)[1]..., last(p)[2]...) for (i,p) in zip(start:start+5, point)],
 # 	e, collect(first.(point)))
-#»»
 
-# inter(triangle1, triangle2) ««
+# SegmentTriangleInter««2
+# for uv ∩ pqr = [ij] (in same order):
+#  each point is either: a segment extremity 12 / interior0
+#  a triangle vertex 123/edge 456/interior 0 (not exterior)
+#  so 21^2 possibilities (representable on 4 octets)
+#  in segment: inter = ∅, {u}, [u?], [uv], {?}, [??], [?v], {v} (8 cases)
+#  i is either a vertex (123), an edge, or inner
+#  j: same
+#
+#  if i, j == same vertex: equal
+#  if i, j == same edge: 
+# inter(triangle1, triangle2) ««2
 """
     inter(triangle1, triangle2; ε, indices, count)
 
 Returns a description of the intersection of two 3-dimensional triangles.
-`indices` is the list of names of vertices of the two triangles
-(default `(1,2,3,4,5,6)`) and `count` the total number of points
-(default `6`).
- * `face2`: same.
-
-FIXME: missing
- - edge-inside-edge (Fig 3a: edge_edgeCollinear)
+This is returned as a IntersectionType structure, encoded in the following way:
+ - 0: point is interior to one triangle
+ - 1,2,3: point is on an edge qr, rp, pq
+ - 4,5,6: point is on a vertex p, q, r
 """
-function inter(t1::Triangle{3}, t2::Triangle{3};
-	idx1=(1,2,3), idx2=(4,5,6), count=6,
-	ε=_THICKNESS)
+function inter((p1,q1,r1),(p2,q2,r2), ε=_THICKNESS)
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
 	#   https://hal.inria.fr/inria-00072100/document]
 	# https://github.com/yusuketomoto/ofxCGAL/blob/master/libs/CGAL/include/CGAL/Triangle_3_Triangle_3_intersection.h
 	# https://fossies.org/linux/CGAL/include/CGAL/Intersections_3/internal/Triangle_3_Triangle_3_do_intersect.h
 	(p1, q1, r1) = vertices(t1)
 	(p2, q2, r2) = vertices(t2)
+	@debug "computing triangle-triangle intersection"
 
 	# return types:
-	TI = TriangleIntersection{typeof(p1)}
+	IT = IntersectionType{6,typeof(p1)}
 
-	plane2 = (supporting_plane(t2))
-	normal2= direction(plane2)
+	normal2= normalize(cross(q2-p2, r2-p2))
 
 	dp1 = dot(normal2, p1-p2)
 	dq1 = dot(normal2, q1-p2)
@@ -301,32 +492,33 @@ function inter(t1::Triangle{3}, t2::Triangle{3};
 	# filter for adjacent faces: these have opposed edges (detected with
 	# vertex labels) and are not collinear
 	# (they might also be collinear, but this is a bit harder to detect).
-	    if idx1[1] == idx2[1] && idx1[2] == idx2[3]
-		abs(dr1) > ε && return TI(empty)
-	elseif idx1[2] == idx2[2] && idx1[3] == idx2[1]
-		abs(dp1) > ε && return TI(empty)
-	elseif idx1[3] == idx2[3] && idx1[1] == idx2[2]
-		abs(dq1) > ε && return TI(empty)
-	end
+# 	    if idx1[1] == idx2[1] && idx1[2] == idx2[3]
+# 		abs(dr1) > ε && return IT()
+# 	elseif idx1[2] == idx2[2] && idx1[3] == idx2[1]
+# 		abs(dp1) > ε && return IT()
+# 	elseif idx1[3] == idx2[3] && idx1[1] == idx2[2]
+# 		abs(dq1) > ε && return IT()
+# 	end
 
 	@inline _touch1(i1,i2) =
-		inter_touch1(permute3.(i1, ((p1,q1,r1), idx1)),
-		             permute3.(i2, ((p2,q2,r2), idx2)),
-		             2, (i2 ≤ 3) ? normal2 : -normal2, ε)
+		inter_touch1(permute3(i1, (p1,q1,r1)), i1,
+		             permute3(i2, (p2,q2,r2)), i2, 2,
+								 (i2 ≤ 3) ? normal2 : -normal2, ε)
 	@inline _arrow1(i1,i2) =
-		inter_arrow1(permute3.(i1, ((p1,q1,r1), idx1)),
-		             permute3.(i2, ((p2,q2,r2), idx2)),
+		inter_arrow1(permute3(i1, (p1,q1,r1)), i1,
+		             permute3(i2, (p2,q2,r2)), i2,
 								 permute3(i1, (dp1, dq1, dr1)),
 								 normal2, count, ε)
 	@inline _border1(i1,i2) =
-		inter_border1(permute3.(i1, ((p1,q1,r1), idx1)),
-		              permute3.(i2, ((p2,q2,r2), idx2)),
+		inter_border1(permute3(i1, (p1,q1,r1)), i1,
+		              permute3(i2, (p2,q2,r2)), i2,
 									count, ε)
 	
 	# permute both triangles as needed so that t2 separates p1 from q1, r1
 	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
+	@debug "signs for p1,q1,r1: $(sign(dp1)) $(sign(dq1)) $(sign(dr1))"
 	@tree27((dp1,dq1,dr1),
-		"+++" => (return TI(empty)),
+		"+++" => (return IT()),
 		"0--" => (return _touch1(i,j)),
 		"0+-" => (return _arrow1(i,j)),
 		"+00" => (return _border1(i,j)),
@@ -339,36 +531,37 @@ function inter(t1::Triangle{3}, t2::Triangle{3};
 			(newpoints2, newedges) = intproj
 			newpoints3 = map((point,p1,p2)->(lift(point),p1,p2), newpoints2)
 			# FIXME: lift polygon
-			return TI(empty)
+			return IT()
 		end,
 	)
-# 	println("dp1 dq1 dr1: $(sign(dp1)) $(sign(dq1)) $(sign(dr1)) $((i1,i2))")
+	@debug "now (i1,i2)=($i1,$i2)"
 
 	@inline _touch2(i1,i2) =
-		inter_touch1(permute3.(i1, ((p1,q1,r1), idx1)),
-		             permute3.(i2, ((p2,q2,r2), idx2)),
+		inter_touch1(permute3(i1, (p1,q1,r1)), i1,
+		             permute3(i2, (p2,q2,r2)), i2,
 		             1, (i2 ≤ 3) ? normal2 : -normal2, ε)
 	# likewise for second triangle
 	normal1 = cross(q1-p1, r1-p1)
 	dp2 = dot(normal1, p2-p1)
 	dq2 = dot(normal1, q2-p1)
 	dr2 = dot(normal1, r2-p1)
+	@debug "dp2 dq2 dr2: $(sign(dp2)) $(sign(dq2)) $(sign(dr2))"
 	@tree27((dp2,dq2,dr2),
-		"+++" => (return TI(empty)),
+		"+++" => (return IT()),
 		"0--" => (return _touch2(i,1)),
 # 		"0+-" => (return _arrow2(i,1)),
 # 		"+00" => (return _border2(i,1)),
 		"+--" => (i2+=i-1),
 		"-++" => (i2+=i-1; i1+=3),
 	)
-# 	println("dp2 dq2 dr2: $(sign(dp2)) $(sign(dq2)) $(sign(dr2)) $((i2,i2))")
+	@debug "now i1,i2 = $((i1,i2))"
 
 	# apply both permutations ««
 	@inbounds (a1, b1, c1) = permute3(i1, (p1,q1,r1))
 	@inbounds (a2, b2, c2) = permute3(i2, (p2,q2,r2))
 	# give symbolic names to what we return...
-	@inbounds (la1,lb1,lc1)= permute3(i1, idx1)
-	@inbounds (la2,lb2,lc2)= permute3(i2, idx2)
+	(la1,lb1,lc1)= i1==1 ? (1,2,3) : i1==2 ? (2,3,1) : (3,1,2)
+	(la2,lb2,lc2)= i2==1 ? (1,2,3) : i2==2 ? (2,3,1) : (3,1,2)
 	# re-use already computed determinants as z-coordinates:
 	@inbounds (za1, zb1, zc1) = permute3(i1, (dp1, dq1, dr1))
 	@inbounds (za2, zb2, zc2) = permute3(i2, (dp2, dq2, dr2))
@@ -393,13 +586,13 @@ function inter(t1::Triangle{3}, t2::Triangle{3};
 	# db1b2 is a determinant comparing the positions of b1 and b2
 	a1a2b1 = cross(a2-a1, b1-a1)
 	db1b2 = dot(a1a2b1, b2-a1)
-	println("  db1b2=$db1b2")
-	db1b2 < -ε && return TI(empty)
+	@debug "db1b2=$db1b2"
+	db1b2 < -ε && return IT()
 
 	a1a2c1 = cross(a2-a1, c1-a1)
 	dc1c2 = dot(a1a2c1, c2-a1)
-	println("  dc1c2=$dc1c2")
-	dc1c2 > ε && return TI(empty)
+	@debug "dc1c2=$dc1c2"
+	dc1c2 > ε && return IT()
 
 	# coordinates of four intersection points bb1, cc1, bb2, cc2
 	# (all four are aligned on the intersection of the two planes)
@@ -408,7 +601,6 @@ function inter(t1::Triangle{3}, t2::Triangle{3};
 	@inline bb2() = barycenter(b2, a2, za2/(za2-zb2))
 	@inline cc2() = barycenter(c2, a2, za2/(za2-zc2))
 
-	@inline single(p) = TI(count+1, (0,0), p)
 	@inline segment(p1,p2) = TI(count+1, (count+1, count+2), p1, p2)
 	@inline B1(t1,t2) = bb1() => ((la1, lb1), (t1,t2))
 	@inline B2(t1,t2) = bb2() => ((la2, lb2), (t1,t2))
@@ -417,7 +609,7 @@ function inter(t1::Triangle{3}, t2::Triangle{3};
 
 	# TODO: +00 cases (3a or 3b in https://www.polibits.gelbukh.com/2013_48/Triangle-Triangle%20Intersection%20Determination%20and%20Classification%20to%20Support%20Qualitative%20Spatial%20Reasoning.pdf)
 	db1c2 = dot(a1a2b1, c2-a1)
-	println("db1c2 = $db1c2")
+	@debug "db1c2 = $db1c2"
 	if db1c2 < -ε
 		db1b2 ≤ ε && return single(B2(la1,lb1))
 		dc1b2 = dot(a1a2c1, b2-a1)
@@ -437,16 +629,15 @@ function inter(t1::Triangle{3}, t2::Triangle{3};
 	end
 	@assert dc1c2 ≤ ε # empty case was already detected above
 	return single(C2(a1c1)) # cc2 ∈ edge [a1,c1]
-end#»»
-
-# inter_touch1««
+end
+# inter_touch1««2
 """
     inter_touch1
 
 Returns intersection in the case where triangle `t1` touches plane of `t2`
 at the single point `p1` (oriented so that q1, r1 are *below* the plane).
 """
-function inter_touch1(((p1,q1,r1),idx1), ((p2,q2,r2),idx2), face, normal2, ε)
+function inter_touch1((p1,q1,r1), i1, (p2,q2,r2), i2, face, normal2, ε)
 	# Possible cases here:
 	# - nothing
 	# - vertex-vertex (return empty)
@@ -455,10 +646,11 @@ function inter_touch1(((p1,q1,r1),idx1), ((p2,q2,r2),idx2), face, normal2, ε)
 	# To decide: project everything on the plane of face2
 	# and compute three 2d determinants
 	(coord, e) = project_2d(normal2, Val(true))
+	@debug "entering inter_touch1 $i1, $i2"
 # 	println("point $p1 touches other plane:")
 # 	println("tri2 = ($p2,$q2,$r2) $idx2")
 # 	println("tri1 = ($p1,$q1,$r1) $idx1")
-	TI = TriangleIntersection{typeof(p1)}
+	IT=IntersectionType{6,typeof(p1)}
 
 	a1 = p1[coord]
 	a2 = p2[coord]
@@ -467,39 +659,38 @@ function inter_touch1(((p1,q1,r1),idx1), ((p2,q2,r2),idx2), face, normal2, ε)
 	dabc = abs(normal2[e])
 	@assert cross(b2-a2,c2-a2) ≈ dabc
 	dab = cross(b2-a2, a1-a2)
-	dab < -ε && return TI(empty)
+	dab < -ε && return IT()
 	dbc = cross(c2-b2, a1-b2)
-	dbc < -ε && return TI(empty)
+	dbc < -ε && return IT()
 	dca = dabc - dab - dbc
 # 	println("proj = ($coord, $e) from $normal2")
 # 	println("projections: $p1 => $a1 vs. ($a2, $b2, $c2)")
 # 	println("determinants: $dabc =  $dab, $dbc, $dca")
-	dca < -ε && return TI(empty)
+	dca < -ε && return IT()
 	@assert abs(dca-cross(a2-c2,a1-c2)) < 1e-9
-# 	println("point $a1 in ($a2,$b2,$c2): $dab, $dbc, $dca")
-	if dab ≤ ε
-		if dbc ≤ ε
+	@debug "point $a1 in ($a2,$b2,$c2): $dab, $dbc, $dca"
+	if dab ≤ ε # it cannot be <-ε, so a1 ∈ [a2,b2]
+		if dbc ≤ ε # a1 == b2
 			@assert norm(a1-b2) ≤ ε
-			return TI(empty)
+			return IT(a1 => (i1+3, plus1mod3(i2, 3)))
 		elseif dca ≤ ε
 			@assert norm(a1-a2) ≤ ε
-			return TI(empty)
-		end
+			return IT(a1 => (i1+3, i2+3))
 		# a1 ∈ open segment ]a2, b2[
-		return (idx1[1], idx2[1], idx2[2])
-	elseif dbc ≤ ε
-		if ca ≤ ε
+		return IT(a1 => (i1+3, plus2mod3(i2)))
+	elseif dbc ≤ ε # a1 ∈ ]b2,c2] (b2 was already treated above)
+		if ca ≤ ε # a1 == c2
 			@assert norm(a1-c2) ≤ ε
-			return TI(empty)
-		end
-		return TI(idx1[1], idx2[2], idx2[3])
+			return IT(a1 => (i1+3, plus2mod3(i2, 3)))
+		end # open segment ]b2,c2[
+		return IT(a1 => (i1+3, i2))
 	elseif dca ≤ ε
-		return TI(idx1[1], idx2[3], idx2[1])
+		return IT(a1 => (i1+3, plus1mod3(i2)))
 	end
 	# a1 ∈ interior of other face
-	return TI(idx1[1], 2, 0)
-end#»»
-# inter_arrow1 ««
+	return IT(a1 => (i1+3, 0))
+end
+# inter_arrow1 ««2
 """
     inter_arrow1
 
@@ -541,88 +732,9 @@ function inter_arrow1(((p1,q1,r1),idx1), ((p2,q2,r2),idx2),
 	@assert abs(drp_u-cross(p2b-r2b,u-r2b)) < 1e-9
 	# Sutherland-Cohen to intersect segment [a,u] with triangle a2b2c2:
 	# trivial reject cases
-	dpq_p < -ε && dpq_u < -ε && return TI(empty)
-	dqr_p < -ε && dqr_u < -ε && return TI(empty)
-	drp_p < -ε && drp_u < -ε && return TI(empty)
-	# Rotate p2q2r2 so that p1 is either inside, or outside (pq) but inside
-	# (qr), i.e. change to signs -+? if possible:
-# 	if dpq_p ≥ ε
-# 		if dqr_p ≥ ε
-# 			if     drp_p ≥ ε i=1 # inside the triangle
-# 			elseif drp_p ≤-ε i=2 
+	dpq_p < -ε && dpq_u < -ε && return IT()
+	dqr_p < -ε && dqr_u < -ε && return IT()
+	drp_p < -ε && drp_u < -ε && return IT()
 	
 	
-end #»»
-
-"""
-    Computes the intersection between 2d segment and triangle
-
-Returns a `TriangleIntersection` structure.
-"""
-function inter2_segment_triangle((u1,v1),idx1,(p2,q2,r2),idx2;
-	dpqr = cross(q2-p2,r2-p2), ε)
-	# compute position of u:
-	dpq_u = cross(q2-p2, u-p2)
-	dqr_u = cross(r2-q2, u-q2)
-	drp_u = dpqr - dpq_u - dqr_u
-	@assert abs(drp_u-cross(p2-r2,u-r2)) < 1e-9
-	# likewise for v:
-	dpq_v = cross(q2-p2, v-p2)
-	dqr_v = cross(r2-q2, v-q2)
-	drp_v = dpqr - dpq_v - dqr_v
-	# easy reject cases: segment lies fully outside one side of triangle
-	dpq_u < -ε && dpq_v < -ε && return TI(empty)
-	dqr_u < -ε && dqr_v < -ε && return TI(empty)
-	drp_u < -ε && drp_v < -ε && return TI(empty)
-	# rotate triangle to standard configuration:
-	# -+?, i.e. out
-	@inline _out1(i) = inter2_segment_triangle_out1( # -++
-		(u1,v1),idx1, permute3.(i,(p2,q2,r2),idx2)...; dpqr, ε)
-	@inline _out2(i) = inter2_segment_triangle_out2( # --+
-		(u1,v1),idx1, permute3.(i,(p2,q2,r2),idx2)...; dpqr, ε)
-	@inline _edge(i) = inter2_segment_triangle_edge( # 0++
-		(u1,v1),idx1, permute3.(i,(p2,q2,r2),idx2)...; dpqr, ε)
-	@inline _vertex(i) = inter2_segment_triangle_vertex(
-		(u1,v1),idx1, permute3.(i,(p2,q2,r2),idx2)...; dpqr, ε)
-# 	if dqr_u > ε
-# 		if drp_u > ε
-# 			if     dpq_u > ε return _inside()
-# 			elseif dpq_u <-ε return _out1(3)  # ++- => -++
-# 			else             return _edge(3)  # ++0 => 0++
-# 			end
-# 		elseif drp_u < -ε # +-
-# 			if     dpq_u > ε return _out1(2)  # +-+ => -++
-# 			elseif dpq_u <-ε return _out2(2)  # +-- => --+
-# 			else             @assert false    # +-0 ?
-# 			end
-# 		else # +0
-# 			if     dpq_u > ε return _edge(2)  # +0+ => 0++
-# 			elseif dpq_u <-ε @assert false # +0- ?
-# 			else             return _vertex(1)# +00
-# 			end
-# 		end
-# 	elseif  dqr_u <-ε
-# 		if drp_u > ε
-# 			if     dpq_u > ε return _out1(2)  # +-+ => -++
-# 			elseif dpq_u <-ε return _out2(2)  # +-- => --+
-# 			else             @assert false    # -+0 ?
-# 			end
-# 		elseif drp_u <-ε
-# 			if 
 end
-
-function inter(t1::Triangle{2}, t2::Triangle{2};
-	ε=_THICKNESS, d2=det(t2), common_edge = 0)#««
-	(p1, q1, r1) = vertices(t1)
-	(p2, q2, r2) = vertices(t2)
-	u2 = q2-p2; v2=r2-p2
-
-	# FIXME: this is already computed in inter(::Triangle{3}),
-	# as one of the components of the `normal2` vector...
-	# and, since we projected on the “right” coordinates, we know that area2>0
-	@assert d2 == det(t2)
-	@assert d2 == det(u2, v2)
-	@assert d2 > ε
-end#»»
-
-end # module
