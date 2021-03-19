@@ -1,5 +1,11 @@
+"""
+    TriangleIntersections
+
+Routines for computing the intersection of two 2d or 3d triangles.
+The triangle vertices may be of any type which supports:
+indexation, `cross`, `dot`, and interaction with `Projector` type.
+"""
 module TriangleIntersections
-# import Meshes: Point, Triangle, coordtype, vertices, coordinates
 using LinearAlgebra
 using StaticArrays
 
@@ -12,7 +18,6 @@ using StaticArrays
 @inline monotonic(a,b,c) = dot(a-b,c-b) ≤ 0
 @inline samepoint(a,b) = norm(a-b,1) ≤ 1e-8
 
-@inline real_type(x...)=Float64
 _THICKNESS=1e-8
 @inline plus1mod3(i,j=0)=(i==1) ? 2+j : (i==2) ? 3+j : 1+j
 @inline plus2mod3(i,j=0)=(i==1) ? 3+j : (i==2) ? 1+j : 2+j
@@ -29,16 +34,24 @@ struct IntersectionData{N,P} <: AbstractVector{Tuple{P,NTuple{2,Int8}}}
 	npoints::Int
 	pttype::MVector{N,NTuple{2,Int8}}
 	points::MVector{N,P}
+	@inline IntersectionData{N}(npoints::Int, pttype::MVector{N},
+		points::MVector{N}) where{N} =
+		new{N,eltype(points)}(npoints, pttype, points)
 	@inline function IntersectionData{N}(npoints::Int, pttype, points) where{N}
 		it = new{N,eltype(points)}(npoints, MVector{N,NTuple{2,Int8}}(undef),
 			MVector{N,eltype(points)}(undef))
-		it.pttype[1:npoints] .= pttype
-		it.points[1:npoints] .= points
+		# instead of broadcasting, we write the loop: this allows us to
+		# over-specify the set of points
+		for i in 1:npoints
+			it.pttype[i] = pttype[i]; it.points[i] = points[i]
+		end
 		return it
 	end
 	@inline IntersectionData{N}(pt::Pair...) where{N} =
 		IntersectionData{N}(length(pt), last.(pt), first.(pt))
 end
+@inline allocsize(::Type{<:IntersectionData{N}}) where{N} = N
+@inline allocsize(t::IntersectionData) = allocsize(typeof(t))
 @inline Base.size(it::IntersectionData) = (it.npoints,)
 @inline Base.getindex(it::IntersectionData, i) = (it.points[i], it.pttype[i])
 @inline function Base.show(io::IO, it::IntersectionData)
@@ -51,6 +64,17 @@ function swap!(it::IntersectionData)
 		it.pttype[i] = it.pttype[i][[2,1]]
 	end
 	return it
+end
+@inline function rename!(it::IntersectionData, side::Int, table)
+	if side == 1
+		for i in 1:length(it)
+			it.pttype[i] = (table[1+it.pttype[i][1]], it.pttype[i][2])
+		end
+	else
+		for i in 1:length(it)
+			it.pttype[i] = (it.pttype[i][1], table[1+it.pttype[i][2]])
+		end
+	end
 end
 
 
@@ -372,25 +396,54 @@ function inter2_segment_triangle((u1,v1),(p2,q2,r2),i2=1;
 	return ID(UVQR(), P2(0))
 end
 
-# function inter(t1::Triangle{2}, t2::Triangle{2};
-# 	ε=_THICKNESS, d2=det(t2), common_edge = 0)#««
-# 	(p1, q1, r1) = vertices(t1)
-# 	(p2, q2, r2) = vertices(t2)
-# 	u2 = q2-p2; v2=r2-p2
-# 
-# 	# FIXME: this is already computed in inter(::Triangle{3}),
-# 	# as one of the components of the `normal2` vector...
-# 	# and, since we projected on the “right” coordinates, we know that area2>0
-# 	@assert d2 == det(t2)
-# 	@assert d2 == det(u2, v2)
-# 	@assert d2 > ε
-# end#»»
+# inter2 ««2
+"""
+    inter2
 
+Computes the intersection of two 2d triangles.
+dpqr is the determinant of second triangle (assumed > 0).
+"""
+function inter2((p1,q1,r1),(p2,q2,r2), dpqr, ε=_THICKNESS)
+	@assert dpqr ≈ det2(p2,q2,r2)
+	@assert dpqr > ε
+
+	itpq = inter2_segment_triangle((p1,q1),(p2,q2,r2); dpqr, ε)
+	itqr = inter2_segment_triangle((q1,r1),(p2,q2,r2); dpqr, ε)
+	itrp = inter2_segment_triangle((r1,p1),(p2,q2,r2); dpqr, ε)
+	# glue those three together:
+	rename!(itpq, 1, (3,4,5))
+	rename!(itqr, 1, (1,5,6))
+	rename!(itrp, 1, (2,6,4))
+	points = similar(itqr.points, 6)
+	pttype = similar(itqr.pttype, 6)
+	n = 0
+
+	@inline function push!(x, j::Int)
+		@inbounds for i in 1:length(x)-j
+			pttype[n+i] = x.pttype[i]
+			points[n+i] = x.points[i]
+		end
+		n += (length(x)-j)
+	end
+	push!(itpq, last(itpq)[2] == first(itqr)[2] ? 1 : 0)
+	push!(itqr, last(itqr)[2] == first(itrp)[2] ? 1 : 0)
+	push!(itrp, last(itrp)[2] == first(itpq)[2] ? 1 : 0)
+	return IntersectionData{6}(n, pttype, points)
+end
 # 3d intersections««1
 # basic geometry stuff««2
 
 
 # Projector ««2
+"""
+    Projector
+
+A structure containing information about a 3d -> 2d projection
+defined via selecting coordinates (so not orthogonal),
+and optionally about the lift back to a certain plaine in 3d.
+
+Can be applied to any type by defining methods for `lift` and `project`.
+"""
 struct Projector{T}
 	dir::Int8
 	lift::NTuple{3,T}
@@ -398,6 +451,13 @@ end
 struct FormalInv{X}
 	x::X
 end
+"""
+    Projector(direction)
+
+Computes a linear projector,
+i.e. just a pair of coordinates to extract for
+orientation-preserving, faithful 3d→2d projection.
+"""
 @inline function Projector(direction::AbstractVector) # no lift
 	@inbounds u1 = direction[1]
 	@inbounds u2 = direction[2]
@@ -422,6 +482,12 @@ end
 	end
 end
 
+"""
+    Projector(direction, point)
+
+Computes an affine projector, i.e. defines the affine lift
+as well as the projection.
+"""
 @inline function Projector(direction::AbstractVector, point)
 	@inbounds u1 = direction[1]
 	@inbounds u2 = direction[2]
@@ -448,6 +514,31 @@ end
 		          return P(-1, (-u3/u1, -u2/u1, d/u1))
 	end
 end
+"""
+    project(p::Projector, u)
+
+Computes the projection for a given vector.
+This has, by default, methods for `Tuple`, `AbstractVector`,
+and `StaticVector{3}`. To make this module work with other types,
+these methods should be extended (cf. the `StaticVector{3}` method definition).
+"""
+@inline function project(p::Projector, u)
+	p.dir == 1 && return (u[2], u[3])
+	p.dir == 2 && return (u[3], u[1])
+	p.dir == 3 && return (u[1], u[2])
+	p.dir ==-1 && return (u[3], u[2])
+	p.dir ==-2 && return (u[1], u[3])
+	p.dir ==-3 && return (u[2], u[1])
+	@assert false
+end
+"""
+    lift(p::Projector, u)
+
+Computes the affine lift for a vector.
+This has, by default, methods for `Tuple`, `AbstractVector`,
+and `StaticVector{2}`. To make this module work with other types,
+these methods should be extended (cf. the `StaticVector{2}` method definition).
+"""
 @inline function lift(p::Projector, u)
 	z = p.lift[1]*u[1]+p.lift[2]*u[2]+p.lift[3]
 	p.dir == 1 && return (z, u[1], u[2])
@@ -456,15 +547,6 @@ end
 	p.dir ==-1 && return (z, u[2], u[1])
 	p.dir ==-2 && return (u[1], z, u[2])
 	p.dir ==-3 && return (u[2], u[1], z)
-	@assert false
-end
-@inline function project(p::Projector, u)
-	p.dir == 1 && return (u[2], u[3])
-	p.dir == 2 && return (u[3], u[1])
-	p.dir == 3 && return (u[1], u[2])
-	p.dir ==-1 && return (u[3], u[2])
-	p.dir ==-2 && return (u[1], u[3])
-	p.dir ==-3 && return (u[2], u[1])
 	@assert false
 end
 # syntactic sugar: p(u) and inv(p)(u)
@@ -478,46 +560,39 @@ Base.inv(p::Projector) = FormalInv{typeof(p)}(p)
 @inline project(p::Projector, u::StaticVector{3}) = SVector(project(p,(u...,)))
 
 # lifting intersection data
-function lift(p::Projector, it::IntersectionData)
-	return 
+@inline function lift(p::Projector, it::IntersectionData)
+	return IntersectionData{allocsize(it)}(length(it),
+		last.(it), inv(p).(first.(it)))
 end
 
 # inter(triangle1, triangle2) ««2
 """
-    inter(triangle1, triangle2; ε)
+    inter(triangle1, triangle2, ε)
 
 Returns a description of the intersection of two 3-dimensional triangles.
-This is returned as a IntersectionData structure, encoded in the following way:
+This is returned as a `IntersectionData` structure,
+encoded in the following way:
  - 0: point is interior to one triangle
  - 1,2,3: point is on an edge qr, rp, pq
  - 4,5,6: point is on a vertex p, q, r
+
+Both arguments may be of any types, as long as that type supports enumeration
+to three vertices, and those are compatible with basic geometry operations.
 """
 function inter((p1,q1,r1),(p2,q2,r2), ε=_THICKNESS)
+	# loosely inspired by
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
 	#   https://hal.inria.fr/inria-00072100/document]
-	# https://github.com/yusuketomoto/ofxCGAL/blob/master/libs/CGAL/include/CGAL/Triangle_3_Triangle_3_intersection.h
-	# https://fossies.org/linux/CGAL/include/CGAL/Intersections_3/internal/Triangle_3_Triangle_3_do_intersect.h
 	@debug "computing triangle-triangle intersection\n($p1,$q1,$r1)\n($p2,$q2,$r2)"
 
-	# return types:
+	# return type:
 	ID = IntersectionData{6}
 
-	normal2= (cross(q2-p2, r2-p2))
+	normal2= cross(q2-p2, r2-p2)
 
 	dp1 = dot(normal2, p1-p2)
 	dq1 = dot(normal2, q1-p2)
 	dr1 = dot(normal2, r1-p2)
-
-	# filter for adjacent faces: these have opposed edges (detected with
-	# vertex labels) and are not collinear
-	# (they might also be collinear, but this is a bit harder to detect).
-# 	    if idx1[1] == idx2[1] && idx1[2] == idx2[3]
-# 		abs(dr1) > ε && return ID()
-# 	elseif idx1[2] == idx2[2] && idx1[3] == idx2[1]
-# 		abs(dp1) > ε && return ID()
-# 	elseif idx1[3] == idx2[3] && idx1[1] == idx2[2]
-# 		abs(dq1) > ε && return ID()
-# 	end
 
 	# permute both triangles as needed so that t2 separates p1 from q1, r1
 	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
@@ -563,14 +638,11 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=_THICKNESS)
 		end,
 		"0+-" => begin
 			@permute3! i (p2,q2,r2,dp2,dq2,dr2)
-# 			(j > 3) && (normal2 = -normal2; dp1 = -dp1; dq1 = -dq1; dr1 = -dr1)
-# 			@permute3! j (p1,q1,r1)
 			return swap!(inter_arrow((p2,q2,r2), i, (p1,q1,r1), j, (dp2,dq2,dr2),
 					normal1, ε))
 		end,
 		"+00" => begin
 			@assert false
-# 		"+00" => (return _border2(i,1)),
 		end,
 		"+--" => (i2+=i-1),
 		"-++" => (i2+=i-1; i1+=3),
@@ -617,7 +689,6 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=_THICKNESS)
 	@inline Q2(x)= barycenter(q2, p2, dp2/(dp2-dq2))=>(x,P2Q2)
 	@inline R2(x)= barycenter(r2, p2, dp2/(dp2-dr2))=>(x,P2R2)
 
-	# TODO: +00 cases (3a or 3b in https://www.polibits.gelbukh.com/2013_48/Triangle-Triangle%20Intersection%20Determination%20and%20Rlassification%20to%20Support%20Qualitative%20Spatial%20Reasoning.pdf)
 	dq1r2 = dot(p1p2q1, r2-p1)
 	@debug "dq1r2 = $dq1r2"
 	if dq1r2 < -ε
@@ -747,23 +818,17 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	@debug "in inter_border\n($u1,$v1)\n($p2,$q2,$r2)"
 	dpqr = abs(normal2[abs(proj.dir)])
 	it = inter2_segment_triangle((u1,v1), (a2,b2,c2), 1; dpqr, ε)
-	length(it) == 0 && return ID()
-
-	(pt1, (u1, v1)) = it[1]; z1 = inv(proj)(pt1)
-	w1 = (u1==1) ? plus1mod3(i1, 3) : (u1==2) ? plus2mod3(i1, 3) : i1
-	length(it) == 1 && return ID(z1 => (w1,v1))
-
-	(pt2, (u2,v2)) = it[2]; z2 = inv(proj)(pt2)
-	w2 = (u2==1) ? plus1mod3(i1, 3) : (u2==2) ? plus2mod3(i1, 3) : i1
-	return ID(z1 => (w1, v1), z2 => (w2, v2))
+	rename!(it, 1, (i1, plus1mod3(i1,3), plus2mod3(i1,3)))
+	return inv(proj)(it)
 end
-# inter_coplanar
+# inter_coplanar ««2
 
 @inline function inter_coplanar((p1,q1,r1), (p2,q2,r2), normal2, ε)
 	ID = IntersectionData{6}
 	proj = Projector(normal2, p2)
 	(a1,b1,c1,a2,b2,c2) = proj.((p1,q1,r1,p2,q2,r2))
-	it = inter((a1,b1,c1),(a2,b2,c2))
+	dpqr = abs(normal2[abs(proj.dir)])
+	it = inter2((a1,b1,c1),(a2,b2,c2), dpqr, ε)
 	return inv(proj)(it)
 end
 #»»1
