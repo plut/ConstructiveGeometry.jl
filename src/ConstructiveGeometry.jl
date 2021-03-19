@@ -77,7 +77,8 @@ The type of real numbers to which objects of type `T` are promoted.
 
 # Dict of lists
 DictOfLists{A,B} = Dict{A,Vector{B}}
-@inline function listpush!(d::DictOfLists, (key, val)) # listpush!(l, k=>v)
+DictOfSets{A,B} = Dict{A,Set{B}}
+@inline function listpush!(d, (key, val)) # listpush!(l, k=>v)
 	!haskey(d, key) && (d[key] = [])
 	push!(d[key], val)
 end
@@ -1194,6 +1195,7 @@ end
 #————————————————————— Meshing (2d) —————————————————————————————— ««1
 
 include("SpatialSorting.jl")
+include("TriangleIntersections.jl")
 
 #»»1
 # Generic code for 2d and 3d meshing««1
@@ -2494,6 +2496,24 @@ triangles(s::AbstractSurface) =
 	TrianglesIterator{coordtype(s),typeof(s)}(s)
 Base.size(tri::TrianglesIterator) = (nfaces(tri.surface),)
 
+# Edge list««2
+function edges(s::AbstractSurface)
+	list = NTuple{2,Int}[]
+	sizehint!(list, length(faces(s))<<1)
+	# for a closed, oriented surface, this will count each edge exactly once:
+	for f in faces(s)
+		f[1] < f[2] && push!(list, (f[1], f[2]))
+		f[2] < f[3] && push!(list, (f[2], f[3]))
+		f[3] < f[1] && push!(list, (f[3], f[1]))
+	end
+	return list
+end
+@inline function edge(f::SVector{3,Int}, i::Integer)
+	i == 1 && return minmax(f[2], f[3])
+	i == 2 && return minmax(f[3], f[1])
+	i == 3 && return minmax(f[1], f[2])
+	return edge(f, mod1(i, 3))
+end
 # Face edges iterator««2
 struct FaceEdgesIterator{T}
 	vertices::T
@@ -3417,21 +3437,86 @@ function self_intersect(s::AbstractSurfaceIncidence)
 		edge_points = edge_points,
 		face_points = face_points)
 end
-function self_int2(s::AbstractSurfaceIncidence; ε=_THICKNESS)
-	boxes = [ boundingbox(t...) for t in triangles(s) ]
-	for (i1, i2) in intersections(boxes)
-		tri1 = triangle(s, i1)
-		tri2 = triangle(s, i2)
+function self_int2(s::AbstractSurface; ε=_THICKNESS)
+	T = eltype(eltype(vertices(s)))
+	n = nvertices(s)
+	new_points = similar(vertices(s), 0)
+	new_edges = NTuple{2,Int}[]
+	face_points = DictOfSets{Int,Int}()
+	edge_points = Dict([ e=>Int[] for e in edges(s)])
+	edge_coords = Dict([ e=>T[] for e in edges(s)])
+
+	@inline function add_point_edge!(e, k, p)#««
+		@debug "adding point $k to edge $e ««"
+		k ∈ edge_points[e] && return
+		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
+		# fixme: unroll this loop to allow constant-propagation:
+		i = argmax(abs.(vec))
+		if length(edge_points[e]) == 0 # most common case
+			push!(edge_points[e], k)
+			push!(edge_coords[e], p[i])
+			@debug "first point on this edge, insertion is trivial»"*"»"
+			return
+		end
+# 		dprintln("  sorted by coordinate $i ($(vec[i]))")
+# 		dprintln("  e=$e")
+		rev = (vec[i] < 0)
+		j = searchsorted(edge_coords[e], p[i]; rev=rev)
+# 		dprintln("  inserting at position $j, $(first(j))")
+		insert!(edge_points[e], first(j), k)
+		insert!(edge_coords[e], first(j), p[i])
+		@debug "  now edge_points[$e] = $(edge_points[e])\n»»"
+	end#»»
+
+	boxes = [ boundingbox(vertices(t)...) for t in triangles(s) ]
+	for (i1, i2) in SpatialSorting.intersections(boxes)
 	# we know that the bounding boxes of faces (i) and (j) intersect,
 	# now determine the intersection type of those two triangles
-	# possible types:
-	# vv: ignore this (we will simplify points in the next step)
-	# ve:
-	# vf: 6 cases (vertices of i in face j, and conversely)
-	# ee: 9 possibilities (3 × 3 edges)
-	# ef: 6 cases (edges of i in face j)
-	# ff: coincident supporting planes; counted as “vf” or “ve”
+		(f1, f2) = faces(s)[i1], faces(s)[i2]
+		tri1 = triangles(s)[i1]
+		tri2 = triangles(s)[i2]
+		p1 = coordinates.(vertices(tri1))
+		p2 = coordinates.(vertices(tri2))
+		it = TriangleIntersections.inter(p1, p2, ε)
+		@debug "$i1=$tri1\n$i2=$tri2\n intersection: $it"
+		isempty(it) && continue
+		(v1, v2) = last(it)[2]
+		for (i, (coords, (u1, u2))) in pairs(it)
+			@debug "  types: ($u1, $u2); previous=($v1,$v2)"
+			(v1, v2) = (u1, u2)
+			# pindex = number of new point (created if necessary)««
+			if u1 ≥ 4 pindex = f1[u1-3]
+			elseif u2 ≥ 4 pindex = f2[u2-3]
+			else
+				pt = Point(coords)
+				pindex = findfirst(isapprox(pt; atol=_THICKNESS), new_points)
+				if pindex == nothing
+					push!(new_points, pt)
+					pindex = length(new_points)
+				end
+				pindex+= n
+			end#»»
+
+			# if this point is inside a face or an edge, add it««
+			if u1 == 0
+				listpush!(face_points, f1 => pindex)
+			elseif u1 ≤ 3
+				add_point_edge!(edge(f1, u1), pindex, pt)
+			end
+			if u2 == 0
+				listpush!(face_points, f2 => pindex)
+			elseif u2 ≤ 3
+				add_point_edge!(edge(f2, u2), pindex, pt)
+			end#»»
+			# check if this creates a new edge with the cyclically previous point
+
+		end
 	end
+	# FIXME: new edges??
+	return (points = new_points,
+		edge_points = edge_points,
+		face_points = face_points,
+		new_edges   = new_edges)
 end
 
 # Sub-triangulation««2
