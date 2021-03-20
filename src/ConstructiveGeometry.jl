@@ -2344,23 +2344,23 @@ function project_2d(plane::Polyhedra.HyperPlane)
 end
 
 # Intersections (3d)««2
-# function inter(s1::Segment{3}, s2::Segment{3}; thickness = 0)
-# 	(a1, b1) = vertices(s1)
-# 	(a2, b2) = vertices(s2)
-# # 	d = det3(a1, b1, a2, b2)
-# # 	@debug "inter: d=$d"
-# # 	!iszero(d) && return nothing
-# 	# compute supporting plane
-# 	plane = supporting_plane(Triangle(a1, b1, a2))
-# 	# check all points are coplanar
-# 	abs(plane(b2)) > thickness && return nothing
-# 	iszero(direction(plane)) && return a2
-# 	(proj, lift) = project_2d(plane)
-# 	int2 = inter(Segment(a1[proj],b1[proj]), Segment(a2[proj],b2[proj]);
-# 		thickness)
-# 	int2 == nothing && return nothing
-# 	return lift(int2)
-# end
+function inter(s1::Segment{3}, s2::Segment{3}; thickness = 0)
+	(a1, b1) = vertices(s1)
+	(a2, b2) = vertices(s2)
+# 	d = det3(a1, b1, a2, b2)
+# 	@debug "inter: d=$d"
+# 	!iszero(d) && return nothing
+	# compute supporting plane
+	plane = supporting_plane(Triangle(a1, b1, a2))
+	# check all points are coplanar
+	abs(plane(b2)) > thickness && return nothing
+	iszero(direction(plane)) && return a2
+	(proj, lift) = project_2d(plane)
+	int2 = inter(Segment(a1[proj],b1[proj]), Segment(a2[proj],b2[proj]);
+		thickness)
+	int2 == nothing && return nothing
+	return lift(int2)
+end
 
 # Rays««2
 """
@@ -2498,20 +2498,20 @@ Base.size(tri::TrianglesIterator) = (nfaces(tri.surface),)
 
 # Edge list««2
 function edges(s::AbstractSurface)
-	list = NTuple{2,Int}[]
+	list = SVector{2,Int}[]
 	sizehint!(list, length(faces(s))<<1)
 	# for a closed, oriented surface, this will count each edge exactly once:
 	for f in faces(s)
-		f[1] < f[2] && push!(list, (f[1], f[2]))
-		f[2] < f[3] && push!(list, (f[2], f[3]))
-		f[3] < f[1] && push!(list, (f[3], f[1]))
+		f[1] < f[2] && push!(list, SA[f[1], f[2]])
+		f[2] < f[3] && push!(list, SA[f[2], f[3]])
+		f[3] < f[1] && push!(list, SA[f[3], f[1]])
 	end
 	return list
 end
 @inline function edge(f::SVector{3,Int}, i::Integer)
-	i == 1 && return minmax(f[2], f[3])
-	i == 2 && return minmax(f[3], f[1])
-	i == 3 && return minmax(f[1], f[2])
+	i == 1 && return SA[minmax(f[2], f[3])...]
+	i == 2 && return SA[minmax(f[3], f[1])...]
+	i == 3 && return SA[minmax(f[1], f[2])...]
 	return edge(f, mod1(i, 3))
 end
 # Face edges iterator««2
@@ -3439,9 +3439,10 @@ function self_intersect(s::AbstractSurfaceIncidence)
 end
 function self_int2(s::AbstractSurface; ε=_THICKNESS)
 	T = eltype(eltype(vertices(s)))
+	TI = TriangleIntersections
 	n = nvertices(s)
 	new_points = similar(vertices(s), 0)
-	new_edges = NTuple{2,Int}[]
+	new_edges = Set{SVector{2,Int}}()
 	face_points = DictOfSets{Int,Int}()
 	edge_points = Dict([ e=>Int[] for e in edges(s)])
 	edge_coords = Dict([ e=>T[] for e in edges(s)])
@@ -3477,16 +3478,19 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 		tri2 = triangles(s)[i2]
 		p1 = coordinates.(vertices(tri1))
 		p2 = coordinates.(vertices(tri2))
-		it = TriangleIntersections.inter(p1, p2, ε)
+		it = TI.inter(p1, p2, ε)
 		@debug "$i1=$tri1\n$i2=$tri2\n intersection: $it"
 		isempty(it) && continue
 		(v1, v2) = last(it)[2]
+		tmp_newedges = UInt8(0)
+		tmp_pindex = MVector{6,Int}(undef)
 		for (i, (coords, (u1, u2))) in pairs(it)
 			@debug "  types: ($u1, $u2); previous=($v1,$v2)"
-			(v1, v2) = (u1, u2)
 			# pindex = number of new point (created if necessary)««
-			if u1 ≥ 4 pindex = f1[u1-3]
-			elseif u2 ≥ 4 pindex = f2[u2-3]
+			if TI.isvertex(u1)
+				pindex = f1[TI.index(u1)]; pt = vertices(s)[pindex]
+			elseif TI.isvertex(u2)
+				pindex = f2[TI.index(u2)]; pt = vertices(s)[pindex]
 			else
 				pt = Point(coords)
 				pindex = findfirst(isapprox(pt; atol=_THICKNESS), new_points)
@@ -3498,18 +3502,28 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 			end#»»
 
 			# if this point is inside a face or an edge, add it««
-			if u1 == 0
+			if iszero(u1)
 				listpush!(face_points, f1 => pindex)
-			elseif u1 ≤ 3
-				add_point_edge!(edge(f1, u1), pindex, pt)
+			elseif TI.isedge(u1)
+				add_point_edge!(edge(f1, TI.index(u1)), pindex, pt)
 			end
-			if u2 == 0
+			if iszero(u2)
 				listpush!(face_points, f2 => pindex)
-			elseif u2 ≤ 3
-				add_point_edge!(edge(f2, u2), pindex, pt)
+			elseif TI.isedge(u2)
+				add_point_edge!(edge(f2, TI.index(u2)), pindex, pt)
 			end#»»
 			# check if this creates a new edge with the cyclically previous point
+			if !TI.same_edge(u1, v1) && !TI.same_edge(u2, v2)
+				tmp_newedges |= (1<<i)
+			end
 
+			(v1, v2) = (u1, u2); tmp_pindex[i] = pindex
+		end
+		for i in 1:length(it)
+			if !iszero(tmp_newedges & (1<<i))
+				push!(new_edges, 
+					[minmax(tmp_pindex[i], tmp_pindex[mod1(i-1, length(it))])...])
+			end
 		end
 	end
 	# FIXME: new edges??
@@ -3548,7 +3562,10 @@ self-intersection points.
 """
 function subtriangulate(s::AbstractSurfaceIncidence)
 # 	println("self-intersect...")
-	self_int = self_intersect(s)
+	self_int = self_int2(s)
+	global G1 = self_intersect(s)
+	global G2 = self_int2(s)
+	
 # 	println("subtriangulate...")
 # 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
