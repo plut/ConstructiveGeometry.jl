@@ -79,7 +79,7 @@ The type of real numbers to which objects of type `T` are promoted.
 DictOfLists{A,B} = Dict{A,Vector{B}}
 DictOfSets{A,B} = Dict{A,Set{B}}
 @inline function listpush!(d, (key, val)) # listpush!(l, k=>v)
-	!haskey(d, key) && (d[key] = [])
+	!haskey(d, key) && (d[key] = valtype(d)())
 	push!(d[key], val)
 end
 	
@@ -3503,12 +3503,12 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 
 			# if this point is inside a face or an edge, add it««
 			if iszero(u1)
-				listpush!(face_points, f1 => pindex)
+				listpush!(face_points, i1 => pindex)
 			elseif TI.isedge(u1)
 				add_point_edge!(edge(f1, TI.index(u1)), pindex, pt)
 			end
 			if iszero(u2)
-				listpush!(face_points, f2 => pindex)
+				listpush!(face_points, i2 => pindex)
 			elseif TI.isedge(u2)
 				add_point_edge!(edge(f2, TI.index(u2)), pindex, pt)
 			end#»»
