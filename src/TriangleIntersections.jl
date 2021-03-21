@@ -135,6 +135,11 @@ end
 	end
 	return it
 end
+@inline function shift1!(it::IntersectionData, turn::Integer)
+	for i in 1:length(it)
+		it.pttype[i] = (it.pttype[i][1]<<turn, it.pttype[i][2])
+	end
+end
 @inline function rename!(it::IntersectionData, side::Int, table)
 	if side == 1
 		for i in 1:length(it)
@@ -251,14 +256,15 @@ function inter_segment2_halfplane(it::IntersectionData, halfplane, t; ε=0)
 		d2 <-ε && return ID()
 		d2 ≤ ε && return ID(u2 => (a2, b2|t))
 		# opposite signs: compute intersection
-		return ID(inter_point() => (Constants.interior, t), u2 => (a2, b2))
+		# FIXME this is wrong, should use (a
+		return ID(inter_point() => (a1&a2, (b1&b2)|t), u2 => (a2, b2))
 	elseif d1 ≤ ε # u1 ∈ (pq)
 		d2 <-ε && return ID(u1 => (a1, b1|t))
 		d2 ≤ ε && return ID(u1 => (a1, b1|t), u2 => (a2, b2|t))
 		return ID(u1 => (a1, b1|t), u2 => (a2, b2))
 	end
 	# d1 > ε
-	d2 <-ε && return ID(u1 => (a1, b1), inter_point() => (Constants.interior, t))
+	d2 <-ε && return ID(u1 => (a1, b1), inter_point() => (a1&a2, (b1&b2)|t))
 	d2 ≤ ε && return ID(u1 => (a1, b1), u2 => (a2, b2|t))
 	return ID(u1 => (a1, b1), u2 => (a2, b2))
 end
@@ -287,15 +293,8 @@ function inter_triangle2((p1,q1,r1),(p2,q2,r2); ε=0)
 	itqr = inter_segment2_triangle2((q1,r1),(p2,q2,r2); ε)
 	itrp = inter_segment2_triangle2((r1,p1),(p2,q2,r2); ε)
 	# glue those three together:
-	rename1!(itpq, Constants.interior=>Constants.edge12,
-		Constants.vertex1=>Constants.vertex1,
-		Constants.vertex2=>Constants.vertex2)
-	rename1!(itqr, Constants.interior=>Constants.edge23,
-		Constants.vertex1=>Constants.vertex2,
-		Constants.vertex2=>Constants.vertex3)
-	rename1!(itrp, Constants.interior=>Constants.edge31,
-		Constants.vertex1=>Constants.vertex3,
-		Constants.vertex2=>Constants.vertex1)
+	shift1!(itqr, 1)
+	shift1!(itrp, 2)
 	points = similar(itqr.points, 6)
 	pttype = similar(itqr.pttype, 6)
 	n = 0
@@ -465,7 +464,7 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 	# loosely inspired by
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
 	#   https://hal.inria.fr/inria-00072100/document]
-	@debug "computing triangle-triangle intersection\n($p1,$q1,$r1)\n($p2,$q2,$r2)"
+# 	@debug "computing triangle-triangle intersection\n($p1,$q1,$r1)\n($p2,$q2,$r2)"
 
 	# return type:
 	ID = IntersectionData{6,typeof(p1)}
@@ -478,7 +477,7 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 
 	# permute both triangles as needed so that t2 separates p1 from q1, r1
 	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
-	@debug "signs for p1,q1,r1: $(Int.(sign.((dp1,dq1,dr1))))"
+# 	@debug "signs for p1,q1,r1: $(Int.(sign.((dp1,dq1,dr1))))"
 	@tree27((dp1,dq1,dr1),
 		"+++" => (return ID()),
 		"0--" => begin
@@ -486,16 +485,16 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 			return inter_touch((p1,q1,r1), turn, (p2,q2,r2), normal2, ε)
 		end,
 		"0+-" => begin
-			@debug "config inter_arrow 1 with ($p1,$q1,$r1,$dp1,$dq1,$dr1) turn=$turn"
+# 			@debug "config inter_arrow 1 with ($p1,$q1,$r1,$dp1,$dq1,$dr1) turn=$turn"
 			@permute3! turn (p1,q1,r1,dp1,dq1,dr1)
 # 			(direct > 3) && (normal2 = -normal2; dp1 = -dp1; dq1 = -dq1; dr1 = -dr1)
 # 			@permute3! direct (p2,q2,r2)
-			@debug " -> ($p1,$q1,$r1,$dp1,$dq1,$dr1)"
+# 			@debug " -> ($p1,$q1,$r1,$dp1,$dq1,$dr1)"
 		return inter_arrow((p1,q1,r1), turn, (p2,q2,r2), flip,
 			(dp1,dq1,dr1), normal2, ε)
 		end,
 		"+00" => begin
-			@debug "config inter_border 1, turn=$turn"
+# 			@debug "config inter_border 1, turn=$turn"
 			@permute3! turn (p1,q1,r1)
 		return inter_border((p1,q1,r1), turn, (p2,q2,r2), normal2, ε)
 		end,
@@ -504,19 +503,18 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 			return inter_coplanar((p1,q1,r1), (p2,q2,r2), normal2, ε)
 		end,
 	)
-	@debug "now (i1,i2)=($i1,$i2)"
+# 	@debug "now (i1,i2)=($i1,$i2)"
 
 	# likewise for second triangle
 	normal1 = cross(q1-p1, r1-p1)
 	dp2 = dot(normal1, p2-p1)
 	dq2 = dot(normal1, q2-p1)
 	dr2 = dot(normal1, r2-p1)
-	@debug "signs for dp2 dq2 dr2: $(Int.(sign.((dp2,dq2,dr2))))"
+# 	@debug "signs for dp2 dq2 dr2: $(Int.(sign.((dp2,dq2,dr2))))"
 	@tree27((dp2,dq2,dr2),
 		"+++" => (return ID()),
 		"0--" => begin
 			i2+= turn; (i2 ≥ 3) && (i2 -= 3);
-			println("now i2=$i2")
 			@permute3! i2 (p2,q2,r2)
 			return swap!(inter_touch((p2,q2,r2), i2, (p1,q1,r1), normal1, ε))
 		end,
@@ -526,14 +524,14 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 				(dp2,dq2,dr2), normal1, ε))
 		end,
 		"+00" => begin
-			@debug "config inter_border 2, turn=$turn"
+# 			@debug "config inter_border 2, turn=$turn"
 			@permute3! turn (p2,q2,r2)
 		return swap!(inter_border((p2,q2,r2), turn, (p1,q1,r1), normal1, ε))
 		end,
 		"+--" => (i2+=turn),
 		"-++" => (i2+=turn; i1+=3),
 	)
-	@debug "now i1,i2 = $((i1,i2))"
+# 	@debug "now i1,i2 = $((i1,i2))"
 
 	# apply both permutations ««
 	(lp1, lq1, lr1) = (lp2,lq2,lr2) =
@@ -561,12 +559,12 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 	# dq1q2 is a determinant comparing the positions of q1 and q2
 	p1p2q1 = cross(p2-p1, q1-p1)
 	dq1q2 = dot(p1p2q1, q2-p1)
-	@debug "dq1q2=$dq1q2"
+# 	@debug "dq1q2=$dq1q2"
 	dq1q2 < -ε && return ID()
 
 	p1p2r1 = cross(p2-p1, r1-p1)
 	dr1r2 = dot(p1p2r1, r2-p1)
-	@debug "dr1r2=$dr1r2"
+# 	@debug "dr1r2=$dr1r2"
 	dr1r2 > ε && return ID()
 
 	P1Q1=lp1&lq1; P1R1=lp1&lr1;
@@ -578,7 +576,7 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 	@inline R2(x)= barycenter(r2, p2, dp2/(dp2-dr2))=>(x,P2R2)
 
 	dq1r2 = dot(p1p2q1, r2-p1)
-	@debug "dq1r2 = $dq1r2"
+# 	@debug "dq1r2 = $dq1r2"
 	if dq1r2 < -ε
 		dq1q2 ≤ ε && return ID(Q2(P1Q1))
 		dr1q2 = dot(p1p2r1, q2-p1)
@@ -618,7 +616,7 @@ function inter_touch((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	# To decide: project everything on the plane of face2
 	# and compute three 2d determinants
 	proj = Projector(normal2)
-	@debug "entering inter_touch $i1"
+# 	@debug "entering inter_touch $i1"
 	ID=IntersectionData{6,typeof(p1)}
 
 	a1 = proj(p1)
@@ -634,7 +632,7 @@ function inter_touch((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	@assert abs(dca-cross(a2-c2,a1-c2)) < 1e-9
 	dca < -ε && return ID()
 
-	@debug "point $a1 in ($a2,$b2,$c2): $dab, $dbc, $dca"
+# 	@debug "point $a1 in ($a2,$b2,$c2): $dab, $dbc, $dca"
 	if dab ≤ ε # it cannot be <-ε, so a1 ∈ [a2,b2]
 		if dbc ≤ ε
 			@assert samepoint(a1,b2)
@@ -668,17 +666,11 @@ function inter_arrow((p1,q1,r1), turn, (p2,q2,r2), flip,
 	(zp1, zq1, zr1), normal2, ε)
 	proj = Projector(normal2, p2)
 	ID = IntersectionData{6,typeof(p1)}
-# 	@assert j ∈ (1,4)
-	if flip; @assert zq1 <-ε; @assert zr1 > ε
-	else; @assert zq1 > ε; @assert zr1 <-ε
-	end
 	@assert abs(zp1) ≤ ε
-# 	@assert zq1 > ε
-# 	@assert zr1 <-ε
 # 	@debug "arrow($i1,$i2): $p2,$q2,$r2; $normal2 -> $(proj.dir)"
 
 	(a1,b1,c1,a2,b2,c2) = proj.((p1,q1,r1,p2,q2,r2))
-	@debug "$a2,$b2,$c2"
+# 	@debug "$a2,$b2,$c2"
 	dpqr = abs(normal2[abs(proj.dir)])
 	# we know that interior of segment (q1,r1) intersects plane 2:
 	v = barycenter(b1, c1, zr1/(zr1-zq1))
@@ -710,7 +702,7 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	ID = IntersectionData{6,typeof(p1)}
 	proj = Projector(normal2, p2)
 	(u1,v1,a2,b2,c2) = proj.((q1,r1,p2,q2,r2))
-	@debug "in inter_border\n($u1,$v1)\n($p2,$q2,$r2)\nproj=$proj"
+# 	@debug "in inter_border\n($u1,$v1)\n($p2,$q2,$r2)\nproj=$proj"
 	dpqr = abs(normal2[abs(proj.dir)])
 	it = inter_segment2_triangle2((u1,v1), (a2,b2,c2); ε)
 	rename1!(it, Constants.interior => Constants.edge23<<i1,

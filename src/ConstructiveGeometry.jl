@@ -3497,6 +3497,11 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 				if pindex == nothing
 					push!(new_points, pt)
 					pindex = length(new_points)
+					@debug """
+creating point $pindex=$pt: faces ($i1,$i2), type=($u1,$u2)
+coords 1: $p1
+coords 2: $p2
+					"""
 				end
 				pindex+= n
 			end#»»
@@ -3563,8 +3568,8 @@ self-intersection points.
 function subtriangulate(s::AbstractSurfaceIncidence)
 # 	println("self-intersect...")
 	self_int = self_int2(s)
-	global G1 = self_intersect(s)
-	global G2 = self_int2(s)
+# 	global G1 = self_intersect(s)
+# 	global G2 = self_int2(s)
 	
 # 	println("subtriangulate...")
 # 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
@@ -3589,10 +3594,10 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 		@debug "from face $i=$(faces(s)[i]): $plane"
 		cluster = coplanar_faces(s, plane, _THICKNESS)
 		push!(cluster, i)
-		str="cluster=$cluster"*
-			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
-		@debug "««cluster=$cluster"*
-			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
+# 		str="cluster=$cluster"*
+# 			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
+# 		@debug "««cluster=$cluster"*
+# 			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
 
 		proj = project_2d(direction(plane))
 		pset = Set{Int}()
@@ -3747,13 +3752,13 @@ function faces_around_edge(s::AbstractSurfaceIncidence,
 			return flist[reorder[k.stop]]
 		end
 	end
-	str = "faces around edge $edge: $flist\n"
-	for i in reorder
-		f = abs(flist[i])
-		p3 = sum(faces(s)[f]) - sum(edge)
-		str*= "  face $(flist[i]) to vertex $p3: vec2=$(face_vec2[i])\n"
-	end
-	@debug str
+# 	str = "faces around edge $edge: $flist\n"
+# 	for i in reorder
+# 		f = abs(flist[i])
+# 		p3 = sum(faces(s)[f]) - sum(edge)
+# 		str*= "  face $(flist[i]) to vertex $p3: vec2=$(face_vec2[i])\n"
+# 	end
+# 	@debug str
 	return flist[reorder]
 end
 

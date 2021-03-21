@@ -1,5 +1,5 @@
 # Immediate work
- - [ ] split in several packages:
+ - [?] split in several packages:
   - `AbstractGeometry`
 	- `StrongIndices`
 	- `AABBTree`
@@ -11,9 +11,6 @@
  inclusion (as defined on connected components) does not work in this
  case
    - [x] solution could be in correctly counting opposite faces...
- - [ ] see if `merge()` should remove opposite faces
-   - [ ] **NO**, they are needed to correctly compute multiplicity (e.g.
-		 `cube(2)\cube(1)`
  - [x] linear extrusion of PolygonXor
  - [x] rotate extrusion
  - [ ] intersection with half-plane and half-space
@@ -55,7 +52,7 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
 	 - this is simplest (it works as a xor polygon, whereas converting any
 		 xor to this is harder)
  - [x] reorganize inside the file
- - [ ] split in several files after all (will help in `include()` time)?
+ - [?] split in several files after all (will help in `include()` time)?
  - [ ] 3d => 2d projection
  - [ ] 3d => 2d intersection with plane
  - [x] a common name for meshing objects
