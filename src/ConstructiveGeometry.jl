@@ -3215,6 +3215,7 @@ self-intersection points.
 function subtriangulate(s::AbstractSurfaceIncidence)
 # 	println("self-intersect...")
 	self_int = self_intersect(s)
+	# FIXME: do something with new_edges
 # 	println("subtriangulate...")
 # 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"

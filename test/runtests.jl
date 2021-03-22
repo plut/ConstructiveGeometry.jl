@@ -1,6 +1,7 @@
 using ConstructiveGeometry
 using Test
 using StaticArrays
+using LinearAlgebra
 using ConstructiveGeometry: _FIXED, Vec, Point, Path
 using ConstructiveGeometry: from_clipper, to_clipper
 using ConstructiveGeometry: children, vertices
@@ -99,11 +100,131 @@ v = [[-1,0],[0,-1],[1,0],[0,1]]
 m = [CG.circular_sign(i,j) for i in v, j in v]
 @test sign.(m) == [0 1 1 1; -1 0 1 1; -1 -1 0 1; -1 -1 -1 0]
 end
-# @testset "Intersection" begin#««1
-# seg1 = CG.Segment(Point(0,0,2), Point(0,2,0))
-# seg2 = CG.Segment(Point(0,1,1), Point(1,0,1))
-# @test CG.inter(seg1, seg2) == Point(0,1,1)
-# end
+@testset "Triangle intersection" begin#««1
+TI=CG.TriangleIntersections
+Pos=TI.Constants
+pts(m) = ([Float64.(m[i,:]) for i in 1:size(m,1)]...,)
+function check_inter1(s, t, n)#««
+	it = inter(s,t)
+	return length(it)==n &&
+		all(u[1] ==  pttype(p, s) && u[2] == pttype(p,t) for (p,u) in it)
+end#»»
+function check_inter(s1,t1,n)#««
+	perm = (([1],),
+		([1,2],[2,1]),
+		([1,2,3],[2,3,1],[3,1,2],[1,3,2],[2,1,3],[3,2,1]))
+	s = (s1[p] for p in perm[length(s1)])
+	if length(s1) == 2
+		t = (t1[p] for p in perm[3][1:3])
+	else
+		t = (t1[p] for p in perm[length(t1)])
+	end
+	return all(check_inter1(s2,t2,n) for s2 in s, t2 in t)
+end#»»
+function pttype(a,(u,v)::NTuple{2},ε=1e-8)#««
+	abs(TI.det2(u,v,a)) > ε && return -1
+	t = dot(a-u,v-u)/dot(v-u,v-u)
+	t < 0-ε && return Pos.invalid
+	t > 1+ε && return Pos.invalid
+	t ≤ 0+ε && return Pos.vertex1
+	t ≥ 1-ε && return Pos.vertex2
+	return Pos.edge12
+end#»»
+function pttype(a,(p,q,r)::NTuple{3,<:StaticVector{2}},ε=1e-8)#««
+	(d1,d2,d3) = (TI.det2(q,r,a),TI.det2(r,p,a),TI.det2(p,q,a))
+	s(x) = (x > ε) ? '+' : (x<-ε) ? '-' : '0'
+	m = s(d1)s(d2)s(d3)
+	@assert '+' ∈ m "bad point type ($m)for $a in ($p, $q, $r)"
+	m == "+++" && return Pos.interior
+	m == "0++" && return Pos.edge23
+	m == "+0+" && return Pos.edge31
+	m == "++0" && return Pos.edge12
+	m == "+00" && return Pos.vertex1
+	m == "0+0" && return Pos.vertex2
+	m == "00+" && return Pos.vertex3
+	return Pos.invalid
+end#»»
+@inline inter(s::NTuple{2}, t::NTuple{3}) = TI.inter_segment2_triangle2(s,t)
+@inline inter(s::NTuple{3,<:StaticVector{3}}, t::NTuple{3}) = TI.inter(s,t)
+t2=pts(SA[0 0;10 0;0 10])
+
+# vertices:
+@test check_inter(pts(SA[-1 1;10 0]), t2, 2)
+@test check_inter(pts(SA[-1 1;0 10]), t2, 1)
+@test check_inter(pts(SA[-5 5;0 0]), t2, 1)
+# edges:
+@test check_inter(pts(SA[-1 1;2 0]), t2, 2)
+@test check_inter(pts(SA[-1 1;0 2]), t2, 1)
+@test check_inter(pts(SA[-1 1;7 3]), t2, 2)
+# contact with vertices:
+@test check_inter(pts(SA[-5 5;1 -1]), t2, 1)
+# inside:
+@test check_inter(pts(SA[-1 1;1 1]), t2, 2)
+# outside:
+@test check_inter(pts(SA[-1 1;2 10]), t2, 2)
+@test check_inter(pts(SA[-1 5;2 20]), t2, 1)
+@test check_inter(pts(SA[-1 5;2 30]), t2, 0)
+@test check_inter(pts(SA[-1 5;10 -3]), t2, 2)
+function pttype(a,(p,q,r)::NTuple{3,<:StaticVector{3}},ε=1e-8)#««
+	normal2 = cross(q-p,r-p)
+	if abs(dot(normal2, p-a)) > ε
+		return -1
+	end
+	proj = TI.Projector(normal2)
+	(a1, p1, q1, r1) = proj.((a,p,q,r))
+	return pttype(a1, (p1,q1,r1), ε)
+end#»»
+t3 = pts(SA[0 0 0;5 0 0;0 5 0])
+function dotest(c, a, b, n)#««
+	# triangle on plane [x+y=c],
+	# crossing [z=0] at (3-a,a,0) and (3-b,b,0)
+	# (edges 3 and 2)
+	t1 = pts(SA[c-a a 1; c-a a -1; c-2b+a 2b-a  -1])
+
+	check_inter(t3,t1,n)
+	check_inter(t1,t3,n)
+end#»»
+@test check_inter(pts(SA[2. 0 0;2 2 0;1 1 1]),
+		pts(SA[3. 2 0;1 2 0;2 1 1]), 2)
+	# touch configuration:
+@test dotest(0, -2, -1, 0)
+@test dotest(0, -2, 0,  1)
+@test dotest(0, -2, 1, 1)
+@test dotest(0, 0, 1, 1)
+@test dotest(0, 1, 2, 0)
+
+	# general position:
+@test dotest(3, -2,-1, 0)
+@test dotest(3, -1, 0, 1)
+@test dotest(3, -1, 2, 2)
+@test dotest(3, -1, 3, 2)
+@test dotest(3, -1, 4, 2)
+
+@test dotest(3, 0, 2, 2)
+@test dotest(3, 0, 3, 2)
+@test dotest(3, 0, 4, 2)
+
+@test dotest(3, 1, 2, 2)
+@test dotest(3, 1, 3, 2)
+@test dotest(3, 1, 4, 2)
+
+@test dotest(3, 3, 4, 1)
+@test dotest(3, 5, 4, 0)
+
+	# arrow configuration:
+@test check_inter(pts(SA[-1 1 1;-1 1 -1;2 2 0]), t3, 2)
+
+	# border configuration:
+@test check_inter(pts(SA[0 0 0;5 0 0;0 0 1]), t3, 2)
+@test check_inter(pts(SA[-1 1 0; 2 2 0;0 0 1]), t3, 2)
+@test check_inter(pts(SA[1 0 0;3 0 0;0 0 1]), t3, 2)
+
+	# coplanar
+@test check_inter(pts(SA[1 1 0;2 1 0;1 2 0]), t3, 3)
+@test check_inter(pts(SA[-1 2 0;2 -1 0;6 6 0]), t3, 6)
+@test check_inter(pts(SA[28. 0 0;12 0 0;20 0 -8]),
+		pts(SA[25. 0 0;20 0 -5;15 0 0]), 2)
+end
 @testset "Surfaces" begin #««1
 using ConstructiveGeometry: Surface, merge, select_faces, mesh
 using ConstructiveGeometry: nvertices, nfaces
