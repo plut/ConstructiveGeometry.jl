@@ -2453,7 +2453,7 @@ function select_faces(list::AbstractVector{<:Integer}, s::AbstractSurface)
 	list = list[keep]
 	@debug "after removing opposites, $(length(list)) remain"
 	renum = fill(0, eachindex(vertices(s)))
-	newfaces = SVector{3,Int}[]
+	newfaces = similar(faces(s), 0)
 	newpoints = similar(vertices(s),0)
 	for i in list
 		if i > 0
@@ -2724,11 +2724,8 @@ function SurfacePatches(s::AbstractSurfaceIncidence)
 		mark_face(i₀, n)
 		while !isempty(visit)
 			i = pop!(visit); f = faces(s)[i]
-# 			println(collect(face_edges(f)))
 			for e in face_edges(f)
-# 				println("  adjacent edge $e")
 				adj = filter(!isequal(i), abs.(inc_ef(s)[e]))
-# 				println("  faces = $adj")
 				if length(adj) == 1
 					# regular edge: 2 adjacent faces. One is f, mark the other.
 					iszero(label[adj[1]]) && mark_face(adj[1], n)
@@ -2939,17 +2936,11 @@ function self_intersect(s::AbstractSurface; ε=0)
 		if !haskey(edge_points, e)
 			edge_points[e] = [k]
 			edge_coords[e] = [p[i]]
-# 		if length(edge_points[e]) == 0 # most common case
-# 			push!(edge_points[e], k)
-# 			push!(edge_coords[e], p[i])
 			@debug "first point on this edge, insertion is trivial"
 			return
 		end
-# 		dprintln("  sorted by coordinate $i ($(vec[i]))")
-# 		dprintln("  e=$e")
 		rev = (vec[i] < 0)
 		j = searchsorted(edge_coords[e], p[i]; rev=rev)
-# 		dprintln("  inserting at position $j, $(first(j))")
 		insert!(edge_points[e], first(j), k)
 		insert!(edge_coords[e], first(j), p[i])
 		@debug "  now edge_points[$e] = $(edge_points[e])"
@@ -3053,14 +3044,15 @@ self-intersection points.
 """
 function subtriangulate(s::AbstractSurfaceIncidence;
 		ε=0, type=Float64)
-# 	println("self-intersect...")
 	self_int = self_intersect(s; ε)
 	# FIXME: do something with new_edges
-# 	println("subtriangulate...")
-# 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
+# 	explain(s, "/tmp/before-subtriangulate.scad", scale=40)
 	newpoints = [ vertices(s); self_int.points ]
-	newfaces = SVector{3,Int}[]
+	newfaces = similar(faces(s), 0)
+	# FIXME we can probably compute the number of faces in advance;
+	# this should be better than nothing:
+	sizehint!(newfaces, nfaces(s))
 	@inline edge_points(e1, e2) =
 		e1 < e2 ? self_int.edge_points[SA[e1,e2]] :
 		reverse(self_int.edge_points[SA[e2,e1]])
@@ -3071,6 +3063,7 @@ function subtriangulate(s::AbstractSurfaceIncidence;
 	for e in keys(self_int.edge_points)
 		push!(faces_todo, abs.(inc_ef(s)[e])...)
 	end
+	unchanged_faces = trues(nfaces(s))
 	@debug "$(length(faces_todo)) faces to do: $faces_todo" *
 		join(["\n $i=$(faces(s)[i])" for i in faces_todo])
 	while !isempty(faces_todo)
@@ -3138,7 +3131,7 @@ function subtriangulate(s::AbstractSurfaceIncidence;
 				# FIXME: check orientation of face!
 				if issubset(t, ps)
 					t1 = i > 0 ? t : SA[t[1],t[3],t[2]]
-					@debug "  (face $i) pushing $t1 to newtriangles"
+					@debug "  (face $i) pushing $t1 to newfaces"
 					push!(newfaces, t1)
 				end
 			end
@@ -3146,11 +3139,15 @@ function subtriangulate(s::AbstractSurfaceIncidence;
 		end
 		@debug "cluster done»»"
 
-		for j in cluster
-			delete!(faces_todo, abs(j))
+		for j in abs.(cluster)
+			delete!(faces_todo, j)
+			unchanged_faces[j] = false
 		end
 	end
-	@debug "newfaces=$(Vector.(newfaces))"
+	for (b, f) in zip(unchanged_faces, faces(s))
+		b && push!(newfaces, f)
+	end
+	@debug "$(length(newfaces)) newfaces=$(Vector.(newfaces))"
 
 # 	for (i, f) in pairs(faces(s))#««
 # 		extra = get(self_int.face_points, i, Int[])
@@ -3389,9 +3386,12 @@ function multiplicity_levels(s::AbstractSurfacePatches)
 # 	@debug " Input surface:\n"*strscad(s)
 # 	explain(s, "/tmp/before-multiplicity.scad", scale=40)
 # 	println("multiplicity...")
-	@debug "regular components: $(components(s))"
-	@debug "  labeling: $(label(s))"
-	@debug "  adjacency: $(adjacency(s))"
+# 	@debug """
+# solid = $s
+# regular components: $(components(s))
+#   labeling: $(label(s))
+#   adjacency: $(adjacency(s))
+# """
 
 	levels = LevelStructure(length(components(s)))
 	for (i1, r1) in pairs(components(s)), i2 in 1:i1-1
@@ -3460,8 +3460,8 @@ function multiplicity_levels(s::AbstractSurfacePatches)
 end
 # Binary union and intersection««2
 function select_multiplicity(m, parameters, s::AbstractSurface...)
-	t = subtriangulate(SurfaceIncidence(merge(s...));
-		ε = get_parameter(parameters, :ε),
+	ε = get_parameter(parameters, :ε)
+	t = subtriangulate(SurfaceIncidence(merge(s...; ε)); ε,
 		type = get_parameter(parameters, :type))
 	face_idx = multiplicity_levels(SurfacePatches(SurfaceIncidence(t)))
 	@debug "select_multiplicity««"
