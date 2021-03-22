@@ -1,7 +1,9 @@
 # Immediate work
- - clean the type system once and for all:
-  - suggestion: leat `AbstractGeometry` objects have a mess of types,
-		and only decide on a type at meshing type
+ - [ ] clean the type system once and for all:
+  - [ ] suggestion: leat `AbstractGeometry` objects have a mess of types
+		if they so want,
+  - [ ] and only decide on a coord. type at meshing type (as a parameter).
+	- [ ] take advantage to allow exact (rational) arithmetic
  - [?] split in several packages:
   - [ ] `AbstractGeometry`
 	- [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
@@ -68,11 +70,11 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [x] fix `Offset` for polygon xor
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works
-# Performances
+# Performance
  - [ ] try to use SIMD (e.g. bbox computation)
- - [ ] `@inbounds` wherever possible
- - [ ] use `sizehint!` for arrays
- - [ ] use an AABB tree (bounding box tree) for intersection detection
+ - [?] `@inbounds` wherever possible
+ - [x] use `sizehint!` for arrays
+ - [x] use an AABB tree (bounding box tree) for intersection detection
 # Dependencies
  - [ ] `CircularArrays.jl` ?
  - [ ] `Dictionaries.jl` ?

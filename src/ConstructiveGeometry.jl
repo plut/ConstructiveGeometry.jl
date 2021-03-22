@@ -1623,44 +1623,6 @@ function halfplane(p12::Pair{<:Point{2}}, p3::Point{2})
 	return Polyhedra.HalfSpace(s*l.a, s*l.β)
 end
 
-"""
-    hrep(pt1, pt2, pt3)
-
-Returns the triple of half-planes delimiting the interior of the given
-triangle.
-"""
-function hrep(p1::Point{2}, p2::Point{2}, p3::Point{2})
-	return (halfplane(p1=>p2, p3),
-	        halfplane(p2=>p3, p1),
-	        halfplane(p3=>p1, p2))
-end
-
-function line_inter(s1::Segment{2}, s2::Segment{2})
-	((x1,y1), (x2,y2)) = coordinates.(vertices(s1))
-	((x3,y3), (x4,y4)) = coordinates.(vertices(s2))
-	d=(x1-x2)*(y3-y4)-(y1-y2)*(x3-x4)
-	iszero(d) && return nothing
-	a = x1*y2-y1*x2; b = x3*y4-y3*x4
-	d1 = inv(to_real(d))
-	return Point(standardize.(d1 .* SA[a*(x3-x4)-b*(x1-x2), a*(y3-y4)-b*(y1-y2)]))
-end
-function inter(s1::Segment{2}, s2::Segment{2}; thickness = 0)
-	c = line_inter(s1, s2)
-	(c == nothing) && return nothing
-	((x1,y1), (x2,y2)) = coordinates.(vertices(s1))
-	((x3,y3), (x4,y4)) = coordinates.(vertices(s2))
-	(c[1] > x1 + thickness && c[1] > x2 + thickness) && return nothing
-	(c[1] > x3 + thickness && c[1] > x4 + thickness) && return nothing
-	(c[2] > y1 + thickness && c[2] > y2 + thickness) && return nothing
-	(c[2] > y3 + thickness && c[2] > y4 + thickness) && return nothing
-	(c[1] < x1 - thickness && c[1] < x2 - thickness) && return nothing
-	(c[1] < x3 - thickness && c[1] < x4 - thickness) && return nothing
-	(c[2] < y1 - thickness && c[2] < y2 - thickness) && return nothing
-	(c[2] < y3 - thickness && c[2] < y4 - thickness) && return nothing
-# 	if c ∉ boundingbox(s1) return nothing; end
-# 	if c ∉ boundingbox(s2) return nothing; end
-	return c
-end
 #Convex hull««1
 # 2d convex hull ««2
 
@@ -2343,140 +2305,6 @@ function project_2d(plane::Polyhedra.HyperPlane)
 	return (coordinates=coords, lift=Affine(m, c))
 end
 
-# Intersections (3d)««2
-function inter(s1::Segment{3}, s2::Segment{3}; thickness = 0)
-	(a1, b1) = vertices(s1)
-	(a2, b2) = vertices(s2)
-# 	d = det3(a1, b1, a2, b2)
-# 	@debug "inter: d=$d"
-# 	!iszero(d) && return nothing
-	# compute supporting plane
-	plane = supporting_plane(Triangle(a1, b1, a2))
-	# check all points are coplanar
-	abs(plane(b2)) > thickness && return nothing
-	iszero(direction(plane)) && return a2
-	(proj, lift) = project_2d(plane)
-	int2 = inter(Segment(a1[proj],b1[proj]), Segment(a2[proj],b2[proj]);
-		thickness)
-	int2 == nothing && return nothing
-	return lift(int2)
-end
-
-# Rays««2
-"""
-    AffineRay
-
-An open ray, of the form `a + ]0,∞[ v`.
-"""
-struct AffineRay{D,T} <: Geometry{D,T}
-	origin::Point{D,T}
-	direction::Vec{D,T}
-end
-
-@inline direction(a::AffineRay) = a.direction
-@inline origin(a::AffineRay) = a.origin
-@inline AffineRay(origin::SVector{D}, direction::SVector{D}) where{D} =
-	AffineRay{D,promote_type(eltype.((origin,direction))...)}(origin, direction)
-
-"""
-    intersects(a::AffineRay{3}, t::Triangle)
-
-Returns 1 iff ray intersects triangle in given order,
--1 if it intersects in opposite order, otherwise 0.
-
-Algorithm is inspired by Segura-Feito[1]:
-after translating everything so that the ray starts at the origin,
-we apply the linear transformation
-x ↦ (⟨x,v2,v3⟩,⟨v1,x,v3⟩,⟨v1,v2,x⟩)  (⟨⟩ is the determinant)
-This maps the three points of the triangle to
-(δ,0,0), (0,δ,0), (0,0,δ), where δ=⟨v1,v2,v3⟩.
-The sign of δ gives the position of the origin w.r.t the triangle: δ>0
-iff the origin is *inside* the triangle.
-
-Once the vertices of the triangle are aligned to the axes, the ray
-intersects the triangle iff the 3 coordinates of its direction `u` are >0.
-This means that ⟨u,v2,v3⟩, ⟨v2,u,v3⟩, ⟨v1,v2,u⟩ > 0.
-
-[1] https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.2.2084&rep=rep1&type=pdf
-
-"""
-function intersects(a::AffineRay, t::Triangle, strict = false)
-	u = a.direction
-	(v1, v2, v3) = [x-a.origin for x ∈ vertices(t)]
-	d = det3(v1, v2, v3)
-	# FIXME: could be make slightly faster (but less readable)
-	# by precomputing u∧v2
-	if strict
-		if (d > 0 && det3(u, v2, v3) > 0
-			&& det3(v1, u, v3) > 0 && det3(v1, v2, u) > 0)
-			return 1
-		elseif (d < 0 && det3(u, v2, v3) < 0
-			&& det3(v1, u, v3) < 0 && det3(v1, v2, u) < 0)
-			return -1
-		end
-	else
-		if (d ≥ 0 && det3(u, v2, v3) ≥ 0
-			&& det3(v1, u, v3) ≥ 0 && det3(v1, v2, u) ≥ 0)
-			return 1
-		elseif (d ≤ 0 && det3(u, v2, v3) ≤ 0
-			&& det3(v1, u, v3) ≤ 0 && det3(v1, v2, u) ≤ 0)
-			return -1
-		end
-	end
-	return 0
-end
-
-
-struct AffineRayInv{D,T} <: Geometry{D,T}
-	origin::Vec{D,T}
-	direction::Vec{D,T}
-	inv_dir::Vec{D,T}
-end
-_inv0(x::Real) = iszero(x) ? zero(real_type(x)) : inv(to_real(x))
-@inline inv(a::AffineRay{D,T}) where{D,T} =
-	AffineRayInv{D,real_type(T)}(a.origin, a.direction, _inv0.(a.direction))
-
-"""
-    intersects(a::AffineRay{3}, b::BBox)
-
-https://tavianator.com/2011/ray_box.html
-"""
-function intersects(a::AffineRayInv{3}, b::BBox; strict=false)
-	tmin = zero(eltype(a.direction))
-	tmax = typemax(eltype(a.direction))
-	for i in 1:3
-		# position = x + t*z, hence t = (position-x)*z1
-		x = a.origin[i]; z = a.direction[i]; z1 = a.inv_dir[i]
-		u = b.proj[i]
-		if iszero(z)
-			if x < u.low || x > u.high return false; end
-		else
-			# if z > 0 then p_min = x+tmin*z, p_max = x+tmax*z
-			#   (thus tmin = (pmin-x)*z1, tmax = (pmax-x)*z1)
-			# else tmin, tmax are swapped
-			@inline f(v) = (v-x)*z1
-			if z > 0
-				tmax = min(tmax, f(u.high))
-				tmin = min(tmin, f(u.low))
-			else
-				tmax = min(tmax, f(u.low))
-				tmin = min(tmin, f(u.high))
-			end
-			if strict
-				if tmin ≥ tmax return false; end
-			else
-				if tmin > tmax return false; end # early abort
-			end
-		end
-	end
-	return true
-end
-
-function intersections(a::AffineRay, s::AbstractSurface,
-		minface = 0)
-	return sum(intersects(a, Triangle(s,i), i>minface )
-		for i in eachindex(faces(s)))
-end
 # Operations on triangulated surfaces««1
 # Triangle iterator««2
 struct TrianglesIterator{T,S} <:
@@ -2599,8 +2427,6 @@ Combines both triangulations, renumbering points of `s2` as needed.
 	return simplify(concatenate(slist...); ε)
 end
 function concatenate(slist::AbstractSurface...)
-# 	renum = [ collect(offset[i]+1:offset[i]+nvertices(s))
-# 		for (i,s) in pairs(slist) ]
 	newfaces = sizehint!(copy(faces(first(slist))), sum(nfaces.(slist)))
 	newpoints= sizehint!(copy(vertices(first(slist))), sum(nvertices.(slist)))
 	offset = 0
@@ -3257,188 +3083,8 @@ triangulate(points::AbstractMatrix{<:Real}, faces) =
 # 3d union and intersection««1
 # After [Zhou, Grinspun, Zorin, Jacobson](https://dl.acm.org/doi/abs/10.1145/2897824.2925901)
 # Self-intersection««2
-# TODO: move all intersection computations to clean little functions
-"""
-    self_intersect(s::AbstractSurface)
-
-Returns all self-intersections of `s`, as a `NamedTuple`:
- - `points`: all new points of intersection (as a vector of `Point{3}`,
-   to be appended to the original geometric points of the structure).
- - `edge_points`: for all edges, a vector of indices of new points
-   (sorted in the direction of the edge).
- - `face_points`: for all faces of `s`, the list of new points in this face,
-
-Point indices are returned as indices in `vertices(s)` ∪ {new points}.
-
-"""
-function self_intersect(s::AbstractSurfaceIncidence)
-# 	println("incidence...")
-# 	inc = incidence(s; vf=false) # we only need edge_faces
-# 	println("planes...")
-	@debug "self-intersect ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
-	@debug " Input surface:\n"*strscad(s)
-	# we precompute all planes: we need them later for edge intersections
-	planes = [ supporting_plane(tri) for tri in triangles(s) ]
-
-	n = nvertices(s)
-# 	println("self_intersect: $n points at beginning")
-	new_points = similar(vertices(s), 0)
-	T = eltype(eltype(vertices(s)))
-	face_points = DictOfLists{Int,Int}()
-	edge_points = Dict([ k=>Int[] for k in keys(inc_ef(s)) ])
-	edge_coords = Dict([ k=>T[] for k in keys(inc_ef(s)) ])# used for sorting
-	@inline function create_point!(p)
-		@debug "inserting point $p"
-		j = findfirst(isapprox(p;atol=_THICKNESS), new_points)
-		if !isempty(new_points)
-			m = findmin([distance²(p,q) for q in new_points])
-		end
-		if j isa Int; return j; end
-		push!(new_points, p)
-		return n + length(new_points)
-	end
-	@inline function add_point_edge!(e, k, p)#««
-		@debug "adding point $k to edge $e ««"
-		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
-		# fixme: unroll this loop to allow constant-propagation:
-		i = argmax(abs.(vec))
-		if length(edge_points[e]) == 0 # most common case
-			push!(edge_points[e], k)
-			push!(edge_coords[e], p[i])
-			@debug "first point on this edge, insertion is trivial»"*"»"
-			return
-		end
-# 		dprintln("  sorted by coordinate $i ($(vec[i]))")
-# 		dprintln("  e=$e")
-		rev = (vec[i] < 0)
-		j = searchsorted(edge_coords[e], p[i]; rev=rev)
-# 		dprintln("  inserting at position $j, $(first(j))")
-		insert!(edge_points[e], first(j), k)
-		insert!(edge_coords[e], first(j), p[i])
-		@debug "  now edge_points[$e] = $(edge_points[e])\n»»"
-	end#»»
-
-# 	println("faces...")
-	@debug "face-edge and face-vertex intersections: ««\n"
-	# face-edge and face-vertex intersections
-	for (i, f) in pairs(faces(s))
-# 		println("  face $i: $f")
-		# set up infrastructure for this face
-		triangle = vertices(s)[f]
-		bbox = boundingbox(triangle...)
-		plane = planes[i]
-		(proj, lift) = project_2d(plane)
-		triangle2 = hrep([p[proj] for p in triangle]...) # hrep of projection
-
-		# face-vertex intersections««
-		for (j, p) in pairs(vertices(s))
-			if j ∈ f || p ∉ bbox || !isapprox(plane(p), 0; atol=1e-10)
-				continue
-			end
-			p2 = p[proj]
-			if any(h(p2) <= 0 for h in triangle2)
-				continue
-			end
-			# vertex is inside this face, mark it
-			@debug "vertex $j is inside face $i=$f"
-			listpush!(face_points, i => j)
-		end#»»
-		# face-edge intersections««
-		for (e, flist) in pairs(inc_ef(s))
-			segment = Segment(vertices(s)[e]...)
-			if isempty(boundingbox(segment) ∩ bbox) || !isempty(e ∩ f)
-				continue
-			end
-			# FIXME move this to a segment ∩ triangle function
-			(z1, z2) = plane.(vertices(segment))
-			# correct for some rounding errors for vertices in the plane
-			(z1*z2 ≥ 0 || abs(z1) <= 1e-10 || abs(z2) <= 1e-10 ) && continue
-
-			# the previous line ensures that z1 ≠ z2, so this never fails:
-			(a1, a2) = coordinates.(vertices(segment))
-			p2 = Point((z2*a1[proj] - z1*a2[proj])/(z2-z1))
-			if any(h(p2) <= 0 for h in triangle2)
-				continue
-			end
-			p3 = lift(p2)
-			k = create_point!(p3)
-			@debug "+p$k = $p3: edge $e ∩ face $i=$f"
-			@debug "adding point $k to face $i=$f"
-			@assert norm(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]])) <= 1e-3*norm(vertices(s)[e[1]]-vertices(s)[e[2]])
-# 			dprintln("cross: $(cross(vertices(s)[e[1]]-vertices(s)[e[2]], p3-vertices(s)[e[2]]))")
-			listpush!(face_points, i=>k)
-			add_point_edge!(e, k, p3)
-		end#»»
-	end
-	@debug "»»\n"
-# 	println("edges...")
-	@debug "edge-edge and edge-vertex intersections:««\n"
-	# edge-edge and edge-vertex intersections
-	for (e, flist) in pairs(inc_ef(s))
-		# two equations define this edge:
-		# first one is that of an adjacent face
-		eq1 = planes[abs(flist[1])]
-		# for the second equation, it happens (quite often) that edges
-		# delimitate two parallel faces, so we cannot use a second face
-		# equation. Instead we project on first plane and look for an
-		# equation of the projection here.
-		v = direction(eq1)
-		(proj, kmax) = project_2d(v, Val(true))
-		eq2 = line(vertices(s)[e[1]][proj] => vertices(s)[e[2]][proj])
-
-		bbox = boundingbox(vertices(s)[e]...)
-		# edge-vertex intersections:««
-		for (j, p) in pairs(vertices(s))
-			if p ∉ bbox || j ∈ e || eq2(p[proj]) ≠ 0 || eq1(p) ≠ 0
-				continue
-			end
-
-			# edge (segment) is intersection of bbox and line,
-			# therefore here we know that the point is on the edge:
-			@debug "vertex $j is on edge $e"
-			add_point_edge!(e, j, p)
-		end#»»
-		# edge-edge intersections:««
-		for (e1, flist1) in pairs(inc_ef(s))
-
-			# TODO: could this be made simpler by just checking if determinant
-			# is zero?
-			segment = Segment(vertices(s)[e]...)
-			# this makes the iteration triangular:
-			if e1 == e break; end
-			seg1 = Segment(vertices(s)[e1]...)
-			if isempty(boundingbox(seg1) ∩ bbox) continue; end
-			if !isempty(e ∩ e1) continue; end
-			p = inter(segment, seg1; thickness=_THICKNESS)
-			if p isa Nothing continue; end
-			# check that this is not a vertex of one of the edges
-			(a1, b1, a2, b2) = vertices(s)[[e[1], e[2], e1[1], e1[2]]]
-			isapprox(p, a1; atol = _THICKNESS) && continue
-			isapprox(p, b1; atol = _THICKNESS) && continue
-			isapprox(p, a2; atol = _THICKNESS) && continue
-			isapprox(p, b2; atol = _THICKNESS) && continue
-# 			@debug "eq2 => $(eq2(p[proj]))"
-# 			if eq2(p[proj]) ≠ 0 continue; end
-			# point p is a new point and on both edges e and e1
-			@debug "edges $e and $e1 intersect"
-			k = create_point!(p)
-			@debug "+p$k = $p: edges $e ∩ $e1"
-			add_point_edge!(e, k, p)
-			add_point_edge!(e1, k, p)
-		end#»»
-	end
-	@debug " end of edges»»\n"
-	@debug face_points
-# 	@debug join("computed intersections: ",
-# 		["\n face $f=$(faces(s)[f]): $p" for(f,p) in pairs(face_points)])
-	@debug join(["\n edge $e: $p" for(e,p) in pairs(edge_points)])
-	@debug " end of self-intersect»»\n"
-	return (points = new_points,
-		edge_points = edge_points,
-		face_points = face_points)
-end
-function self_int2(s::AbstractSurface; ε=_THICKNESS)
-	@debug """self_int2 ««\n$s"""
+function self_intersect(s::AbstractSurface; ε=_THICKNESS)
+	@debug """self_intersect ««\n$s"""
 	T = eltype(eltype(vertices(s)))
 	TI = TriangleIntersections
 	n = nvertices(s)
@@ -3541,15 +3187,15 @@ end
 
 # Sub-triangulation««2
 # FIXME: thickness -> ε
-function coplanar_faces(s::AbstractSurfaceIncidence,
+function coplanar_faces(s::AbstractSurface,
 		hyperplane::Polyhedra.HyperPlane,
-		thickness = 0)
+		ε = 0)
 	# looking for connected-component faces is not enough (e.g.
 	# intersection of two objects havin a common flat side).
 	coplanar = Set{Int}()
 	for (j, f) in pairs(faces(s))
 		v = hyperplane.(vertices(s)[f])
-		if all(<(thickness), abs.(v))
+		if all(<(ε), abs.(v))
 			n = direction(supporting_plane(Triangle(vertices(s)[f])))
 			push!(coplanar, j*sign(dot(n, direction(hyperplane))))
 		end
@@ -3568,10 +3214,7 @@ self-intersection points.
 """
 function subtriangulate(s::AbstractSurfaceIncidence)
 # 	println("self-intersect...")
-	self_int = self_int2(s)
-	global G1 = self_intersect(s)
-	global G2 = self_int2(s)
-	
+	self_int = self_intersect(s)
 # 	println("subtriangulate...")
 # 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
 	@debug "subtriangulate ($(nvertices(s)) vertices, $(nfaces(s)) faces)««"
