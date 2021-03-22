@@ -30,6 +30,9 @@ import Base: length, getindex, size, iterate, keys, eltype, convert
 import Base: union, intersect, setdiff, copy, isempty, merge
 import Base: *, +, -, ∈, inv, sign, iszero
 
+include("SpatialSorting.jl")
+include("TriangleIntersections.jl")
+
 #————————————————————— Ideal objects —————————————————————————————— ««1
 #»»1
 # Types««1
@@ -1193,9 +1196,6 @@ function scad(io::IO, s::SetParameters)
 end
 
 #————————————————————— Meshing (2d) —————————————————————————————— ««1
-
-include("SpatialSorting.jl")
-include("TriangleIntersections.jl")
 
 #»»1
 # Generic code for 2d and 3d meshing««1
