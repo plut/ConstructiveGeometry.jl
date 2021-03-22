@@ -368,56 +368,6 @@ end
 
 @inline vertices(p::Polygon) = p.points
 @inline nvertices(p) = length(vertices(p))
-# # Region (as explicit union of polygons-with-holes)««2
-# """
-#     Cheese
-# 
-# A polygonal area with polygonal holes.
-# All these polygons are assumed to be simple closed loops, in direct order.
-# """
-# struct Cheese{T} <: Geometry{2,T}
-#   exterior::Polygon{T}
-#   holes::Vector{Polygon{T}}
-# end
-# 
-# Cheese(p::Polygon) = Cheese{coordtype(p)}(p, [])
-# Cheese(p::Polygon, holes::Polygon...) =
-# 	Cheese{real_type(coordtype(p), coordtype.(holes)...)}(p, [holes...])
-# 
-# @inline scad_name(::Cheese) = :polygon
-# function scad_parameters(p::Cheese)
-# 	firstindex = similar(p.holes, Int)
-# 	if length(p.holes) > 1 # else length(firstindex) == 0...
-# 		firstindex[1] = nvertices(p.exterior)
-# 		for i in 1:length(p.holes)-1
-# 			firstindex[i+1] = firstindex[i] + nvertices(p.holes[i])
-# 		end
-# 	end
-# 	points = vcat(vertices(p.exterior), vertices.(p.holes)...)
-# 	paths = [[0:nvertices(p.exterior)-1;],
-# 		[[firstindex[i] : firstindex[i]+nvertices(p.holes[i])-1;]
-# 			for i in eachindex(p.holes)]...]
-# 	return (points=points, paths=paths)
-# end
-# 
-# """
-#     Region
-# 
-# A distinct union of polygonal areas with polygonal holes.
-# 
-# Should be fillable with parity rule.
-# """
-# struct Region{T} <: Geometry{2,T}
-#   children::Vector{Cheese{T}}
-# end
-# Region(p::Cheese) = Region{coordtype(p)}([p])
-# Region(p::Polygon) = Region(Cheese(p))
-# Region(v::Vector{<:Point{2}}) = Region(Polygon(v))
-# 
-# children(r::Region) = r.children
-# @inline scad_name(::Region) = :union
-# @inline scad_parameters(::Region) = NamedTuple()
-# 
 # Empty unions and intersects««2
 """
     EmptyUnion
@@ -1201,8 +1151,6 @@ end
 # Generic code for 2d and 3d meshing««1
 mesh(s::Geometry) = mesh(s, _DEFAULT_PARAMETERS)
 # “thickness” of points, edges etc. for computing intersections:
-const _THICKNESS = 1e-8
-
 # Transformations««2
 function mesh(s::AffineTransform{3}, parameters)
 	g = mesh(s.child, parameters)
@@ -1227,7 +1175,8 @@ end
 # Default value is 0.02 (1-cos(180°/`$fa`)).
 # FIXME: explain why .005 works better
 
-_DEFAULT_PARAMETERS = (accuracy = 0.1, precision = .005, symmetry = 1)
+_DEFAULT_PARAMETERS = (accuracy = 0.1, precision = .005, symmetry = 1,
+	type = Float64, plane_thickness = 0)
 
 @inline get_parameter(parameters, name) =
 	get(parameters, name, _DEFAULT_PARAMETERS[name])
@@ -1501,8 +1450,7 @@ Polygon is assumed not self-intersecting.
 end
 @inline point_in_polygon(point::Point{2}, path::Polygon) =
 	point_in_polygon(point, vertices(path))
-# Polyhedra interface and intersections««1
-# Polyhedra types««2
+# Polyhedra interface««1
 @inline polyhedra_lib(T::Type{<:Real}) =
 	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
 
@@ -1542,12 +1490,8 @@ end
 @inline convert(T::Type{<:Polyhedra.HRepElement}, h::Polyhedra.HRepElement) =
 	T(h.a, h.β)
 
-# Intersections (2d)««2
-# we need a couple of functions in the particular case of simplexes.
-# `Polyhedra.jl` is a bit slow for these simple cases, so we write them
-# here:
+# Intersections (2d)««1
 
-standardize(x::Float64) = (x == -0.0) ? 0.0 : x
 """
     inter(path, hyperplane::Polyhedra.HyperPlane)
 
@@ -1562,8 +1506,11 @@ function inter(path::AnyPath, hyperplane::Polyhedra.HyperPlane)
 			newpath[c+= 1] = path[i]
 		end
 		for j in 1:i-1
-			if s[i] * s[j] < 0
-				newpath[c+= 1] = standardize.((s[j]*path[i]-s[i]*path[j])/(s[j]-s[i]))
+			# separating these two cases avoids some painful `-0.` expressions:
+			if s[i] < 0 < s[j]
+				newpath[c+= 1] = (s[j]*path[i]-s[i]*path[j])/(s[j]-s[i])
+			elseif s[j] < 0 < s[i]
+				newpath[c+= 1] = (s[i]*path[j]-s[j]*path[i])/(s[i]-s[j])
 			end
 		end
 	end
@@ -1580,18 +1527,18 @@ function inter(path::AnyPath, halfplane::Polyhedra.HalfSpace)
 	boundary = convert(Polyhedra.HyperPlane, halfplane)
 	n = length(path)
 	# we know that we add at most 1 new point (cutting a corner).
-	newpath = similar(path, n+1); c = 0
+	newpath = similar(path, 0); sizehint!(newpath, n+1)
 	for i in eachindex(path)
 		j = mod1(i+1, n)
 		(si, sj) = (s[i], s[j])
-		if si >= 0   newpath[c+=1] = path[i]; end
+		(si >= 0) &&  push!(newpath, path[i])
 		if si*sj < 0
 		# whiskers would generate two new points; we remove the second one
 			newpoint = inter(path[[i,j]], boundary)[1]
-			if (c==0|| newpath[c] != newpoint) newpath[c+=1] = newpoint; end
+			(c==0|| newpath[c] != newpoint) && push!(newpath, newpoint)
 		end
 	end
-	return newpath[1:c]
+	return newpath
 end
 @inline inter(path::AnyPath, h::Polyhedra.HRepElement,
 		t::Polyhedra.HRepElement...) =
@@ -2413,17 +2360,45 @@ where the boolean is `true` if the edge was reversed.
 
 Returns all pairs of coincident points (up to ε in ‖⋅‖∞) in this set.
 """
-function same_points(points::AbstractVector{<:Point{3}}; ε=_THICKNESS)
+function same_points(points::AbstractVector{<:Point{3}}; ε=0)
 	boxes = [ BBox(p, p+SA[ε,ε,ε]) for p in points ]
 	return SpatialSorting.intersections(boxes)
 end
+
+"""
+    simplify_points(points; ε)
+
+Removes duplicates from the set of points, returning (list of new points,
+map from old index to new index).
+"""
+function simplify_points(points; ε=0)
+	n = length(points)
+	samepoints= extrema.(same_points(points; ε))
+	merged = collect(1:n)
+	# merged[j]: oldindex of point replacing this one
+	for (i, j) in samepoints
+		(merged[j] > merged[i]) && (merged[j] = merged[i])
+	end
+	newindex = similar(merged)
+	newpoints = sizehint!(similar(points, 0), n)
+	for (i, j) in pairs(merged)
+		if i == j # this is a kept point
+			push!(newpoints, points[i])
+			newindex[i] = length(newpoints)
+		else # this is a relabeled point
+			newindex[i] = newindex[j]
+		end
+	end
+	return (newpoints, newindex)
+end
+
 """
     merge(s1::AbstractSurface, s2::AbstractSurface)
 
 Combines both triangulations, renumbering points of `s2` as needed.
 (Numbering in `s1` is preserved).
 """
-@inline function merge(slist::AbstractSurface...; ε=_THICKNESS)
+@inline function merge(slist::AbstractSurface...; ε=0)
 	return simplify(concatenate(slist...); ε)
 end
 function concatenate(slist::AbstractSurface...)
@@ -2443,36 +2418,9 @@ end
 
 Removes duplicate points in `s`, renumbering as needed.
 """
-function simplify(s::AbstractSurface; ε=_THICKNESS)
+function simplify(s::AbstractSurface; ε=0)
 	(newpoints, reindex) = simplify_points(vertices(s); ε)
 	return Surface(newpoints, [ reindex[f] for f in faces(s) ])
-end
-
-"""
-    simplify_points(points; ε)
-
-Removes duplicates from the set of points, returning (list of new points,
-map from old index to new index).
-"""
-function simplify_points(points; ε=_THICKNESS)
-	n = length(points)
-	samepoints= extrema.(same_points(points; ε))
-	merged = collect(1:n)
-	# merged[j]: oldindex of point replacing this one
-	for (i, j) in samepoints
-		(merged[j] > merged[i]) && (merged[j] = merged[i])
-	end
-	newindex = similar(merged)
-	newpoints = sizehint!(similar(points, 0), n)
-	for (i, j) in pairs(merged)
-		if i == j # this is a kept point
-			push!(newpoints, points[i])
-			newindex[i] = length(newpoints)
-		else # this is a relabeled point
-			newindex[i] = newindex[j]
-		end
-	end
-	return (newpoints, newindex)
 end
 
 
@@ -2790,128 +2738,6 @@ function SurfacePatches(s::AbstractSurfaceIncidence)
 		label, components, adjacency)
 end
 
-# # DirectedEdgesTriMesh««1
-# # Basic types««2
-# struct DirectedEdgesTriMesh{T}
-# 	opposite::Vector{Int} # 3×n
-# 	destination::Vector{Int}
-# 	from::T # Vector or Dict
-# 	@inline DirectedEdgesTriMesh(;opposite, destination, from) =
-# 		new{typeof(from)}(opposite, destination, from)
-# end
-# 
-# function DirectedEdgesTriMesh(
-# 		faces::AbstractVector{<:AbstractVector{<:Integer}})
-# 	@assert all(length.(faces) .== 3)
-# 	# vf[p] = [faces containing point p]
-# 	points = union(faces...)
-# 	vf = Dict(p=>Int[] for p in points)
-# 	from = Dict(p=>0 for p in points)
-# # 	from = Vector{Int}(undef, length(points))
-# 	# face i has 3i-2..3i
-# 	for (i, f) in pairs(faces), (j, p) in pairs(f[1:3])
-# 		push!(vf[p], i)
-# 		from[p] = 3*i-3+j
-# 	end
-# 	function find_edge(p, q)#««
-# 	# returns index of edge pq (in this direction)
-# 		for i in vf[p]
-# 			f = faces[i]
-# 			if f[1]==p && f[2]==q return 3*i-2
-# 			elseif f[2]==p && f[3]==q return 3*i-1
-# 			elseif f[3]==p && f[1]==q return 3*i
-# 			end
-# 		end
-# 		return 0 # opposite edge not found: we are on the boundary
-# 		# (e.g. when dissecting a triangle)
-# 	end#»»
-# 	opposite = Vector{Int}(undef, 3*length(faces))
-# 	destination=Vector{Int}(undef, 3*length(faces))
-# 	for (i, f) in pairs(faces)
-# 		destination[3*i-2] = f[2]
-# 		destination[3*i-1] = f[3]
-# 		destination[3*i  ] = f[1]
-# 		opposite[3*i-2] = find_edge(f[2], f[1])
-# 		opposite[3*i-1] = find_edge(f[3], f[2])
-# 		opposite[3*i  ] = find_edge(f[1], f[3])
-# 	end
-# 	return DirectedEdgesTriMesh(;
-# 		opposite=opposite,
-# 		destination=destination,
-# 		from=from)
-# end
-# 
-# @inline next(::DirectedEdgesTriMesh, n) = n+1-3*(n%3==0)
-# @inline prev(::DirectedEdgesTriMesh, n) = n-1+3*(n%3==1)
-# @inline nfaces(m::DirectedEdgesTriMesh) = fld(length(m.opposite),3)
-# # @inline vertices(m::DirectedEdgesTriMesh) = m.points
-# @inline opposite(m::DirectedEdgesTriMesh, ab) = m.opposite[value(ab)]
-# @inline opposite!(m::DirectedEdgesTriMesh, ab, x) =
-# 	m.oposite[value(ab)] = x
-# @inline destination(m::DirectedEdgesTriMesh, ab) = m.destination[value(ab)]
-# @inline destination!(m::DirectedEdgesTriMesh, ab, x) =
-# 	m.destination[value(ab)] = x
-# @inline from(m::DirectedEdgesTriMesh, pt) = m.from[pt]
-# @inline from!(m::DirectedEdgesTriMesh, pt, x) = m.from[pt] = x
-# 
-# # @inline function new_half_edges(m:::DirectedEdgesTriMesh, n::Integer)
-# # 	l = length(m.opposite)
-# # 	resize!(m.opposite, l+n)
-# # 	resize!(m.destination, l+n)
-# # 	return (l+1:l+n)
-# # end
-# 
-# @inline destination(m::DirectedEdgesTriMesh, ab) = m.destination[value(ab)]
-# 
-# struct DirectedEdgesTriFaces <: AbstractVector{SVector{3,Int}}
-# 	mesh::DirectedEdgesTriMesh
-# end
-# @inline Base.size(itr::DirectedEdgesTriFaces) = (nfaces(itr.mesh),)
-# @inline Base.getindex(itr::DirectedEdgesTriFaces, n::Integer) =
-# 	SVector{3,Int}(view(itr.mesh.destination, 3*n-2:3*n))
-# @inline faces(m::DirectedEdgesTriMesh) = DirectedEdgesTriFaces(m)
-# 
-# # Splitting edges and faces««2
-# """
-#     split_edge!(m::DirectedEdgesTriMesh, ab, p)
-# 
-# Inserts points `p` in the middle of the half-edge `ab` and its opposite.
-# """
-# function split_edge!(m::DirectedEdgesTriMesh, ab, pt::Point{3})
-# 	n = nfaces(m)
-# 	# Grab all the edge and vertex info from structure
-# 	bc = next(m, ab); ca = next(m, ab)
-# 	cb = opposite(m, bc); ac = opposite(m, ca)
-# 	ba = opposite(m, ab); ad = next(m, ba); db = next(m, ad)
-# 	da = opposite(m, ad); bd = opposite(m, db)
-# 	# use the inner half-edges for computing destination:
-# 	# (outer half-edges might not be defined if we have a boundary...)
-# 	b = destination(m, ab); a = destination(m, ba)
-# 	c = destination(m, bc); d = destination(m, ad)
-# 	# Define new values for point x and triangles xbc, xad
-# 	push!(m.points, pt);
-# 	x = length(m.points)
-# 	resize!(m.halfedges, 3*n+6)
-# 	xb = 3*n+1; new_bc = 3*n+2; cx = 3*n+3
-# 	xa = 3*n+4; new_ad = 3*n+5; dx = 3*n+6
-# 	push!(m.from, xb)
-# 	# adjust structure to record all values
-# 	@inline set!(edge, dest, opp) = (
-# 		m.destination[edge] = dest; m.opposite[edge] = opp; )
-# 	# triangle axc
-# 	ax = ab; set!(ax, x, xa)
-# 	xc = bc; set!(xc, c, cx) # here we overwrite `c` by `c`...
-# 	# ca unchanged
-# 	# triangle bxd
-# 	bx = ba; set!(bx, x, xb)
-# 	xd = ad; set!(xd, d, dx) # ditto
-# 	# db unchanged
-# 	# triangle xbc
-# 	set!(xb, b, bx); set!(new_bc, c, cb); set!(cx, x, xc)
-# 	# triangle xad
-# 	set!(xa, a, ax); set!(new_ad, d, da); set!(dx, x, xd)
-# 	return m # or x...
-# end
 # Triangulations««1
 # Wrapping the Triangle package««2
 # hide the `Triangle` module name to prevent namespace conflict:
@@ -3083,7 +2909,7 @@ triangulate(points::AbstractMatrix{<:Real}, faces) =
 # 3d union and intersection««1
 # After [Zhou, Grinspun, Zorin, Jacobson](https://dl.acm.org/doi/abs/10.1145/2897824.2925901)
 # Self-intersection««2
-function self_intersect(s::AbstractSurface; ε=_THICKNESS)
+function self_intersect(s::AbstractSurface; ε=0)
 	@debug """self_intersect ««\n$s"""
 	T = eltype(eltype(vertices(s)))
 	TI = TriangleIntersections
@@ -3139,7 +2965,7 @@ function self_intersect(s::AbstractSurface; ε=_THICKNESS)
 				pindex = f2[TI.index(u2)]; pt = vertices(s)[pindex]
 			else
 				pt = Point(coords)
-				pindex = findfirst(isapprox(pt; atol=_THICKNESS), new_points)
+				pindex = findfirst(isapprox(pt; atol=ε), new_points)
 				if pindex == nothing
 					push!(new_points, pt)
 					pindex = length(new_points)
@@ -3212,7 +3038,7 @@ end
 Returns a refined triangulation of `s` with vertices at all
 self-intersection points.
 """
-function subtriangulate(s::AbstractSurfaceIncidence)
+function subtriangulate(s::AbstractSurfaceIncidence; ε=0)
 # 	println("self-intersect...")
 	self_int = self_intersect(s)
 	# FIXME: do something with new_edges
@@ -3237,7 +3063,7 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 		i = first(faces_todo)
 		plane = normalize(supporting_plane(triangles(s)[i]))
 		@debug "from face $i=$(faces(s)[i]): $plane"
-		cluster = coplanar_faces(s, plane, _THICKNESS)
+		cluster = coplanar_faces(s, plane, ε)
 		push!(cluster, i)
 		str="cluster=$cluster"*
 			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
