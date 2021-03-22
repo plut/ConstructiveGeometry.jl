@@ -1,9 +1,10 @@
 # Immediate work before bumping version:
+ - [ ] document the changes
  - [ ] convert Polygon{Int} to Polygon{Float}
- - [ ] clean the type system once and for all:
-  - [ ] suggestion: leat `AbstractGeometry` objects have a mess of types
+ - [?] clean the type system once and for all:
+  - [x] suggestion: leat `AbstractGeometry` objects have a mess of types
 		if they so want,
-  - [ ] and only decide on a coord. type at meshing type (as a parameter).
+  - [x] and only decide on a coord. type at meshing type (as a parameter).
 	- [ ] take advantage to allow exact (rational) arithmetic
  - [?] split in several packages:
   - [ ] `AbstractGeometry`

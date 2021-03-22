@@ -2465,10 +2465,10 @@ function select_faces(list::AbstractVector{<:Integer}, s::AbstractSurface)
 			if iszero(renum[p])
 				push!(newpoints, vertices(s)[p])
 				renum[p] = length(newpoints)
-				@debug "point $p = $(vertices(s)[p]) renamed $(renum[p])"
+# 				@debug "point $p = $(vertices(s)[p]) renamed $(renum[p])"
 			end
 		end
-		@debug "face $f renamed $(renum[f])"
+# 		@debug "face $f renamed $(renum[f])"
 		push!(newfaces, renum[f])
 	end
 	@debug "end select_faces»»"
@@ -2534,8 +2534,13 @@ function SurfaceIncidence(s::AbstractSurface;
 	if ef
 		for (i, f) in pairs(faces(s)), u in 1:3
 			e = (f[u], f[plus1mod3[u]])
-			(b, c) = edge_can(e)
-			listpush!(inc_ef, c => b ? -i : i)
+			if e[1] < e[2]
+				listpush!(inc_ef, SA[e[1], e[2]] => i)
+			else
+				listpush!(inc_ef, SA[e[2], e[1]] => -i)
+			end
+# 			(b, c) = edge_can(e)
+# 			listpush!(inc_ef, c => (b ? -i : i))
 		end
 	end
 	inc_ff = [Int[] for f in faces(s)]
@@ -2773,10 +2778,10 @@ module LibTriangle
 # 		end
 # 		@debug s
 		isunique(array) = length(unique(array)) == length(array)
-		@assert isunique(vmap) "points must be unique: $(vmap)"
-		for i in 1:size(vertices,1), j in 1:i-1
-			@assert vertices[i,:] != vertices[j,:] "points must be distinct: $i, $j"
-		end
+# 		@assert isunique(vmap) "points must be unique: $(vmap)"
+# 		for i in 1:size(vertices,1), j in 1:i-1
+# 			@assert vertices[i,:] != vertices[j,:] "points must be distinct: $i, $j"
+# 		end
 		return SVector{3,Int}.(Triangle.constrained_triangulation(vertices,
 			vmap, edge_list))
 	end
@@ -2956,7 +2961,7 @@ function self_intersect(s::AbstractSurface; ε=0)
 		p1 = coordinates.(vertices(tri1))
 		p2 = coordinates.(vertices(tri2))
 		it = TI.inter(p1, p2; ε)
-		@debug "$i1=$f1 $tri1\n$i2=$f2 $tri2\n intersection: $it"
+# 		@debug "$i1=$f1 $tri1\n$i2=$f2 $tri2\n intersection: $it"
 		isempty(it) && continue
 		(v1, v2) = last(it)[2]
 		tmp_newedges = UInt8(0)
@@ -3072,8 +3077,6 @@ function subtriangulate(s::AbstractSurfaceIncidence;
 		@debug "from face $i=$(faces(s)[i]): $plane"
 		cluster = coplanar_faces(s, plane, ε)
 		push!(cluster, i)
-		str="cluster=$cluster"*
-			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
 		@debug "««cluster=$cluster"*
 			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
 
@@ -3369,9 +3372,14 @@ end
 # `c` is a vector of regular component numbers;
 # returns the list of all vertices belonging to one of the regular
 # components in `c`
-function vertices_in_components(s::AbstractSurfacePatches, c)
-	flist = union(components(s)[[c...]]...)
-	return union(faces(s)[flist]...)
+function vertices_in_components(s::AbstractSurfacePatches, c::Vector{Int})
+	flist = union(components(s)[c]...)::Vector{Int}
+	v = Int[]; sizehint!(v, 2*length(flist))
+	for f in flist
+		push!(v, faces(s)[f]...)
+	end
+	return v
+# 	return union(faces(s)[flist]...)::Vector{Int}
 end
 
 """

@@ -479,7 +479,7 @@ function inter((p1,q1,r1),(p2,q2,r2); ε=0)
 
 	# permute both triangles as needed so that t2 separates p1 from q1, r1
 	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
-	@debug "signs for p1,q1,r1: $(Int.(sign.((dp1,dq1,dr1))))"
+# 	@debug "signs for p1,q1,r1: $(Int.(sign.((dp1,dq1,dr1))))"
 	@tree27((dp1,dq1,dr1),
 		"+++" => (return ID()),
 		"0--" => begin
@@ -496,7 +496,7 @@ function inter((p1,q1,r1),(p2,q2,r2); ε=0)
 			(dp1,dq1,dr1), normal2, ε)
 		end,
 		"+00" => begin
-			@debug "config inter_border 1 (+00), turn=$turn, flip=$flip"
+# 			@debug "config inter_border 1 (+00), turn=$turn, flip=$flip"
 			@permute3! turn (p1,q1,r1)
 		return inter_border((p1,q1,r1), turn, (p2,q2,r2), normal2, ε)
 		end,
@@ -706,7 +706,7 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	(u1,v1,a2,b2,c2) = proj.((q1,r1,p2,q2,r2))
 	@debug "in inter_border\n($q1,$r1)\n($p2,$q2,$r2)\nproj=$proj"
 	dpqr = abs(normal2[abs(proj.dir)])
-	@debug "in inter_border to segment\n($u1,$v1)\n($a2,$b2,$c2)"
+# 	@debug "in inter_border to segment\n($u1,$v1)\n($a2,$b2,$c2)"
 	it = inter_segment2_triangle2((u1,v1), (a2,b2,c2); ε)
 	@debug "found it=$it"
 	rename1!(it, Constants.edge12 => Constants.edge23<<i1,
