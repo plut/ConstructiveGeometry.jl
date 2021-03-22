@@ -351,15 +351,17 @@ A simple, closed polygon enclosed by the given vertices.
 @inline polygon(args...; kwargs...) = Polygon(args...; kwargs...)
 struct Polygon{T} <: Geometry{2,T}
 	points::Vector{Point{2,T}}
-	@inline Polygon(points::AbstractVector{<:Point{2}}) =
-		new{real_type(coordtype.(points)...)}(points)
-	@inline Polygon(points::AbstractVector{<:AbstractVector{<:Real}}) =
-		Polygon(Point.(points))
-	@inline Polygon(points::AbstractVector{<:Real}...) = Polygon([points...])
-	# points in rows, for easy notation:
-	@inline Polygon(m::AbstractMatrix{<:Real}) =
-		Polygon([m[i,:] for i in 1:size(m,1)])
+# 	@inline Polygon{T}(points::AbstractVector{<:Point{2}}) where{T}=
+# 		new{T}(points)
 end
+@inline Polygon(points::AbstractVector{<:Point{2}}) =
+	Polygon{real_type(coordtype.(points)...)}(points)
+@inline Polygon(points::AbstractVector{<:AbstractVector{<:Real}}) =
+	Polygon(Point.(points))
+@inline Polygon(points::AbstractVector{<:Real}...) = Polygon([points...])
+# points in rows, for easy notation:
+@inline Polygon(m::AbstractMatrix{<:Real}) =
+	Polygon([m[i,:] for i in 1:size(m,1)])
 # Polygon{T} = PrimitiveSolid{:polygon,2,T,
 # 	@NamedTuple{points::Path{2,T}}}
 # @inline _infer_type(::Type{<:Polygon}; points) = real_type(eltype.(points)...)
@@ -452,9 +454,11 @@ struct PolygonXor{T} <: Geometry{2,T}
 	paths::Vector{Polygon{T}}
 end
 PolygonXor(p::Polygon...) = PolygonXor{real_type(coordtype.(p)...)}([p...])
-PolygonXor(points::AbstractVector{<:Point{2}}...) =
+@inline PolygonXor{T}(points::AbstractVector{<:Point{2}}...) where{T} =
+	PolygonXor{T}([Polygon{T}.(points)...])
+@inline PolygonXor(points::AbstractVector{<:Point{2}}...) =
 	PolygonXor(Polygon.(points)...)
-PolygonXor(points::AbstractVector{<:AbstractVector{<:Real}}...) =
+@inline PolygonXor(points::AbstractVector{<:AbstractVector{<:Real}}...) =
 	PolygonXor([Point{2}.(p) for p in points]...)
 
 @inline paths(p::PolygonXor) = p.paths
@@ -1176,7 +1180,7 @@ end
 # FIXME: explain why .005 works better
 
 _DEFAULT_PARAMETERS = (accuracy = 0.1, precision = .005, symmetry = 1,
-	type = Float64, plane_thickness = 0)
+	type = Float64, ε = 1e-8)
 
 @inline get_parameter(parameters, name) =
 	get(parameters, name, _DEFAULT_PARAMETERS[name])
@@ -1854,8 +1858,12 @@ mesh(s::CSGUnion{2}, parameters) =
 	PolygonXor(clip(:union, [mesh(x, parameters) for x in children(s)]...)...)
 
 mesh(s::CSGInter{2}, parameters) =
-	PolygonXor(clip(:intersection,
+begin
+	z=clip(:intersection,
+		[mesh(x, parameters) for x in children(s)]...)
+	PolygonXor{get_parameter(parameters, :type)}(clip(:intersection,
 		[mesh(x, parameters) for x in children(s)]...)...)
+end
 
 mesh(s::CSGDiff{2}, parameters) =
 	PolygonXor(clip(:difference,
@@ -2410,7 +2418,7 @@ function concatenate(slist::AbstractSurface...)
 		push!(newfaces, [ f .+ offset for f in faces(slist[i]) ]...)
 		push!(newpoints, vertices(slist[i])...)
 	end
-	return Surface(newpoints, newfaces)
+	return Surface{real_type(coordtype.(slist)...)}(newpoints, newfaces)
 end
 
 """
@@ -2420,7 +2428,7 @@ Removes duplicate points in `s`, renumbering as needed.
 """
 function simplify(s::AbstractSurface; ε=0)
 	(newpoints, reindex) = simplify_points(vertices(s); ε)
-	return Surface(newpoints, [ reindex[f] for f in faces(s) ])
+	return Surface{coordtype(s)}(newpoints, [ reindex[f] for f in faces(s) ])
 end
 
 
@@ -2755,18 +2763,18 @@ module LibTriangle
 			vmap::Vector{Int}, edge_list::Matrix{Int})
 		# XXX temporary: the libtriangle call tends to segfault whenever lines
 		# cross, so we show what it is called with
-		s = "constrained_triangulation($(size(vertices)), $(size(vmap)), $(size(edge_list)):\n$vertices\n$vmap\n$edge_list\n"
-		for (i, v) in pairs(vmap)
-			s*= "\n  $(vertices[i,1]) $(vertices[i,2]) $v"
-		end
-# 		println(s,"\n") # debug output is not always flushed in time before segfault
-		s*= "\n\n"
-		for e in eachrow(edge_list)
-			v1 = view(vertices, findfirst(==(e[1]), vmap), :)
-			v2 = view(vertices, findfirst(==(e[2]), vmap), :)
-			s*=("\n  $(v1[1]) $(v1[2]) $(v2[1]-v1[1]) $(v2[2]-v1[2]) # $e")
-		end
-		@debug s
+# 		s = "constrained_triangulation($(size(vertices)), $(size(vmap)), $(size(edge_list)):\n$vertices\n$vmap\n$edge_list\n"
+# 		for (i, v) in pairs(vmap)
+# 			s*= "\n  $(vertices[i,1]) $(vertices[i,2]) $v"
+# 		end
+# # 		println(s,"\n") # debug output is not always flushed in time before segfault
+# 		s*= "\n\n"
+# 		for e in eachrow(edge_list)
+# 			v1 = view(vertices, findfirst(==(e[1]), vmap), :)
+# 			v2 = view(vertices, findfirst(==(e[2]), vmap), :)
+# 			s*=("\n  $(v1[1]) $(v1[2]) $(v2[1]-v1[1]) $(v2[2]-v1[2]) # $e")
+# 		end
+# 		@debug s
 		isunique(array) = length(unique(array)) == length(array)
 		@assert isunique(vmap) "points must be unique: $(vmap)"
 		for i in 1:size(vertices,1), j in 1:i-1
@@ -2917,18 +2925,23 @@ function self_intersect(s::AbstractSurface; ε=0)
 	new_points = similar(vertices(s), 0)
 	new_edges = Set{SVector{2,Int}}()
 	face_points = DictOfSets{Int,Int}()
-	edge_points = Dict([ e=>Int[] for e in edges(s)])
-	edge_coords = Dict([ e=>T[] for e in edges(s)])
+	edge_points = DictOfLists{SVector{2,Int},Int}()
+	edge_coords = DictOfLists{SVector{2,Int},T}()
+# 	edge_points = Dict([ e=>Int[] for e in edges(s)])
+# 	edge_coords = Dict([ e=>T[] for e in edges(s)])
 
 	@inline function add_point_edge!(e, k, p)#««
 		@debug "adding point $k to edge $e"
-		k ∈ edge_points[e] && return
+		haskey(edge_points, e) && k ∈ edge_points[e] && return
 		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
 		# fixme: unroll this loop to allow constant-propagation:
 		i = argmax(abs.(vec))
-		if length(edge_points[e]) == 0 # most common case
-			push!(edge_points[e], k)
-			push!(edge_coords[e], p[i])
+		if !haskey(edge_points, e)
+			edge_points[e] = [k]
+			edge_coords[e] = [p[i]]
+# 		if length(edge_points[e]) == 0 # most common case
+# 			push!(edge_points[e], k)
+# 			push!(edge_coords[e], p[i])
 			@debug "first point on this edge, insertion is trivial"
 			return
 		end
@@ -2951,7 +2964,7 @@ function self_intersect(s::AbstractSurface; ε=0)
 		tri2 = triangles(s)[i2]
 		p1 = coordinates.(vertices(tri1))
 		p2 = coordinates.(vertices(tri2))
-		it = TI.inter(p1, p2, ε)
+		it = TI.inter(p1, p2; ε)
 		@debug "$i1=$f1 $tri1\n$i2=$f2 $tri2\n intersection: $it"
 		isempty(it) && continue
 		(v1, v2) = last(it)[2]
@@ -3038,9 +3051,10 @@ end
 Returns a refined triangulation of `s` with vertices at all
 self-intersection points.
 """
-function subtriangulate(s::AbstractSurfaceIncidence; ε=0)
+function subtriangulate(s::AbstractSurfaceIncidence;
+		ε=0, type=Float64)
 # 	println("self-intersect...")
-	self_int = self_intersect(s)
+	self_int = self_intersect(s; ε)
 	# FIXME: do something with new_edges
 # 	println("subtriangulate...")
 # 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
@@ -3083,13 +3097,27 @@ function subtriangulate(s::AbstractSurfaceIncidence; ε=0)
 				push!(fp[j], self_int.face_points[i]...)
 			for k in 1:3
 				k1 = plus1mod3[k]
-				(_, e) = edge_can([f[k], f[k1]])
-				line = [e[1]; self_int.edge_points[e]; e[2]]
-				push!(fp[j], line...)
-# 				@debug "face $i=$f: pushing edge $e => $line"
-				for i in 1:length(line)-1
-					@inbounds push!(eset, minmax(line[i], line[i+1]))
+# 				(_, e) = edge_can([f[k], f[k1]])
+				e = SVector{2,Int}(minmax(f[k], f[k1]))
+				if haskey(self_int.edge_points, e)
+					l = self_int.edge_points[e]
+					push!(fp[j], e[1])
+					push!(fp[j], l...)
+					push!(fp[j], e[2])
+					push!(eset, minmax(l[1], e[1]))
+					for i in 1:length(l) - 1
+						push!(eset, minmax(l[i], l[i+1]))
+					end
+					push!(eset, minmax(last(l), e[2]))
+				else
+					push!(fp[j], e[1])
+					push!(fp[j], e[2])
+					push!(eset, minmax(e[1], e[2]))
 				end
+# 				@debug "face $i=$f: pushing edge $e => $line"
+# 				for i in 1:length(line)-1
+# 					@inbounds push!(eset, minmax(line[i], line[i+1]))
+# 				end
 			end
 			@debug "face $i=$f contains points $(fp[j])"
 			union!(pset, fp[j]...)
@@ -3162,7 +3190,7 @@ function subtriangulate(s::AbstractSurfaceIncidence; ε=0)
 
 	@debug "(end subtriangulate)»»"
 # 	newfaces = remove_opposite_faces(newfaces)
-	return Surface(newpoints, newfaces)
+	return Surface{type}(newpoints, newfaces)
 end
 
 # Faces around an edge««2
@@ -3431,8 +3459,10 @@ function multiplicity_levels(s::AbstractSurfacePatches)
 	return mfaces
 end
 # Binary union and intersection««2
-function select_multiplicity(m, s::AbstractSurface...)
-	t = subtriangulate(SurfaceIncidence(merge(s...)))
+function select_multiplicity(m, parameters, s::AbstractSurface...)
+	t = subtriangulate(SurfaceIncidence(merge(s...));
+		ε = get_parameter(parameters, :ε),
+		type = get_parameter(parameters, :type))
 	face_idx = multiplicity_levels(SurfacePatches(SurfaceIncidence(t)))
 	@debug "select_multiplicity««"
 	flist = get(face_idx, m, Int[])
@@ -3579,7 +3609,7 @@ function mesh(s::RotateExtrude, parameters)
 	end
 	@debug "triangles = $triangles"
 	@debug "end rotate_extrude»»"
-	surf = Surface(pts3, triangles)
+	surf = Surface{get_parameter(parameters, :type)}(pts3, triangles)
 # 	explain(surf, "/tmp/mu.scad", scale=30)
 	return simplify(surf)
 end
@@ -3781,11 +3811,11 @@ function mesh(s::Union{Cylinder, Sphere}, parameters)
 end
 # CSG operations««2
 function mesh(s::CSGUnion{3}, parameters)
-	return select_multiplicity(1,
+	return select_multiplicity(1, parameters,
 		[mesh(x, parameters) for x in children(s)]...)
 end
 function mesh(s::CSGInter{3}, parameters)
-	return select_multiplicity(length(children(s)),
+	return select_multiplicity(length(children(s)), parameters,
 		[mesh(x, parameters) for x in children(s)]...)
 end
 function mesh(s::CSGComplement{3}, parameters)

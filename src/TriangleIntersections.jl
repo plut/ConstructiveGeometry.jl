@@ -440,8 +440,10 @@ Base.inv(p::Projector) = FormalInv{typeof(p)}(p)
 
 @inline lift(p::Projector, u::AbstractVector) = [lift(p,(u...,))...]
 @inline project(p::Projector, u::AbstractVector) = [project(p,(u...,))...]
-@inline lift(p::Projector, u::StaticVector{2}) = SVector(lift(p,(u...,)))
-@inline project(p::Projector, u::StaticVector{3}) = SVector(project(p,(u...,)))
+@inline lift(p::Projector, u::StaticVector{2}) =
+	SVector{3,eltype(u)}(lift(p,u.data))
+@inline project(p::Projector, u::StaticVector{3}) =
+	SVector{2,eltype(u)}(project(p,(u.data)))
 
 # lifting intersection data
 @inline function lift(p::Projector, it::IntersectionData)
@@ -460,7 +462,7 @@ This is returned as a `IntersectionData` structure.
 Both arguments may be of any types, as long as that type supports enumeration
 to three vertices, and those are compatible with basic geometry operations.
 """
-function inter((p1,q1,r1),(p2,q2,r2), ε=0)
+function inter((p1,q1,r1),(p2,q2,r2); ε=0)
 	# loosely inspired by
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
 	#   https://hal.inria.fr/inria-00072100/document]

@@ -1,4 +1,5 @@
 # Immediate work before bumping version:
+ - [ ] convert Polygon{Int} to Polygon{Float}
  - [ ] clean the type system once and for all:
   - [ ] suggestion: leat `AbstractGeometry` objects have a mess of types
 		if they so want,
