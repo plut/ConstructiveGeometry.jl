@@ -3438,6 +3438,7 @@ function self_intersect(s::AbstractSurfaceIncidence)
 		face_points = face_points)
 end
 function self_int2(s::AbstractSurface; ε=_THICKNESS)
+	@debug """self_int2 ««\n$s"""
 	T = eltype(eltype(vertices(s)))
 	TI = TriangleIntersections
 	n = nvertices(s)
@@ -3448,7 +3449,7 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 	edge_coords = Dict([ e=>T[] for e in edges(s)])
 
 	@inline function add_point_edge!(e, k, p)#««
-		@debug "adding point $k to edge $e ««"
+		@debug "adding point $k to edge $e"
 		k ∈ edge_points[e] && return
 		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
 		# fixme: unroll this loop to allow constant-propagation:
@@ -3456,7 +3457,7 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 		if length(edge_points[e]) == 0 # most common case
 			push!(edge_points[e], k)
 			push!(edge_coords[e], p[i])
-			@debug "first point on this edge, insertion is trivial»"*"»"
+			@debug "first point on this edge, insertion is trivial"
 			return
 		end
 # 		dprintln("  sorted by coordinate $i ($(vec[i]))")
@@ -3466,7 +3467,7 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 # 		dprintln("  inserting at position $j, $(first(j))")
 		insert!(edge_points[e], first(j), k)
 		insert!(edge_coords[e], first(j), p[i])
-		@debug "  now edge_points[$e] = $(edge_points[e])\n»»"
+		@debug "  now edge_points[$e] = $(edge_points[e])"
 	end#»»
 
 	boxes = [ boundingbox(vertices(t)...) for t in triangles(s) ]
@@ -3479,13 +3480,12 @@ function self_int2(s::AbstractSurface; ε=_THICKNESS)
 		p1 = coordinates.(vertices(tri1))
 		p2 = coordinates.(vertices(tri2))
 		it = TI.inter(p1, p2, ε)
-		@debug "$i1=$tri1\n$i2=$tri2\n intersection: $it"
+		@debug "$i1=$f1 $tri1\n$i2=$f2 $tri2\n intersection: $it"
 		isempty(it) && continue
 		(v1, v2) = last(it)[2]
 		tmp_newedges = UInt8(0)
 		tmp_pindex = MVector{6,Int}(undef)
 		for (i, (coords, (u1, u2))) in pairs(it)
-			@debug "  types: ($u1, $u2); previous=($v1,$v2)"
 			# pindex = number of new point (created if necessary)««
 			if TI.isvertex(u1)
 				pindex = f1[TI.index(u1)]; pt = vertices(s)[pindex]
@@ -3532,6 +3532,7 @@ coords 2: $p2
 		end
 	end
 	# FIXME: new edges??
+	@debug "»»"
 	return (points = new_points,
 		edge_points = edge_points,
 		face_points = face_points,
@@ -3568,8 +3569,8 @@ self-intersection points.
 function subtriangulate(s::AbstractSurfaceIncidence)
 # 	println("self-intersect...")
 	self_int = self_int2(s)
-# 	global G1 = self_intersect(s)
-# 	global G2 = self_int2(s)
+	global G1 = self_intersect(s)
+	global G2 = self_int2(s)
 	
 # 	println("subtriangulate...")
 # 	explain(s, "/tmp/before-subtriangulate.scad", scale=30)
@@ -3594,10 +3595,10 @@ function subtriangulate(s::AbstractSurfaceIncidence)
 		@debug "from face $i=$(faces(s)[i]): $plane"
 		cluster = coplanar_faces(s, plane, _THICKNESS)
 		push!(cluster, i)
-# 		str="cluster=$cluster"*
-# 			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
-# 		@debug "««cluster=$cluster"*
-# 			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
+		str="cluster=$cluster"*
+			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
+		@debug "««cluster=$cluster"*
+			join(["\n $i=$(faces(s)[abs(i)])" for i in cluster])
 
 		proj = project_2d(direction(plane))
 		pset = Set{Int}()

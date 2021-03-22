@@ -477,7 +477,7 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 
 	# permute both triangles as needed so that t2 separates p1 from q1, r1
 	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
-# 	@debug "signs for p1,q1,r1: $(Int.(sign.((dp1,dq1,dr1))))"
+	@debug "signs for p1,q1,r1: $(Int.(sign.((dp1,dq1,dr1))))"
 	@tree27((dp1,dq1,dr1),
 		"+++" => (return ID()),
 		"0--" => begin
@@ -494,7 +494,7 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 			(dp1,dq1,dr1), normal2, ε)
 		end,
 		"+00" => begin
-# 			@debug "config inter_border 1, turn=$turn"
+			@debug "config inter_border 1 (+00), turn=$turn, flip=$flip"
 			@permute3! turn (p1,q1,r1)
 		return inter_border((p1,q1,r1), turn, (p2,q2,r2), normal2, ε)
 		end,
@@ -510,7 +510,7 @@ function inter((p1,q1,r1),(p2,q2,r2), ε=0)
 	dp2 = dot(normal1, p2-p1)
 	dq2 = dot(normal1, q2-p1)
 	dr2 = dot(normal1, r2-p1)
-# 	@debug "signs for dp2 dq2 dr2: $(Int.(sign.((dp2,dq2,dr2))))"
+	@debug "signs for dp2 dq2 dr2: $(Int.(sign.((dp2,dq2,dr2))))"
 	@tree27((dp2,dq2,dr2),
 		"+++" => (return ID()),
 		"0--" => begin
@@ -678,14 +678,14 @@ function inter_arrow((p1,q1,r1), turn, (p2,q2,r2), flip,
 	length(it) == 0 && return ID()
 
 	(pt1, (u1, v1)) = it[1]; z1 = inv(proj)(pt1)
-	w1 = (u1 == Constants.interior) ? u1 :
+	w1 = (u1 == Constants.edge12) ? Constants.interior :
 		(u1 == Constants.vertex1) ? Constants.vertex1<<turn :
 		Constants.edge23<<turn
 # 	w1 = (u1 == 0) ? 0 : (u1 == 1) ? (i1+3) : i1
 	length(it) == 1 && return ID(z1 => (w1, v1))
 
 	(pt2, (u2,v2)) = it[2]; z2 = inv(proj)(pt2)
-	w2 = (u2 == Constants.interior) ? u2 :
+	w2 = (u2 == Constants.edge12) ? Constants.interior :
 		(u2 == Constants.vertex1) ? Constants.vertex1<<turn :
 		Constants.edge23<<turn
 # 	w2 = (u2 == 0) ? 0 : (u2 == 1) ? (i1+3) : i1
@@ -702,10 +702,12 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	ID = IntersectionData{6,typeof(p1)}
 	proj = Projector(normal2, p2)
 	(u1,v1,a2,b2,c2) = proj.((q1,r1,p2,q2,r2))
-# 	@debug "in inter_border\n($u1,$v1)\n($p2,$q2,$r2)\nproj=$proj"
+	@debug "in inter_border\n($q1,$r1)\n($p2,$q2,$r2)\nproj=$proj"
 	dpqr = abs(normal2[abs(proj.dir)])
+	@debug "in inter_border to segment\n($u1,$v1)\n($a2,$b2,$c2)"
 	it = inter_segment2_triangle2((u1,v1), (a2,b2,c2); ε)
-	rename1!(it, Constants.interior => Constants.edge23<<i1,
+	@debug "found it=$it"
+	rename1!(it, Constants.edge12 => Constants.edge23<<i1,
 		Constants.vertex1 => Constants.vertex2<<i1,
 		Constants.vertex2 => Constants.vertex3<<i1)
 # 	rename!(it, 1, (i1, plus1mod3(i1,3), plus2mod3(i1,3)))

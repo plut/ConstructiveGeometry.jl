@@ -1,9 +1,12 @@
 # Immediate work
+ - clean the type system once and for all:
+  - suggestion: leat `AbstractGeometry` objects have a mess of types,
+		and only decide on a type at meshing type
  - [?] split in several packages:
-  - `AbstractGeometry`
-	- `StrongIndices`
-	- `AABBTree`
-	- `Meshing`
+  - [ ] `AbstractGeometry`
+	- [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
+	- [x] `AABBTree` -> `SpatialSorting` + `TriangleIntersections`
+	- [ ] `Meshing`
  - [x] implement ZGZJ's cluster triangulation to prevent crossing faces
   - [x] “thicken” faces (and edges) wrt intersection (i.e. add small,
 		well-defined tolerance). As a parameter in `set_parameters`?
