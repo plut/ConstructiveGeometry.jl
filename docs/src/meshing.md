@@ -4,11 +4,25 @@
 
 `mesh(objects...)`
 
+The meshing of objects is governed by a few parameters:
+ - `accuracy` and `precision` determine the number of faces inserted in the
+	 mesh;
+ - `symmetry` allows to impose a given rotational symmetry to circles;
+ - `type` dictates the coordinate type of the returned mesh (e.g.
+	 `Float64` or `Rational{Int}`);
+ - `ε` (experimental) is a value of thickness of planes, i.e. any point
+	 closer than `ε` from a plane is considered as belonging to the plane.
+
+To set values other than the defaults for an object,
+apply the `set_parameters` transform to that object:
+
+```julia
+set_parameters(accuracy=1)*
+circle(2)
+```
+
 
 ## Accuracy and precision
-
-The meshing of objects is governed by two parameters:
-`accuracy` and `precision`.
 
  - `accuracy` is the maximum absolute deviation allowed when meshing an object.
  This is the maximum distance between the mesh and the ideal shape.
@@ -31,16 +45,6 @@ The default values are
 The latter value corresponds to the fact
 that large circles have 32 sides (see below).
 
-### Modifying the values
-
-To set values other than the defaults for an object,
-apply the `set_parameters` transform to that object:
-
-```julia
-set_parameters(accuracy=1)*
-Circle(2)
-```
-
 ### Circles
 
 A circle of radius ``r`` is replaced by an inscribed ``n``-gon.
@@ -54,13 +58,19 @@ By definition, ``\texttt{accuracy} = s``
 while ``\texttt{precision} = s/r \approx \frac{π^2}{2 n^2}``.
 This gives
 
-``n = \min(π √{r/(2\texttt{accuracy})}, π √{1/(2\texttt{precision})}).``
+``n = \min(π √{r/(2\texttt{accuracy})}, π/ √{\texttt{precision})}).``
 
 In addition, the number of sides is bounded below to always be at least 4.
 The number of sides thus increases as the square root of the radius,
 with an upper bound.
 With the default parameters, one has
-``n ≈ min(32, 7√r)``.
+``n ≈ \min(32, 7√r)``.
+
+The corresponding value for OpenSCAD is
+``n = \min(360/\texttt{\textdollar fa}, 2πr/\texttt{\textdollar fs})``;
+with the default values ``\texttt{\textdollar fa}=12``
+and ``\texttt{\textdollar fs=2}``, this gives
+``n ≈ \min(30, π r)``.
 
 ## Symmetry
 
