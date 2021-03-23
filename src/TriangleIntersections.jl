@@ -8,6 +8,7 @@ indexation, `cross`, `dot`, and interaction with `Projector` type.
 module TriangleIntersections
 using LinearAlgebra
 using StaticArrays
+using FastClosures
 
 """
     TriangleIntersections.Constants
@@ -16,7 +17,6 @@ Constants describing position of a point in a triangle.
 """
 module Constants#««
 # const Position = Int8
-# 	interior = 0
 # 	interior=0
 # 	vertex1=1
 # 	vertex2=2
@@ -251,7 +251,7 @@ function inter_segment2_halfplane(it::IntersectionData, halfplane, t; ε=0)
 	(u2, (a2,b2)) = it[2]
 	d2 = det2(p,q,u2)
 	# (uv) ∩ (pq) = u+(v-u)*[pqu]/[pqu-pqv]
-	@inline inter_point() = u1 + (u2-u1) * d1/(d1-d2)
+	inter_point = @closure () -> u1 + (u2-u1) * d1/(d1-d2)
 	if d1 < -ε
 		d2 <-ε && return ID()
 		d2 ≤ ε && return ID(u2 => (a2, b2|t))
@@ -299,16 +299,16 @@ function inter_triangle2((p1,q1,r1),(p2,q2,r2); ε=0)
 	pttype = similar(itqr.pttype, 6)
 	n = 0
 
-	@inline function push!(x, j::Int)
+	pushit! = (x, j) -> begin
 		@inbounds for i in 1:length(x)-j
 			pttype[n+i] = x.pttype[i]
 			points[n+i] = x.points[i]
 		end
 		n += (length(x)-j)
 	end
-	!isempty(itpq) && push!(itpq, last(itpq)[2] == first(itqr)[2] ? 1 : 0)
-	!isempty(itqr) && push!(itqr, last(itqr)[2] == first(itrp)[2] ? 1 : 0)
-	!isempty(itrp) && push!(itrp, last(itrp)[2] == first(itpq)[2] ? 1 : 0)
+	!isempty(itpq) && pushit!(itpq, last(itpq)[2] == first(itqr)[2] ? 1 : 0)
+	!isempty(itqr) && pushit!(itqr, last(itqr)[2] == first(itrp)[2] ? 1 : 0)
+	!isempty(itrp) && pushit!(itrp, last(itrp)[2] == first(itpq)[2] ? 1 : 0)
 	return IntersectionData{6,eltype(points)}(n, pttype, points)
 end
 
@@ -462,16 +462,24 @@ This is returned as a `IntersectionData` structure.
 Both arguments may be of any types, as long as that type supports enumeration
 to three vertices, and those are compatible with basic geometry operations.
 """
-function inter((p1,q1,r1),(p2,q2,r2); ε=0)
+@inline inter(tri1::SVector{3}, tri2::SVector{3}; kwargs...) =
+begin
+	inter(tri1.data, tri2.data; kwargs...)
+end
+function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}};
+	ε=0) where{T}
 	# loosely inspired by
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
 	#   https://hal.inria.fr/inria-00072100/document]
 # 	@debug "computing triangle-triangle intersection\n($p1,$q1,$r1)\n($p2,$q2,$r2)"
 
 	# return type:
+	V=SVector{3,T}
+	(p1,q1,r1) = tri1
+	(p2,q2,r2) = tri2
 	ID = IntersectionData{6,typeof(p1)}
 
-	normal2= cross(q2-p2, r2-p2)
+	normal2 = cross(q2-p2, r2-p2)
 
 	dp1 = dot(normal2, p1-p2)
 	dq1 = dot(normal2, q1-p2)
@@ -479,7 +487,7 @@ function inter((p1,q1,r1),(p2,q2,r2); ε=0)
 
 	# permute both triangles as needed so that t2 separates p1 from q1, r1
 	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
-# 	@debug "signs for p1,q1,r1: $(Int.(sign.((dp1,dq1,dr1))))"
+	@debug ("signs for p1,q1,r1", Int.(sign.((dp1,dq1,dr1))))
 	@tree27((dp1,dq1,dr1),
 		"+++" => (return ID()),
 		"0--" => begin
@@ -487,13 +495,9 @@ function inter((p1,q1,r1),(p2,q2,r2); ε=0)
 			return inter_touch((p1,q1,r1), turn, (p2,q2,r2), normal2, ε)
 		end,
 		"0+-" => begin
-# 			@debug "config inter_arrow 1 with ($p1,$q1,$r1,$dp1,$dq1,$dr1) turn=$turn"
 			@permute3! turn (p1,q1,r1,dp1,dq1,dr1)
-# 			(direct > 3) && (normal2 = -normal2; dp1 = -dp1; dq1 = -dq1; dr1 = -dr1)
-# 			@permute3! direct (p2,q2,r2)
-# 			@debug " -> ($p1,$q1,$r1,$dp1,$dq1,$dr1)"
-		return inter_arrow((p1,q1,r1), turn, (p2,q2,r2), flip,
-			(dp1,dq1,dr1), normal2, ε)
+			return inter_arrow((p1,q1,r1), turn, (p2,q2,r2), flip,
+				(dp1,dq1,dr1), normal2, ε)
 		end,
 		"+00" => begin
 # 			@debug "config inter_border 1 (+00), turn=$turn, flip=$flip"
@@ -571,11 +575,11 @@ function inter((p1,q1,r1),(p2,q2,r2); ε=0)
 
 	P1Q1=lp1&lq1; P1R1=lp1&lr1;
 	P2Q2=lp2&lq2; P2R2=lp2&lr2;
-# 	P1Q1=lr1; P1R1=lq1; P2Q2=lr2; P2R2=lq2
-	@inline Q1(x)= barycenter(q1, p1, dp1/(dp1-dq1))=>(P1Q1,x)
-	@inline R1(x)= barycenter(r1, p1, dp1/(dp1-dr1))=>(P1R1,x)
-	@inline Q2(x)= barycenter(q2, p2, dp2/(dp2-dq2))=>(x,P2Q2)
-	@inline R2(x)= barycenter(r2, p2, dp2/(dp2-dr2))=>(x,P2R2)
+# # 	P1Q1=lr1; P1R1=lq1; P2Q2=lr2; P2R2=lq2
+	Q1 = @closure x-> barycenter(q1, p1, dp1/(dp1-dq1))=>(P1Q1,x)
+	R1 = @closure x-> barycenter(r1, p1, dp1/(dp1-dr1))=>(P1R1,x)
+	Q2 = @closure x-> barycenter(q2, p2, dp2/(dp2-dq2))=>(x,P2Q2)
+	R2 = @closure x-> barycenter(r2, p2, dp2/(dp2-dr2))=>(x,P2R2)
 
 	dq1r2 = dot(p1p2q1, r2-p1)
 # 	@debug "dq1r2 = $dq1r2"
@@ -704,7 +708,7 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	ID = IntersectionData{6,typeof(p1)}
 	proj = Projector(normal2, p2)
 	(u1,v1,a2,b2,c2) = proj.((q1,r1,p2,q2,r2))
-	@debug "in inter_border\n($q1,$r1)\n($p2,$q2,$r2)\nproj=$proj"
+# 	@debug "in inter_border\n($q1,$r1)\n($p2,$q2,$r2)\nproj=$proj"
 	dpqr = abs(normal2[abs(proj.dir)])
 # 	@debug "in inter_border to segment\n($u1,$v1)\n($a2,$b2,$c2)"
 	it = inter_segment2_triangle2((u1,v1), (a2,b2,c2); ε)

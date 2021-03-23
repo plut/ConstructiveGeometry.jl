@@ -6,6 +6,7 @@ using StaticArrays
 using FixedPointNumbers
 using SparseArrays
 using Logging
+using FastClosures
 
 import Polyhedra # for convex hull
 import GLPK
@@ -1845,9 +1846,9 @@ end
 	[ c.center + p for p in unit_n_gon(c.radius, parameters) ]
 
 mesh(s::PolygonXor, parameters) = s
-mesh(s::Polygon, parameters) = PolygonXor(s)
-mesh(s::Square, parameters) = PolygonXor(vertices(s))
-mesh(s::Circle, parameters) = PolygonXor(vertices(s, parameters))
+mesh(s::Polygon, parameters) = PolygonXor{get_parameter(parameters, :type)}([s])
+mesh(s::Square, parameters) = PolygonXor{get_parameter(parameters, :type)}(vertices(s))
+mesh(s::Circle, parameters) = PolygonXor{get_parameter(parameters, :type)}(vertices(s, parameters))
 
 # Transforms««2
 # Reduction of CSG operations««2
@@ -2712,7 +2713,7 @@ function SurfacePatches(s::AbstractSurfaceIncidence)
 	components = Vector{Int}[]
 	visit = Int[]
 	adjacency = zeros(SVector{2,Int},0,0)
-	@inline function mark_face(i, n)
+	mark_face = @closure (i, n) -> begin
 # 		println("   (marking face $i=$(faces(s)[i]) as $n)")
 		label[i] = n; push!(components[n], i)
 		push!(visit, i)
@@ -2730,14 +2731,19 @@ function SurfacePatches(s::AbstractSurfaceIncidence)
 		while !isempty(visit)
 			i = pop!(visit); f = faces(s)[i]
 			for e in face_edges(f)
-				adj = filter(!isequal(i), abs.(inc_ef(s)[e]))
-				if length(adj) == 1
+				adj = inc_ef(s)[e]
+				if length(adj) == 2
 					# regular edge: 2 adjacent faces. One is f, mark the other.
-					iszero(label[adj[1]]) && mark_face(adj[1], n)
+					if abs(adj[1]) == i
+						k = abs(adj[2]); iszero(label[k]) && mark_face(k, n)
+					else
+						k = abs(adj[1]); iszero(label[k]) && mark_face(k, n)
+					end
 				else # singular edge
-				# populate adjacency matrix
 					for g in adj
-						l = label[g]
+						k = abs(g)
+						k == i && continue
+						l = label[k]
 						iszero(l) || (adjacency[l,n] = adjacency[n,l] = e)
 					end
 				end
@@ -2932,7 +2938,7 @@ function self_intersect(s::AbstractSurface; ε=0)
 # 	edge_points = Dict([ e=>Int[] for e in edges(s)])
 # 	edge_coords = Dict([ e=>T[] for e in edges(s)])
 
-	@inline function add_point_edge!(e, k, p)#««
+	add_point_edge! = @closure (e, k, p) -> begin #««
 		@debug "adding point $k to edge $e"
 		haskey(edge_points, e) && k ∈ edge_points[e] && return
 		vec = vertices(s)[e[2]]-vertices(s)[e[1]]
@@ -2961,7 +2967,7 @@ function self_intersect(s::AbstractSurface; ε=0)
 		p1 = coordinates.(vertices(tri1))
 		p2 = coordinates.(vertices(tri2))
 		it = TI.inter(p1, p2; ε)
-# 		@debug "$i1=$f1 $tri1\n$i2=$f2 $tri2\n intersection: $it"
+		@debug ("intersection of two triangles", (i1, f1, tri1), (i2, f2, tri2), it)
 		isempty(it) && continue
 		(v1, v2) = last(it)[2]
 		tmp_newedges = UInt8(0)
@@ -2978,11 +2984,7 @@ function self_intersect(s::AbstractSurface; ε=0)
 				if pindex == nothing
 					push!(new_points, pt)
 					pindex = length(new_points)
-					@debug """
-creating point $pindex=$pt: faces ($i1,$i2), type=($u1,$u2)
-coords 1: $p1
-coords 2: $p2
-					"""
+					@debug ("creating point", (pindex, pt), "faces are", (i1, i2), "types", (u1, u2))
 				end
 				pindex+= n
 			end#»»
@@ -3058,7 +3060,7 @@ function subtriangulate(s::AbstractSurfaceIncidence;
 	# FIXME we can probably compute the number of faces in advance;
 	# this should be better than nothing:
 	sizehint!(newfaces, nfaces(s))
-	@inline edge_points(e1, e2) =
+	edge_points = @closure (e1, e2) ->
 		e1 < e2 ? self_int.edge_points[SA[e1,e2]] :
 		reverse(self_int.edge_points[SA[e2,e1]])
 	
@@ -3782,7 +3784,7 @@ mesh(s::Surface, parameters) = s
 
 function vertices(s::Cube, parameters)
 	(u,v) = (s.min, s.max)
-	return Point{3}.([
+	return Point{3,get_parameter(parameters, :type)}.([
 		SA[u[1],u[2],u[3]],
 		SA[u[1],u[2],v[3]],
 		SA[u[1],v[2],u[3]],

@@ -1,6 +1,8 @@
 # Immediate work before bumping version:
+ - [ ] do something with `listpush!`: replace `Set` by `BitVector` (since
+	 total size is bounded)
  - [ ] document the changes
- - [ ] convert Polygon{Int} to Polygon{Float}
+ - [x] convert Polygon{Int} to Polygon{Float}
  - [?] clean the type system once and for all:
   - [x] suggestion: leat `AbstractGeometry` objects have a mess of types
 		if they so want,
@@ -73,6 +75,9 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works
 # Performance
+ - [ ] try to prevent `TriangleIntersections.inter` from typing
+   (e.g. by returning separately the intersection + an array of points,
+   or passing the return type of points as a parameter?).
  - [ ] try to use SIMD (e.g. bbox computation)
  - [?] `@inbounds` wherever possible
  - [x] use `sizehint!` for arrays
