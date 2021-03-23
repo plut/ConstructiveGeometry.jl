@@ -487,7 +487,7 @@ function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}};
 
 	# permute both triangles as needed so that t2 separates p1 from q1, r1
 	# this guarantees that line (bb2 cc2) intersects segments (a1b1) and (a1c1).
-	@debug ("signs for p1,q1,r1", Int.(sign.((dp1,dq1,dr1))))
+# 	@debug ("signs for p1,q1,r1", Int.(sign.((dp1,dq1,dr1))))
 	@tree27((dp1,dq1,dr1),
 		"+++" => (return ID()),
 		"0--" => begin

@@ -21,6 +21,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Triangle = "56f361f5-126b-55db-87fb-1c71988fcde4"
 
 [compat]
+julia = "1.5"
 Clipper = "0.6"
 Colors = "0.12"
 FixedPointNumbers = "0.8"
@@ -31,7 +32,7 @@ Polyhedra = "0.6"
 Rotations = "1"
 StaticArrays = "1"
 Triangle = "0.3"
-julia = "1.5"
+FastClosures = "0.3"
 
 [extras]
 Test = "8dfed614-e22c-5e08-85e1-65c5234f0b40"

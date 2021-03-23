@@ -2967,7 +2967,7 @@ function self_intersect(s::AbstractSurface; ε=0)
 		p1 = coordinates.(vertices(tri1))
 		p2 = coordinates.(vertices(tri2))
 		it = TI.inter(p1, p2; ε)
-		@debug ("intersection of two triangles", (i1, f1, tri1), (i2, f2, tri2), it)
+# 		@debug ("intersection of two triangles", (i1, f1, tri1), (i2, f2, tri2), it)
 		isempty(it) && continue
 		(v1, v2) = last(it)[2]
 		tmp_newedges = UInt8(0)
@@ -2984,7 +2984,7 @@ function self_intersect(s::AbstractSurface; ε=0)
 				if pindex == nothing
 					push!(new_points, pt)
 					pindex = length(new_points)
-					@debug ("creating point", (pindex, pt), "faces are", (i1, i2), "types", (u1, u2))
+# 					@debug ("creating point", (pindex, pt), "faces are", (i1, i2), "types", (u1, u2))
 				end
 				pindex+= n
 			end#»»

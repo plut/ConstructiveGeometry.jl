@@ -1,6 +1,7 @@
 # Immediate work before bumping version:
  - [ ] do something with `listpush!`: replace `Set` by `BitVector` (since
 	 total size is bounded)
+ - [ ] use some form of explicit representation for edges
  - [ ] document the changes
  - [x] convert Polygon{Int} to Polygon{Float}
  - [?] clean the type system once and for all:
