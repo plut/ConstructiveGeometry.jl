@@ -41,8 +41,10 @@ while `accuracy` governs
 ### Default values
 
 The default values are
-`accuracy = 0.2` and `precision = 1/200`.
-The latter value corresponds to the fact
+`accuracy = 0.1` and `precision = 1/200`.
+The first value means that a circle will deviate by at most 0.1mm from
+the ideal circle, and 
+the latter value corresponds to the fact
 that large circles have 32 sides (see below).
 
 ### Circles
@@ -64,13 +66,13 @@ In addition, the number of sides is bounded below to always be at least 4.
 The number of sides thus increases as the square root of the radius,
 with an upper bound.
 With the default parameters, one has
-``n ≈ \min(32, 7√r)``.
+``n ≈ \min(7√r, 32)``.
 
 The corresponding value for OpenSCAD is
-``n = \min(360/\texttt{\textdollar fa}, 2πr/\texttt{\textdollar fs})``;
+``n = \min(2πr/\texttt{\textdollar fs},360/\texttt{\textdollar fa})``;
 with the default values ``\texttt{\textdollar fa}=12``
 and ``\texttt{\textdollar fs=2}``, this gives
-``n ≈ \min(30, π r)``.
+``n ≈ \min(π r, 30)``.
 
 ## Symmetry
 
