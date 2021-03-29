@@ -152,7 +152,7 @@ function print_tree(io::IO, t::BoxTree, i=1)
 		print_tree(io, t, 2i)
 		print_tree(io, t, 2i+1)
 	else
-		println("$i -> leaf $(to_leaf(t, i))")
+		println(io, "$i -> leaf $(to_leaf(t, i))")
 	end
 end
 

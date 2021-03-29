@@ -1,8 +1,16 @@
+# requirements
+ - f->e, e->v, v->v, e->f
+ - retriangulation of a face
+ - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document
+ operators: LeftBack, LeftFront, RightBack, RightFront, Source, Target,
+ Left, Right; Point, Edge
+
 # Immediate work before bumping version:
  - [ ] do something with `listpush!`: replace `Set` by `BitVector` (since
 	 total size is bounded)
  - [ ] use some form of explicit representation for edges
- - [ ] document the changes
+	 - [ ] may as well use half-edge structure while we're at it
+ - [x] document the changes
  - [x] convert Polygon{Int} to Polygon{Float}
  - [?] clean the type system once and for all:
   - [x] suggestion: leat `AbstractGeometry` objects have a mess of types
@@ -226,6 +234,8 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] export to SVG/STL/PLY
    - [ ] `MeshIO`
 # Extras
+ - [ ] [Loop subdivision](https://github.com/cmu462/Scotty3D/wiki/Loop-Subdivision)
+ - [ ] https://student.cs.uwaterloo.ca/~cs779/Gallery/Winter2018/anietoro/doc/
  - [ ] add a display method that shows the tree
  - [ ] try 2 strategies for n-ary intersection/union:
    - [ ] merge all structures and compute multiplicity with ray-shooting,

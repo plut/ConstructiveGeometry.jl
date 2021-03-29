@@ -14,6 +14,8 @@ using FastClosures
     TriangleIntersections.Constants
 
 Constants describing position of a point in a triangle.
+All computations in this module are branch-less
+(implemented using binary logic).
 """
 module Constants#««
 # const Position = Int8
@@ -41,12 +43,22 @@ module Constants#««
 	edge12=4
 	invalid=-1
 end
+@inline Base.show(io::IO, a::Position) =
+	print(io, (a == interior) ? "interior" :
+	(a == vertex1) ? "v1" :
+	(a == vertex2) ? "v2" :
+	(a == vertex3) ? "v3" :
+	(a == edge23) ? "e23" :
+	(a == edge31) ? "e31" :
+	(a == edge12) ? "e12" :
+	"invalid")
 @inline Base.iszero(a::Position) = a == interior
 @inline isvertex(a::Position) = count_ones(Integer(a)) == 2
 @inline isedge(a::Position) = count_ones(Integer(a)) == 1
 @inline Base.:&(a::Position, b::Position) = Position(Integer(a)&Integer(b))
 @inline Base.:|(a::Position, b::Position) = Position(Integer(a)|Integer(b))
 @inline Base.:^(a::Position, b::Position) = Position(Integer(a)^Integer(b))
+# rotating a triangle (1->2->3) implemented without branches
 @inline function Base.:<<(a::Position, i::Integer)
 	i == 0 && return a
 	i == 1 && return (typeof(a))((Integer(a)<<1|Integer(a)>>2)&7)
@@ -54,8 +66,9 @@ end
 	return a<<(i%3)
 end
 @inline index(a::Position) = Integer(a) ≤ 3 ? Integer(a) : 7-Integer(a)
-@inline index(a::Position, ::typeof(isvertex)) = index(a)
-@inline index(a::Position, ::typeof(isedge)) = Integer(a)-(Integer(a)>>2)
+# branch-less computation of index for vertices and edges:
+@inline index(a::Position, ::typeof(isvertex)) = 6-Integer(a)+Integer(a)>>2
+@inline index(a::Position, ::typeof(isedge)) = Integer(a)-Integer(a)>>2
 @inline same_edge(a::Position, b::Position) = !iszero(a & b)
 end#»»
 using .Constants: isvertex, isedge, index, same_edge
@@ -516,7 +529,7 @@ function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}};
 	dp2 = dot(normal1, p2-p1)
 	dq2 = dot(normal1, q2-p1)
 	dr2 = dot(normal1, r2-p1)
-	@debug "signs for dp2 dq2 dr2: $(Int.(sign.((dp2,dq2,dr2))))"
+# 	@debug "signs for dp2 dq2 dr2: $(Int.(sign.((dp2,dq2,dr2))))"
 	@tree27((dp2,dq2,dr2),
 		"+++" => (return ID()),
 		"0--" => begin
@@ -712,7 +725,6 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	dpqr = abs(normal2[abs(proj.dir)])
 # 	@debug "in inter_border to segment\n($u1,$v1)\n($a2,$b2,$c2)"
 	it = inter_segment2_triangle2((u1,v1), (a2,b2,c2); ε)
-	@debug "found it=$it"
 	rename1!(it, Constants.edge12 => Constants.edge23<<i1,
 		Constants.vertex1 => Constants.vertex2<<i1,
 		Constants.vertex2 => Constants.vertex3<<i1)
