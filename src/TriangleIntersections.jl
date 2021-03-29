@@ -71,7 +71,7 @@ end
 @inline index(a::Position, ::typeof(isedge)) = Integer(a)-Integer(a)>>2
 @inline same_edge(a::Position, b::Position) = !iszero(a & b)
 end#»»
-using .Constants: isvertex, isedge, index, same_edge
+import .Constants: isvertex, isedge, index, same_edge
 # Preamble««1
 # Generic stuff««2
 # predicates for assertions:
@@ -98,7 +98,7 @@ struct IntersectionData{N,P} <:
 	npoints::Int
 	pttype::MVector{N,NTuple{2,Constants.Position}}
 	points::MVector{N,P}
-	@inline IntersectionData{N,P}(npoints::Int, ::UndefInitializer) where{N,P} =
+	@inline IntersectionData{N,P}(::UndefInitializer, npoints::Integer) where{N,P} =
 		new{N,P}(npoints, MVector{N,NTuple{2,Constants.Position}}(undef),
 			MVector{N,P}(undef))
 	@inline IntersectionData{N,P}(npoints::Int, pttype::MVector{N,P},
@@ -106,7 +106,7 @@ struct IntersectionData{N,P} <:
 		new{N,P}(npoints, pttype, points)
 	@inline function IntersectionData{N,P}(npoints::Int, pttype, points
 		) where{N,P}
-		it = IntersectionData{N,P}(npoints, undef)
+		it = IntersectionData{N,P}(undef, npoints)
 		# instead of broadcasting, we write the loop: this allows us to
 		# over-specify the set of points
 		for i in 1:npoints
@@ -114,7 +114,7 @@ struct IntersectionData{N,P} <:
 		end
 		return it
 	end
-	@inline IntersectionData{N,P}() where{N,P} = IntersectionData{N,P}(0, undef)
+	@inline IntersectionData{N,P}() where{N,P} = IntersectionData{N,P}(undef, 0)
 	@inline IntersectionData{N,P}(pt::Pair...) where{N,P} =
 		IntersectionData{N,P}(length(pt), last.(pt), first.(pt))
 end
@@ -475,11 +475,9 @@ This is returned as a `IntersectionData` structure.
 Both arguments may be of any types, as long as that type supports enumeration
 to three vertices, and those are compatible with basic geometry operations.
 """
-@inline inter(tri1::SVector{3}, tri2::SVector{3}; kwargs...) =
-begin
-	inter(tri1.data, tri2.data; kwargs...)
-end
-function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}};
+@inline inter(tri1::SVector{3}, tri2::SVector{3}, args...) =
+	inter(tri1.data, tri2.data, args...)
+function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}},
 	ε=0) where{T}
 	# loosely inspired by
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
@@ -725,11 +723,16 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	dpqr = abs(normal2[abs(proj.dir)])
 # 	@debug "in inter_border to segment\n($u1,$v1)\n($a2,$b2,$c2)"
 	it = inter_segment2_triangle2((u1,v1), (a2,b2,c2); ε)
-	rename1!(it, Constants.edge12 => Constants.edge23<<i1,
+	it3 = ID(undef, length(it))
+	for i in 1:length(it)
+		it3.pttype[i] = it.pttype[i]
+		it3.points[i] = inv(proj)(it.points[i])
+	end
+	rename1!(it3, Constants.edge12 => Constants.edge23<<i1,
 		Constants.vertex1 => Constants.vertex2<<i1,
 		Constants.vertex2 => Constants.vertex3<<i1)
 # 	rename!(it, 1, (i1, plus1mod3(i1,3), plus2mod3(i1,3)))
-	return inv(proj)(it)
+	return it3
 end
 # inter_coplanar ««2
 

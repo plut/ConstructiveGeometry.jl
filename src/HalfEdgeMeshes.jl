@@ -3,8 +3,8 @@ using LinearAlgebra
 module LibTriangle
 	using Triangle
 end
-include("src/TriangleIntersections.jl"); TI = TriangleIntersections
-include("src/SpatialSorting.jl")
+include("TriangleIntersections.jl")
+include("SpatialSorting.jl")
 
 # using DataStructures
 const HalfEdgeId = Int
@@ -38,12 +38,14 @@ Use only for *very small* lists.
 AList=GenAList{false}
 SortedAList=GenAList{true}
 
+@inline GenAList{S,K,V}() where{S,K,V} = GenAList{S,K,V}(K[], V[])
 @inline GenAList{S}(keys::Vector{K}, values::Vector{V}) where{S,K,V} =
 	GenAList{S,K,V}(keys, values)
 @inline GenAList{S}(entries::Pair{K,V}...) where {S,K,V} =
 	GenAList{S,K,V}(entries...)
 @inline GenAList{S,K,V}(entries::Pair...) where{S,K,V} =
 	GenAList{S,K,V}([first.(entries)...], [last.(entries)...])
+@inline GenAList{S,K,V}() where{S,K,V} = GenAList{S,K,V}(K[],V[]) # type-stable
 (T::Type{<:GenAList})(a::GenAList) = T(a.keys, a.values)
 Base.keys(a::GenAList) = a.keys
 Base.values(a::GenAList) = a.values
@@ -226,49 +228,7 @@ end
 	return ((m.data.keys[s[1]], a.keys[s[2]]) => a.values[s[2]], (s[1], s[2]+1))
 end
 
-# # do two sorted arrays intersect?««2
-# function sortedintersect(list1, list2)
-# 	u1 = iterate(list1); u1 == nothing && return false
-# 	u2 = iterate(list2); u2 == nothing && return false
-# 	while true
-# 		(e1, s1) = u1
-# 		(e2, s2) = u2
-# 		if e1 == e2
-# 			return true
-# 		elseif e1 < e2
-# 			u1 = iterate(list1, s1); u1 == nothing && return false
-# 		else # e2 < e1
-# 			u2 = iterate(list2, s2); u2 == nothing && return false
-# 		end
-# 	end
-# 	return false
-# end
-# 
 # equivalence relations««1
-# uniqueindices««2
-# """
-#     uniqueindices(list)
-# 
-# assuming `list` is sorted, returns `idx` so that
-# `unique(list) == list[idx]`.
-# """
-# function uniqueindices(list)
-# 	p = pairs(list)
-# 	u = iterate(p)
-# 	ret = keytype(p)[] # for type-stability, we predeclare this
-# 	u == nothing && return ret
-# 	((i, x), s) = u
-# 	push!(ret, i)
-# 	while true
-# 		u = iterate(p, s)
-# 		u == nothing && return ret
-# 		oldx = x
-# 		((i, x), s) = u
-# 		x ≠ oldx && push!(ret, i)
-# 	end
-# 	return ret
-# end
-
 """
     uniquenames(list)
 
@@ -294,63 +254,6 @@ function uniquenames(list)
 	end
 	return (names, idx)
 end
-
-# """
-#     sortperminverse(array)
-# 
-# returns `idx` such that sort(array)[idx] == array.
-# """
-# function sortperminverse(array; kwargs...)
-# 	p = sortperm(array; kwargs...)
-# 	r = similar(p)
-# 	for (x, y) in pairs(p)
-# 		r[y] = x
-# 	end
-# 	return r
-# end
-# 
-# """
-#      uniqueindicesinverse(list)
-# 
-# if list is sorted, returns `idx` such that unique(list)[idx] == list
-# """
-# function uniqueindicesinverse(list)
-# 	u = iterate(list); u == nothing && return Int[]
-# 	(x, s) = u
-# 	j = 1
-# 	r = sizehint!([j], length(list))
-# 	while true
-# 		u = iterate(list, s)
-# 		u == nothing && return r
-# 		(y, s) = u
-# 		(y ≠ x) && (j+= 1; x = y)
-# 		push!(r, j)
-# 	end
-# 	return r
-# end
-# """
-#     uniquesortindicesinverse(list)
-# 
-# returns `idx` such that unique(sort(list))[idx] == list
-# """
-# function uniquesortindicesinverse(list)
-# 	p = sortperm(list) # sortlist == list ∘ p
-# 	u = uniqueindicesinverse(view(list, p)) # uniquelist ∘ u == sortlist
-# 	r = similar(p)
-# 	r[p] .= u
-# 	return r
-# end
-
-# """
-#     uniquesortindices(list)
-# 
-# returns `idx` so that unique(sort(list)) == list[idx]
-# """
-# function uniquesortindices(list)
-# 	perm = sortperm(list)
-# 	idx = uniqueindices(view(list, perm))
-# 	return perm[idx]
-# end
 
 # union-find structure««2
 struct UnionFind{T}
@@ -470,7 +373,8 @@ function equivalence_structure(relation)
 		push!(class[r], i)
 	end
 	map(sort!, class)
-	return EquivalenceStructure(SortedAList(names, rep),class)
+	return EquivalenceStructure(GenAList{true,eltype(names),eltype(rep)}(
+		names, rep_idx),class)
 end
 # half-edge mesh««1
 # half-edge data structure ««2
@@ -485,7 +389,7 @@ end
 
 halfedge_type(::Type{<:HalfEdgeMesh{H}}) where{H,V,P} = H
 halfedge_type(s::HalfEdgeMesh) = halfedge_type(typeof(s))
-face_type(s) = halfedge_type(s)
+@inline face_type(s) = halfedge_type(s)
 vertex_type(::Type{<:HalfEdgeMesh{H,V}}) where{H,V,P} = V
 vertex_type(s::HalfEdgeMesh) = vertex_type(typeof(s))
 point_type(::Type{<:HalfEdgeMesh{H,V,P}}) where{H,V,P} = P
@@ -503,7 +407,7 @@ point_type(s::HalfEdgeMesh) = point_type(typeof(s))
 @inline HalfEdgeMesh(::UndefInitializer, points, args...) =
 	HalfEdgeMesh{HalfEdgeId,VertexId,eltype(points)}(undef, points, args...)
 
-function normalized_plane_eq(p1,p2,p3)
+function normalized_plane_eq(p1,p2,p3)#««
 	# normalized plane equation through three points
 	direction = cross(p2-p1, p3-p1)
 	@inbounds u1 = direction[1]
@@ -526,9 +430,8 @@ function normalized_plane_eq(p1,p2,p3)
 		v = (u1/u3, u2/u3)
 		u3 > 0 && return ( 3, P(v[1], v[2], v[1]*p1[1]+v[2]*p1[2]+p1[3]))
 		          return (-3, P(v[1], v[2], v[1]*p1[1]+v[2]*p1[2]+p1[3]))
-end
-
-function mark_edge!(s::HalfEdgeMesh, edge_loc, k, v1, v2)
+end#»»
+function mark_edge!(s::HalfEdgeMesh, edge_loc, k, v1, v2)#««
 # 	println("mark_edge!($k = ($v1,$v2))")
 	s.destination[k] = v2
 	s.edgefrom[v1] = k
@@ -538,17 +441,15 @@ function mark_edge!(s::HalfEdgeMesh, edge_loc, k, v1, v2)
 # 		println("  opposite edge ($v2,$v1) found in table at $j")
 		s.opposite[j] = k
 		s.opposite[k] = j
-		return
 	end
-end
-
-function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)
-# 	println("marking face $i as ($v1, $v2, $v3)")
+end#»»
+function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)#««
 	mark_edge!(s, edge_loc, 3i-2, v3, v1)
 	mark_edge!(s, edge_loc, 3i-1, v1, v2)
 	mark_edge!(s, edge_loc, 3i  , v2, v3)
 	s.plane[i] = normalized_plane_eq(vertex(s,v1), vertex(s,v2), vertex(s,v3))
-end
+end#»»
+
 function HalfEdgeMesh(points, faces)
 	nv = length(points)
 	@assert all(length.(faces) .== 3)
@@ -559,8 +460,6 @@ function HalfEdgeMesh(points, faces)
 		(v1,v2,v3) = f
 		# (v3v1), (v1v2), (v3v2)
 		mark_face!(s, edge_loc, i, v1, v2, v3)
-# 		(p1,p2,p3) = points[v1], points[v2], points[v3]
-# 		s.plane[i] = normalized_plane_eq(p1,p2,p3)
 	end
 	return s
 end
@@ -715,36 +614,6 @@ function coplanar_faces(s::HalfEdgeMesh; ε = 0)
 	return SpatialSorting.intersections(boxes)
 end
 
-# # refine triangulation««2
-# @inline refine(h, data...) = refine!(deepcopy(h), data...)
-# function refine!(s::HalfEdgeMesh, nv, data...)
-# 	edge_loc = SparseTable1{halfedge_type(s),vertex_type(s)}(nv)
-# 	n = nfaces(s)
-# 	n_new_faces = sum(length.(last.(data))) - length(data)
-# 	resize!(s, nv, n+n_new_faces)
-# 	for (i, triangulation) in data
-# 		# triangulation = [(a1,b1,c1), (a2,b2,c2), ...]
-# 		# replace face f by (a1,b1,c1)
-# 		# if triangulation is empty, then this will (rightly) fail:
-# 		((a1, b1, c1), state) = iterate(triangulation)
-# 		(v1,v2,v3) = face(s, i)
-# 		# before overwriting this face, we save the location of opposed half-edges:
-# 		# and save location of half-edges from v1, v2, v3:
-# 		e = edge_loc[(v1,v3)] = opposite(s, 3i-2); edgefrom!(s, v1, e)
-# 		e = edge_loc[(v2,v1)] = opposite(s, 3i-1); edgefrom!(s, v2, e)
-# 		e = edge_loc[(v3,v2)] = opposite(s, 3i  ); edgefrom!(s, v3, e)
-# 		mark_face!(s, edge_loc, i, a1, b1, c1)
-# 		# append new faces
-# 		while true
-# 			u = iterate(triangulation, state)
-# 			u == nothing && break
-# 			((a,b,c), state) = u
-# 			n+= 1
-# 			mark_face!(s, edge_loc, n, a, b, c)
-# 		end
-# 	end
-# 	return s
-# end
 # concatenation ««2
 function concatenate(slist::HalfEdgeMesh...)
 	r = HalfEdgeMesh{halfedge_type(first(slist)),
@@ -780,7 +649,6 @@ end
 
 @inline Base.min(b::BBox) = b.min; @inline Base.max(b::BBox) = b.max
 @inline Base.:∈(x::AbstractVector, b::BBox) = all(min(b) .≤ x .≤ max(b))
-# @inline ∈(x::Point, b::BBox) = x.coords ∈ b
 @inline Base.isempty(b::BBox) = any(min(b) .> max(b))
 @inline Base.intersect(a::BBox, b::BBox) =
 	BBox((max.(min(a), min(b))), (min.(max(a), max(b))))
@@ -789,8 +657,6 @@ end
 SpatialSorting.position(b::BBox) = b.min + b.max
 SpatialSorting.merge(b1::BBox, b2::BBox) =
 	BBox{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
-# @inline boundingbox(p...) = boundingbox(coordinates.(p)...)
-# @inline boundingbox(g::Geometry) = boundingbox(AbstractMeshes.vertices(g)...)
 # simplify_points««2
 """
     simplify_points(points; ε)
@@ -862,9 +728,10 @@ function Base.insert!(s::EdgeInserts, i, allpoints, p; ε = 0)
 end
 
 function register_point!(s::HalfEdgeMesh, allpoints, in_face, in_edge,#««
-		i, t, p; ε = 0)
+		i, t, p, ε = 0)
 	# i is face number, t is point type, p is geometric point
 	# returns the point number
+	TI = TriangleIntersections
 
 	TI.isvertex(t) && return face(s, i)[TI.index(t, TI.isvertex)]
 
@@ -875,6 +742,7 @@ function register_point!(s::HalfEdgeMesh, allpoints, in_face, in_edge,#««
 		# HalfEdgeMesh has edges in order: edge31, edge12, edge23
 		# index(edge31<<2) = index(edge23) = 1 fixes this:
 		k = TI.index(t<<2, TI.isedge)
+
 		return insert!(in_edge, 3*i-3+k, allpoints, p; ε)
 	end
 	# this is an iterior point:
@@ -901,7 +769,7 @@ Returns `(points, in_face, in_edge, same_edges)` describing the
 self-intersection graph of `s`.
 These values are *not* filtered for repetition.
 """
-function self_intersect(s::HalfEdgeMesh; ε=0)#««
+function self_intersect(s::HalfEdgeMesh, ε=0)#««
 	T = eltype(point_type(s))
 # 	edge_points = [ Int[] for _ in edges(s) ]
 # 	edge_coords = [ T[] for _ in edges(s) ]
@@ -913,22 +781,23 @@ function self_intersect(s::HalfEdgeMesh; ε=0)#««
 	# these will be filtered later to be made unique
 	points = copy(vertices(s))
 	same_points = NTuple{2,vertex_type(s)}[]
-	in_face = AList{face_type(s),Vector{vertex_type(s)}}()
+# 	in_face=AList(face_type(s)[],Vector{vertex_type(s)}[])
+	in_face = GenAList{false,face_type(s),Vector{vertex_type(s)}}()
 	in_edge = EdgeInserts(s)
 	same_edges = NTuple{2,NTuple{2,vertex_type(s)}}[]
 
 	for (i1, i2) in SpatialSorting.intersections(boxes)
 		adjacent_faces(s, i1, i2) && continue
-		it = TI.inter(triangle(s, i1), triangle(s, i2); ε)
+		it = TriangleIntersections.inter(triangle(s, i1), triangle(s, i2), ε)
 		isempty(it) && continue
 		
 		# create points as needed, and store their index:
 		vindex = MMatrix{6,2,vertex_type(s)}(undef)
 		for (i, (p, (t1, t2))) in pairs(it)
 			idx1 = register_point!(s, points, in_face, in_edge,
-				i1, t1, p; ε)
+				i1, t1, p, ε)
 			idx2 = register_point!(s, points, in_face, in_edge,
-				i2, t2, p; ε)
+				i2, t2, p, ε)
 			idx1 ≠ idx2 && push!(same_points, (idx1, idx2))
 			vindex[i,1] = idx1; vindex[i,2] = idx2
 		end
@@ -948,6 +817,7 @@ function self_intersect(s::HalfEdgeMesh; ε=0)#««
 		end
 	end
 	(dup_points, point_rep) = lowest_representatives(same_points)
+	global SE=same_edges
 	return (
 		points=points, in_face=in_face,
 		in_edge=in_edge.vertices,
@@ -1040,8 +910,9 @@ end
 
 # subtriangulate««2
 function subtriangulate(s::HalfEdgeMesh, ε=0)
-	si = self_intersect(s; ε)
-	# cluster of coplanar faces:
+	si = self_intersect(s, ε)
+	# determine clusters of coplanar faces:
+	# (using compact type for equivalence structure since O(n) faces...)
 	coplanar_rel = coplanar_faces(s; ε)
 	coplanar_rep = lowest_representatives(coplanar_rel, 1:nfaces(s))
 	clusters = equivalence_classes(nfaces(s), coplanar_rel;
@@ -1148,7 +1019,6 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 	for (f, tri) in zip(keys(faces_todo), faces_tri)
 		length(tri) ≤ 1 && continue # skipped face, or trivial retriangulation
 
-# 		println(" replacing $f=$(face(s1,f)) by $tri")
 		nf+= length(tri) - 1
 		resize_faces!(s1, nf)
 		((a1,b1,c1), state) = iterate(tri)
@@ -1158,7 +1028,6 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 		e = edge_loc[(v1,v3)] = opposite(s1, 3*f-2); edgefrom!(s1, v1, e)
 		e = edge_loc[(v2,v1)] = opposite(s1, 3*f-1); edgefrom!(s1, v2, e)
 		e = edge_loc[(v3,v2)] = opposite(s1, 3*f  ); edgefrom!(s1, v3, e)
-# 		println("initial edge_loc=$edge_loc")
 		mark_face!(s1, edge_loc, f, a1, b1, c1)
 		# append new faces
 		while true
