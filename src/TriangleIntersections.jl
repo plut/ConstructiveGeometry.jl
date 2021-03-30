@@ -491,6 +491,7 @@ function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}},
 	ID = IntersectionData{6,typeof(p1)}
 
 	normal2 = cross(q2-p2, r2-p2)
+	@assert norm(normal2, Inf) > ε "degenerate triangle2"
 
 	dp1 = dot(normal2, p1-p2)
 	dq1 = dot(normal2, q1-p2)
@@ -524,6 +525,7 @@ function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}},
 
 	# likewise for second triangle
 	normal1 = cross(q1-p1, r1-p1)
+	@assert norm(normal1, Inf) > ε "degenerate triangle1"
 	dp2 = dot(normal1, p2-p1)
 	dq2 = dot(normal1, q2-p1)
 	dr2 = dot(normal1, r2-p1)

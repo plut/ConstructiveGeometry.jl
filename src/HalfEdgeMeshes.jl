@@ -1,5 +1,7 @@
+module HalfEdgeMeshes
 using StaticArrays
 using LinearAlgebra
+using FastClosures
 module LibTriangle
 	using Triangle
 end
@@ -25,37 +27,36 @@ const VertexId = Int
 
 # tools ««1
 # AList ««2
-struct GenAList{S,K,V} <: AbstractDict{K,V}
-	keys::Vector{K}
-	values::Vector{V}
+
+abstract type AbstractAList{K,V} <: AbstractDict{K,V} end
+
+@inline (T::Type{<:AbstractAList})(entries::Pair...) =
+	T([first.(entries)...], [last.(entries)...])
+
+Base.keys(a::AbstractAList) = a.keys
+Base.values(a::AbstractAList) = a.values
+Base.haskey(a::AbstractAList, u) = u ∈ keys(a)
+Base.length(a::AbstractAList) = length(keys(a))
+
+function Base.iterate(a::AbstractAList, s = 1)
+	s > length(a) && return nothing
+	return (a.keys[s] => a.values[s], s+1)
 end
+
 """
     AList{K,V}
 
 Trivial implementation of an associative list.
 Use only for *very small* lists.
 """
-AList=GenAList{false}
-SortedAList=GenAList{true}
-
-@inline GenAList{S,K,V}() where{S,K,V} = GenAList{S,K,V}(K[], V[])
-@inline GenAList{S}(keys::Vector{K}, values::Vector{V}) where{S,K,V} =
-	GenAList{S,K,V}(keys, values)
-@inline GenAList{S}(entries::Pair{K,V}...) where {S,K,V} =
-	GenAList{S,K,V}(entries...)
-@inline GenAList{S,K,V}(entries::Pair...) where{S,K,V} =
-	GenAList{S,K,V}([first.(entries)...], [last.(entries)...])
-@inline GenAList{S,K,V}() where{S,K,V} = GenAList{S,K,V}(K[],V[]) # type-stable
-(T::Type{<:GenAList})(a::GenAList) = T(a.keys, a.values)
-Base.keys(a::GenAList) = a.keys
-Base.values(a::GenAList) = a.values
-Base.haskey(a::AList, u) = u ∈ keys(a)
-Base.haskey(a::SortedAList, u) = !isempty(searchsorted(keys(a), u))
-Base.length(a::GenAList) = length(keys(a))
-function Base.iterate(a::GenAList, s = 1)
-	s > length(a) && return nothing
-	return (a.keys[s] => a.values[s], s+1)
+struct AList{K,V} <: AbstractAList{K,V}
+	keys::Vector{K}
+	values::Vector{V}
 end
+@inline AList{K,V}() where{K,V} = AList{K,V}(K[], V[])
+@inline AList{K,V}(a::AList{K,V}) where{K,V} = AList{K,V}(a.keys, a.values)
+@inline AList(keys::AbstractVector, values::AbstractVector) =
+	AList{eltype(keys),eltype(values)}(keys, values)
 
 function Base.getindex(a::AList, u)
 	@inbounds for (i, k) in pairs(keys(a))
@@ -78,8 +79,18 @@ function Base.setindex!(a::AList, v, u)
 	return a
 end
 
+
+struct SortedAList{K,V} <: AbstractAList{K,V}
+	keys::Vector{K}
+	values::Vector{V}
+end
+@inline SortedAList{K,V}() where{K,V} = SortedAList{K,V}(K[], V[])
+@inline SortedAList(keys::AbstractVector, values::AbstractVector) =
+	SortedAList{eltype(keys),eltype(values)}(keys, values)
+
+
+Base.haskey(a::SortedAList, u) = !isempty(searchsorted(keys(a), u))
 function Base.getindex(a::SortedAList, u)
-# 	println("getindex of $u in $(keytype(a)) $(valtype(a)): $(a.keys) $(a.values)")
 	i = searchsorted(a.keys, u)
 	isempty(i) && throw(KeyError(u))
 	return a.values[first(i)]
@@ -102,9 +113,6 @@ end
 @inline Base.setindex!(a::SortedAList, y, k) =
 	modify!(a, k, y) do v, i; v[i] = y end
 
-	
-
-# TODO: SortedAList to compare performance
 # LazyMap ««2
 struct LazyMap{Y,X,F} <: AbstractVector{Y}
 	f::F
@@ -229,6 +237,7 @@ end
 end
 
 # equivalence relations««1
+# uniquenames ««2
 """
     uniquenames(list)
 
@@ -256,18 +265,31 @@ function uniquenames(list)
 end
 
 # union-find structure««2
-struct UnionFind{T}
-	parent::Vector{T}
-	treesize::Vector{T}
-	@inline UnionFind(undef, n::Integer) =
-		new{typeof(n)}(collect(1:n), ones(typeof(n), n))
-end
-function root(u::UnionFind, i)
+"""
+    AbstractUnionFind
+
+Supertype for union-find-like algorithms.
+Implements: parent tree, encoded as a vector `u.parent`.
+"""
+abstract type AbstractUnionFind{T} end
+
+function root(u::AbstractUnionFind, i)
 	while true
 		j = u.parent[i]
 		i == j && return i
 		i = j
 	end
+end
+function representatives(u::AbstractUnionFind)
+	return [ root(u, i) for i in 1:length(u.parent) ]
+end
+# @inline equivalent(u::AbstractUnionFind, i, j) = root(u, i) == root(u, j)
+
+struct UnionFind{T} <: AbstractUnionFind{T}
+	parent::Vector{T}
+	treesize::Vector{T}
+	@inline UnionFind(undef, n::Integer) =
+		new{typeof(n)}(collect(1:n), ones(typeof(n), n))
 end
 function Base.union!(u::UnionFind, i, j)
 	x = root(u, i)
@@ -279,8 +301,40 @@ function Base.union!(u::UnionFind, i, j)
 	end
 	return u
 end
-function representatives(u::UnionFind)
-	return [ root(u, i) for i in 1:length(u.parent) ]
+
+struct LevelStructure{T} <: AbstractUnionFind{T}
+	parent::Vector{T}
+	treesize::Vector{T}
+	level::Vector{T} # level[i] is difference between i and parent[i]
+	@inline LevelStructure(n::Integer) =
+		new{typeof(n)}(collect(1:n), ones(typeof(n), n), zeros(typeof(n), n))
+end
+function root_and_level(u::LevelStructure, i)
+	l = 0
+	while true
+		j = u.parent[i]
+		l+= u.level[i]
+		i == j && return (i, l)
+		i = j
+	end
+end
+
+# level[i2] = level[i1] + δ
+function connect!(u::LevelStructure, i1, i2, δ)
+	(r1, d1) = root_and_level(u, i1)
+	(r2, d2) = root_and_level(u, i2)
+	if r1 == r2
+		@assert d2 == d1 + δ "connect($i1, $i2, $δ): faces are already connected and multiplicity should be $(d1+δ) (it is $d2). Faces are likely crossed around an edge."
+		return
+	end
+	if u.treesize[r1] < u.treesize[r2]
+		u.parent[r1] = u.parent[r2]; u.treesize[r2]+= u.treesize[r1]
+		u.level[r1] = -δ
+	else
+		u.parent[r2] = u.parent[r1]; u.treesize[r1]+= u.treesize[r2]
+		u.level[r2] = δ
+	end
+	return u
 end
 
 # find representative given equivalence relation ««2
@@ -347,6 +401,9 @@ end
 	s.class[s.representative[x]]
 @inline equivalent(s::EquivalenceStructure, x, y) =
 	s.representative[x] == s.representative[y]
+@inline classes(s::EquivalenceStructure) =
+	(s.representative.keys[i] for i in s.class)
+@inline elements(s::EquivalenceStructure) = keys(s.representative)
 
 function equivalence_structure(relation)
 	# first compute names
@@ -373,8 +430,7 @@ function equivalence_structure(relation)
 		push!(class[r], i)
 	end
 	map(sort!, class)
-	return EquivalenceStructure(GenAList{true,eltype(names),eltype(rep)}(
-		names, rep_idx),class)
+	return EquivalenceStructure(SortedAList(names, rep_idx),class)
 end
 # half-edge mesh««1
 # half-edge data structure ««2
@@ -382,9 +438,9 @@ struct HalfEdgeMesh{H,V,P}
 	opposite::Vector{H}
 	destination::Vector{V}
 	edgefrom::Vector{H} # indexed by VertexId
-	vertices::Vector{P}
+	points::Vector{P}
 	plane::Vector{Tuple{Int8,P}} # normalized plane equations
-	# FIXME: convert to structure-of-array
+	# FIXME: convert to structure-of-array?
 end
 
 halfedge_type(::Type{<:HalfEdgeMesh{H}}) where{H,V,P} = H
@@ -394,6 +450,7 @@ vertex_type(::Type{<:HalfEdgeMesh{H,V}}) where{H,V,P} = V
 vertex_type(s::HalfEdgeMesh) = vertex_type(typeof(s))
 point_type(::Type{<:HalfEdgeMesh{H,V,P}}) where{H,V,P} = P
 point_type(s::HalfEdgeMesh) = point_type(typeof(s))
+dir_type(::HalfEdgeMesh) = Int8
 
 @inline HalfEdgeMesh{H,V,P}(::UndefInitializer, points, nf::Integer
 	) where{H,V,P} = HalfEdgeMesh{H,V,P}(
@@ -407,6 +464,26 @@ point_type(s::HalfEdgeMesh) = point_type(typeof(s))
 @inline HalfEdgeMesh(::UndefInitializer, points, args...) =
 	HalfEdgeMesh{HalfEdgeId,VertexId,eltype(points)}(undef, points, args...)
 
+function main_axis(direction)#««
+	@inbounds (a1, a2, a3) = abs.(direction)
+	if a2 < a1
+		a1 < a3 && @goto max3
+		return direction[1] > 0 ? 1 : -1
+	elseif a2 > a3
+		return direction[2] > 0 ? 2 : -2
+	end; @label max3
+		return direction[3] > 0 ? 3 : -3
+end#»»
+function project2d(axis, vec)
+	# orientation-preserving projection:
+	axis == 1 && return (vec[2], vec[3])
+	axis == 2 && return (vec[3], vec[1])
+	axis == 3 && return (vec[1], vec[2])
+	axis ==-1 && return (vec[3], vec[2])
+	axis ==-2 && return (vec[1], vec[3])
+	@assert axis == -3
+	             return (vec[2], vec[1])
+end
 function normalized_plane_eq(p1,p2,p3)#««
 	# normalized plane equation through three points
 	direction = cross(p2-p1, p3-p1)
@@ -447,7 +524,7 @@ function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)#««
 	mark_edge!(s, edge_loc, 3i-2, v3, v1)
 	mark_edge!(s, edge_loc, 3i-1, v1, v2)
 	mark_edge!(s, edge_loc, 3i  , v2, v3)
-	s.plane[i] = normalized_plane_eq(vertex(s,v1), vertex(s,v2), vertex(s,v3))
+	s.plane[i] = normalized_plane_eq(point(s,v1), point(s,v2), point(s,v3))
 end#»»
 
 function HalfEdgeMesh(points, faces)
@@ -475,8 +552,8 @@ end
 @inline destination!(s::HalfEdgeMesh, e, v) = s.destination[e] = v
 @inline edgefrom(s::HalfEdgeMesh, v) = s.edgefrom[v]
 @inline edgefrom!(s::HalfEdgeMesh, v, e) = s.edgefrom[v] = e
-@inline vertices(s::HalfEdgeMesh) = s.vertices
-@inline vertex(s::HalfEdgeMesh, i) = s.vertices[i]
+@inline points(s::HalfEdgeMesh) = s.points
+@inline point(s::HalfEdgeMesh, i) = s.points[i]
 @inline planes(s::HalfEdgeMesh) = s.plane
 @inline plane(s::HalfEdgeMesh, i) = s.plane[i]
 
@@ -486,8 +563,11 @@ end
 	fld1(opposite(s, 3i  ), 3) == j
 
 @inline halfedge(s::HalfEdgeMesh, e) =
-	(destination(s, opposite(s, e)), destination(s, e))
+	(destination(s, prev(s, e)), destination(s, e))
+@inline opposed_vertex(s::HalfEdgeMesh, e) =
+	destination(s, next(s, e))
 @inline face_edge(s::HalfEdgeMesh, f, j) = halfedge(s, 3*f-3+j)
+@inline regular_edge(s::HalfEdgeMesh, e) = opposite(s, opposite(s, e)) == e
 
 @inline adjacent_face(s::HalfEdgeMesh, f, j) =
 	fld1(opposite(s, 3*f-3+j), 3)
@@ -495,28 +575,14 @@ end
 	map(j->adjacent_face(s, f, j), (1,2,3))
 
 function Base.resize!(s::HalfEdgeMesh, nv, nf)
-	resize_vertices!(s, nv)
+	resize_points!(s, nv)
 	resize_faces!(s, nf)
-	s
-end
-function extendvertices!(s::HalfEdgeMesh, vertices)
-	nv1 = nvertices(s)
-	nv2 = length(vertices)
-	resize!(s.edgefrom, nv2)
-	resize!(s.vertices, nv2)
-	s.vertices[nv1+1:nv2] .= vertices[nv1+1:nv2]
-	s
-end
-function resize_faces!(s::HalfEdgeMesh, nf)
-	resize!(s.opposite, 3nf)
-	resize!(s.destination, 3nf)
-	resize!(s.plane, nf)
 	s
 end
 
 function Base.reverse(s::HalfEdgeMesh)
 	r = HalfEdgeMesh{halfedge_type(s), vertex_type(s), point_type(s)}(
-		undef, vertices(s), nfaces(s))
+		undef, points(s), nfaces(s))
 	# reverse all half-edges:
 	# (31)(12)(23) to (21)(13)(32)
 	#
@@ -559,9 +625,9 @@ end
 
 @inline Base.size(h::HalfEdgeTriangleIterator) = (nfaces(h.mesh),)
 @inline Base.getindex(h::HalfEdgeTriangleIterator, i::Integer) = (
-	vertex(h.mesh,destination(h.mesh, 3i-2)),
-	vertex(h.mesh,destination(h.mesh, 3i-1)),
-	vertex(h.mesh,destination(h.mesh, 3i  )),
+	point(h.mesh,destination(h.mesh, 3i-2)),
+	point(h.mesh,destination(h.mesh, 3i-1)),
+	point(h.mesh,destination(h.mesh, 3i  )),
 	)
 @inline triangles(s::HalfEdgeMesh) =
 	HalfEdgeTriangleIterator{halfedge_type(s),vertex_type(s),point_type(s)}(s)
@@ -587,25 +653,23 @@ function edge(s::HalfEdgeMesh, (v1, v2))
 	for (he, dest) in neighbours(s, v1)
 		dest == v2 && return he
 	end
-	return nothing
+	throw(KeyError((v1,v2))); return edgefrom(v1) # type-stability
 end
 
-# struct HalfEdgeVertexNeighbours{H,V}
-# 	mesh::HalfEdgeMesh{H,V}
-# 	start::H
-# end
-# Base.IteratorSize(::HalfEdgeVertexNeighbours) = Base.SizeUnknown()
-# 
-# @inline vneighbours(s::HalfEdgeMesh, v) =
-# 	HalfEdgeVertexNeighbours{halfedge_type(s),vertex_type(s)}(s, edgefrom(s,v))
-# 
-# @inline Base.iterate(h::HalfEdgeVertexNeighbours) =
-# 	(destination(h.mesh,h.start), h.start)
-# function Base.iterate(h::HalfEdgeVertexNeighbours, s)
-# 	e = next(h.mesh, opposite(h.mesh, s))
-# 	e == h.start && return nothing
-# 	return (destination(h.mesh, e), e)
-# end
+struct HalfEdgeRadialIterator{H,V}
+	mesh::HalfEdgeMesh{H,V}
+	start::H
+end
+@inline radial_loop(s::HalfEdgeMesh, e) =
+	HalfEdgeRadialIterator{halfedge_type(s),vertex_type(s)}(s, e)
+@inline Base.iterate(it::HalfEdgeRadialIterator) = (it.start, it.start)
+function Base.iterate(it::HalfEdgeRadialIterator, s)
+	e = opposite(it.mesh, s)
+	e == it.start && return nothing
+	return (e, e)
+end
+Base.IteratorSize(::HalfEdgeRadialIterator) = Base.SizeUnknown()
+
 # find coplanar faces««2
 # returns the equivalence relation
 function coplanar_faces(s::HalfEdgeMesh; ε = 0)
@@ -614,11 +678,11 @@ function coplanar_faces(s::HalfEdgeMesh; ε = 0)
 	return SpatialSorting.intersections(boxes)
 end
 
-# concatenation ««2
+# modifying the structure: concatenation and point renaming««2
 function concatenate(slist::HalfEdgeMesh...)
 	r = HalfEdgeMesh{halfedge_type(first(slist)),
 		vertex_type(first(slist)),point_type(first(slist))}(undef,
-		vcat(vertices.(slist)...),
+		vcat(points.(slist)...),
 		sum(nfaces.(slist)))
 	eoffset = 0
 	voffset = 0
@@ -635,6 +699,48 @@ function concatenate(slist::HalfEdgeMesh...)
 	end
 	return r
 end
+function extend_points!(s::HalfEdgeMesh, points)
+	nv1 = nvertices(s)
+	nv2 = length(points)
+	resize!(s.edgefrom, nv2)
+	resize!(s.points, nv2)
+	s.points[nv1+1:nv2] .= points[nv1+1:nv2]
+	s
+end
+function resize_faces!(s::HalfEdgeMesh, nf)
+	resize!(s.opposite, 3nf)
+	resize!(s.destination, 3nf)
+	resize!(s.plane, nf)
+	s
+end
+function shift_points!(s::HalfEdgeMesh, vmap, start, stop, offset)
+# 		println("points $start:$stop shifted by $offset")
+	for i in start:stop
+		s.points[i] = s.points[i+offset]
+		s.edgefrom[i] = s.edgefrom[i+offset]
+		vmap[i+offset] = i
+	end
+end
+function deduplicate_vertices!(s::HalfEdgeMesh, ren)
+	nv = nvertices(s); l = length(ren)
+	vmap = Vector{Int}(undef, nv)
+
+	start = 1; offset = 0
+	for (i, k) in pairs(keys(ren))
+		current = k-offset
+		shift_points!(s, vmap, start, current-1, offset)
+		start = current; offset+= 1
+	end
+	shift_points!(s, vmap, start, nv-l, l)
+	# replace points by correct values:
+	vmap[keys(ren)] .= vmap[values(ren)]
+
+	s.destination .= view(vmap, s.destination)
+	resize!(s.points, nv-l)
+	resize!(s.edgefrom, nv-l)
+	return s
+end
+
 # self-intersection««1
 # bbox««2
 struct BBox{P}
@@ -698,15 +804,15 @@ struct EdgeInserts{H,V,P,Z}
 		EdgeInserts{halfedge_type(mesh),vertex_type(mesh),point_type(mesh),
 			eltype(point_type(mesh))}(mesh, nvertices(mesh))
 end
-function Base.insert!(s::EdgeInserts, i, allpoints, p; ε = 0)
+function Base.insert!(s::EdgeInserts, i, allpoints, p, ε = 0)
 # i: half-edge index
 # returns id of vertex
 	e = extrema(halfedge(s.mesh, i))
 	if !haskey(s.vertices, e)
 		# no previous point on this edge: insertion is trivial
-		v = vertex(s.mesh, e[2]) - vertex(s.mesh, e[1])
+		v = point(s.mesh, e[2]) - point(s.mesh, e[1])
 		k = findmax(abs.(v))[2]
-		s.sort[e] = (dir = (v[k] > 0 ? k : -k), z = [p[k]])
+		s.sort[e] = (dir = dir_type(s.mesh)(v[k] > 0 ? k : -k), z = [p[k]])
 		push!(allpoints, p)
 		newvertex = vertex_type(s.mesh)(length(allpoints))
 		s.vertices[e] = [newvertex]
@@ -743,7 +849,7 @@ function register_point!(s::HalfEdgeMesh, allpoints, in_face, in_edge,#««
 		# index(edge31<<2) = index(edge23) = 1 fixes this:
 		k = TI.index(t<<2, TI.isedge)
 
-		return insert!(in_edge, 3*i-3+k, allpoints, p; ε)
+		return insert!(in_edge, 3*i-3+k, allpoints, p, ε)
 	end
 	# this is an iterior point:
 	if !haskey(in_face, i)
@@ -779,50 +885,55 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 	# elist: list of new edges
 	# elist[i] always connects points (2i-1) and (2i)
 	# these will be filtered later to be made unique
-	points = copy(vertices(s))
+	pts = copy(points(s))
 	same_points = NTuple{2,vertex_type(s)}[]
 # 	in_face=AList(face_type(s)[],Vector{vertex_type(s)}[])
-	in_face = GenAList{false,face_type(s),Vector{vertex_type(s)}}()
+	in_face = AList{face_type(s),Vector{vertex_type(s)}}()
 	in_edge = EdgeInserts(s)
 	same_edges = NTuple{2,NTuple{2,vertex_type(s)}}[]
 
 	for (i1, i2) in SpatialSorting.intersections(boxes)
 		adjacent_faces(s, i1, i2) && continue
+		# this can fail only for a flat triangle:
 		it = TriangleIntersections.inter(triangle(s, i1), triangle(s, i2), ε)
 		isempty(it) && continue
+# 		println("faces $i1=$(face(s,i1)) and $i2=$(face(s,i2)) intersect in $(length(it)) points")
 		
 		# create points as needed, and store their index:
 		vindex = MMatrix{6,2,vertex_type(s)}(undef)
 		for (i, (p, (t1, t2))) in pairs(it)
-			idx1 = register_point!(s, points, in_face, in_edge,
+			idx1 = register_point!(s, pts, in_face, in_edge,
 				i1, t1, p, ε)
-			idx2 = register_point!(s, points, in_face, in_edge,
+			idx2 = register_point!(s, pts, in_face, in_edge,
 				i2, t2, p, ε)
 			idx1 ≠ idx2 && push!(same_points, (idx1, idx2))
 			vindex[i,1] = idx1; vindex[i,2] = idx2
+# 		println("   now $(length(points)) points, registered $p=$idx1, $idx2")
 		end
-		e1 = (vindex[1,1], vindex[1,2])
+# 		println("   registered points: $(vindex[1:length(it),:])")
+		v1 = vindex[1,:]
 		for i in 2:length(it)
-			e2 = (vindex[i,1], vindex[i,2])
-			if e1[1] < e1[2]
-				push!(same_edges, (e1, e2))
-			else
-				push!(same_edges, (reverse(e1), reverse(e2)))
-			end
-			if e2[1] < e2[2]
-				push!(same_edges, (e2, e1))
-			else
-				push!(same_edges, (reverse(e2), reverse(e1)))
+			v2 = vindex[i,:]
+# 			println("matching edge starting at $v1, ending at $v2")
+			for j in 1:2
+				if v1[j] < v2[j]
+					push!(same_edges, ((v1[j], v2[j]), (v1[3-j], v2[3-j])))
+				else
+					push!(same_edges, ((v2[j], v1[j]), (v2[3-j], v1[3-j])))
+				end
 			end
 		end
 	end
 	(dup_points, point_rep) = lowest_representatives(same_points)
-	global SE=same_edges
+	real_dup = dup_points .!= point_rep
+	dup_points = dup_points[real_dup]
+	point_rep  = point_rep[real_dup]
 	return (
-		points=points, in_face=in_face,
+		points=pts, in_face=in_face,
 		in_edge=in_edge.vertices,
+		same_points=SortedAList(dup_points, point_rep),
 		same_edges=equivalence_structure(same_edges),
-		same_points=SortedAList(dup_points, point_rep))
+		)
 end#»»
 
 # subtriangulation««1
@@ -980,9 +1091,8 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 			get(si.same_points, e[2], e[2])), clusteredges)
 		unique!(sort!(uniqueedges))
 
-		dir0 = plane(s,f)[1]
-		newtriangles = project_and_triangulate(si.points, dir0,
-			uniquevertices, uniqueedges)
+		newtriangles = project_and_triangulate(si.points,
+			abs(plane(s,f)[1]), uniquevertices, uniqueedges)
 
 		# extract triangulation for each face
 		for f in current_cluster
@@ -999,7 +1109,7 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 				isempty(searchsorted(fvert, real_tri[1])) && continue
 				isempty(searchsorted(fvert, real_tri[2])) && continue
 				isempty(searchsorted(fvert, real_tri[3])) && continue
-				if sign(d) == sign(dir0)
+				if d > 0
 					push!(faces_tri[j], (real_tri[1],real_tri[2],real_tri[3]))
 				else
 					push!(faces_tri[j], (real_tri[1],real_tri[3],real_tri[2]))
@@ -1012,8 +1122,7 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 	# sparsetable0 only:
 	s1 = deepcopy(s)
 	edge_loc = SparseTable0{halfedge_type(s1),vertex_type(s1)}()
-	extendvertices!(s1, si.points)
-	println(vertices(s1))
+	extend_points!(s1, si.points)
 	# n is number of face being written, nf total number of faces
 	n = nf = nfaces(s1)
 	for (f, tri) in zip(keys(faces_todo), faces_tri)
@@ -1038,18 +1147,159 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 			mark_face!(s1, edge_loc, n, a, b, c)
 		end
 	end
-	return (s1, si.same_points, si.same_edges)
+	# build radial cycles for singular half-edges:
+	he1 = [ edge(s1, e) for e in elements(si.same_edges) ]
+	he2 = [ opposite(s1, e) for e in he1 ]
+	for c in si.same_edges.class
+		c1 = he1[c]; c2 = he2[c]
+		# interleave the two lists:
+		for i in 1:length(c)-1
+			opposite!(s1, c1[i], c2[i])
+			opposite!(s1, c2[i], c1[i+1])
+		end
+		opposite!(s1, last(c1), last(c2))
+		opposite!(s1, last(c2), first(c1))
+	end
+	deduplicate_vertices!(s1, si.same_points)
+	return s1
+	# TODO: merge unused points here? this will eventually need to be done
 end
 
-#««1
+#»»1
+# multiplicity««1
+# regular_patches««2
+"""
+    regular_patches(mesh)
 
+Returns a pair `(label, adjacency)`, where `label` is a labeling of the
+faces of `s` in regular (manifold) patches, and `adjacency` is an adjacency
+matrix between these patches (containing a half-edge where both patches meet).
+"""
+function regular_patches(s::HalfEdgeMesh)
+	label = zeros(Int, nfaces(s))
+	todo = face_type(s)[]
+	adjacency = zeros(halfedge_type(s), 0, 0)
+	n = 0
+	for start_face in 1:nfaces(s)
+		!iszero(label[start_face]) && continue
+		label[start_face] = n+= 1
+		push!(todo, start_face)
+		adjacency = let new_adjacency = similar(adjacency, n, n)
+			new_adjacency[1:n-1, 1:n-1] .= adjacency
+			fill!(view(new_adjacency, n, :), 0)
+			fill!(view(new_adjacency, 1:n-1, n), 0)
+			new_adjacency
+		end
+		while !isempty(todo)
+			current_face = pop!(todo)
+			for k in -2:0
+				e = 3*current_face+k
+				if regular_edge(s, e)
+					next_face = fld1(opposite(s, e), 3)
+					if iszero(label[next_face])
+						label[next_face] = n
+						push!(todo, next_face)
+					end
+				else # singular edge
+					for e1 in radial_loop(s, e)
+						l = label[fld1(e1,3)]
+						!iszero(l) && (adjacency[l,n] = adjacency[n,l] = e)
+					end
+				end
+			end
+		end
+	end
+	return (label=label, adjacency=adjacency)
+end
+# circular_sign ««2
+"""
+    circular_sign(u,v)
+
+Let `α` and `β` be the angles of `u`,`v` in [-π, π[.
+This function returns a number <0 iff `α` < `β`, >0 iff `α` > `β`,
+and `0` iff `α` == `β`.
+"""
+@inline function circular_sign(u, v)
+# 16 cases to consider: u = (-1, -i, 1, i), same for v
+	if u[2] > 0
+		v[2] ≤ 0 && return -1 # (i,-1), (i,-i), (i,1)
+	elseif u[2] < 0
+		v[2] > 0 && return 1 #(-i,i)
+	elseif u[2] == 0
+		if v[2] == 0
+			return sign(v[1]) - sign(u[1]) #(1,1) (1,-1) (-1,1) (-1,-1)
+		elseif v[2] > 0
+			return 1 #(-1,i) (1,i)
+		else
+			# the following line is not needed, but faster than computing det:
+			return -sign(u[1]) #(-1,-i) (1,-i) 
+		end
+	end
+	# determinant also works for the following cases:
+	# (-1,-i), (-i, -1), (-i, 1), (1, i)
+	return u[1]*v[2]-u[2]*v[1]
+end
+# sort_radial_loop««2
+function sort_radial_loop(s::HalfEdgeMesh, e)
+	# prepare geometry information
+	(v1, v2) = halfedge(s, e)
+	dir3 = point(s, v2) - point(s, v1)
+	proj = main_axis(dir3)
+	dir2 = project2d(proj, dir3)
+	dir2scaled = dir2 ./dot(dir3, dir3)
+	# collect half-edges and corresponding opposed vertices
+	# for each adjacent face, compute a (3d) vector which, together with
+	# the edge, generates the face (and pointing from the edge to the face):
+	# 2d projection of face_vec3 (preserving orientation)
+	he = collect(radial_loop(s, e)) # half-edges
+	ov = [ opposed_vertex(s, e) for e in he ] #opposite vertices
+	p1 = point(s, v1)
+	fv = [ point(s, v) - p1 for v in ov ] # face vector
+	# face vector, projected in 2d:
+	fv2= [ project2d(proj, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
+# 	println("edge $e = ($v1,$v2): $dir3 proj=$proj")
+# 	for (e1, x, y, z) in zip(he, ov, fv, fv2)
+# 		println("half-edge $e1 = $(halfedge(s, e1)): opp.v=$x, face vec=$y, projects to $z")
+# 	end
+	face_cmp = @closure (i1, i2) -> let b = circular_sign(fv2[i1], fv2[i2])
+		!iszero(b) && return (b > 0)
+		# we want a consistent ordering between coincident faces.
+		# the rule is: 1. all arrows point inward the thin wedge (this is
+		# useful for later determining multiplicity): positive-oriented faces
+		# come *before* negative-oriented faces
+		# 2. sort by face number (i.e. decreasing face number for rule 1).
+		# we have as input an alternated list starting with a positive edge:
+		return (-1)^i1*he[i1] < (-1)^i2*he[i2]
+		# half-edge number is proportional to face number
+	end
+	reorder = sort(1:length(he), lt=face_cmp)
+	return he[reorder] .* (-1) .^ reorder
+end
+# multiplicity ««2
+function multiplicity(s::HalfEdgeMesh, same_edges)#««
+	rp = regular_patches(s)
+	ncomp = size(rp.adjacency, 1)
+	levels = LevelStructure(ncomp)
+	for i1 in 2:ncomp, i2 in 1:i1-1
+		eindex = adjacency[i1, i2]
+		iszero(eindex) && continue
+		# regular components i and j meet at edge eindex
+		elist = sort_radial_loop(s, eindex)
+		plist = rp.label[fld1.(abs.(elist), 3)]
+		for i in 2:length(elist)
+			k = (sign(elist[i-1]) + sign(elist[i])) >> 1
+			connect!(levels, plist[i-1], plist[i], k)
+		end
+	end
+end#»»
+#»»1
 function validate(s::HalfEdgeMesh)
 	for (i, e) in pairs(s.opposite)
 		j = s.opposite[e]
 		j == i || println("edge $i: opposite² = $j")
 	end
-	for (i,v) in pairs(s.edgefrom)
-		j = s.destination[s.opposite[v]]
+	for (i,e) in pairs(s.edgefrom)
+		j = s.destination[prev(s, e)]
 		j == i || println("vertex $i: edgefrom = $v comes from $j")
 	end
 end
@@ -1061,6 +1311,8 @@ half-edge $e: ->$(destination(s,e)), opp=$opp -> $(destination(s,opp))
   in triangle $j with $(map(i->destination(s,i),(3j-2,3j-1,3j)))
 """)
 end
+end # module
+
 
 # h=HalfEdgeMesh(collect(1:4),[[1,2,3],[4,3,2],[4,2,1],[4,1,3]])
 # println("\e[1mrefine:\e[m")
