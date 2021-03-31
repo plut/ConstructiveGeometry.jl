@@ -321,19 +321,24 @@ end
 
 # level[i2] = level[i1] + δ
 function connect!(u::LevelStructure, i1, i2, δ)
-	(r1, d1) = root_and_level(u, i1)
-	(r2, d2) = root_and_level(u, i2)
+	(r1, d1) = root_and_level(u, i1) # l(i1) = l(r1) + d1
+	(r2, d2) = root_and_level(u, i2) # l(i2) = l(r2) + d2
+	# we now want l(i2) = l(i1) + δ, hence
+	# l(r2) + d2 = l(r1) + d1 + δ
+	# l(r2) = l(r1) + d1 - d2 + δ
+	println("connect($i1, $i2, $δ)")
 	if r1 == r2
 		@assert d2 == d1 + δ "connect($i1, $i2, $δ): faces are already connected and multiplicity should be $(d1+δ) (it is $d2). Faces are likely crossed around an edge."
 		return
 	end
 	if u.treesize[r1] < u.treesize[r2]
 		u.parent[r1] = u.parent[r2]; u.treesize[r2]+= u.treesize[r1]
-		u.level[r1] = -δ
+		u.level[r1] = d2 - d1 -δ
 	else
 		u.parent[r2] = u.parent[r1]; u.treesize[r1]+= u.treesize[r2]
-		u.level[r2] = δ
+		u.level[r2] = d1 + d2 + δ
 	end
+# 	println("now:\n$(u.parent)\n$(u.level)")
 	return u
 end
 
@@ -564,7 +569,7 @@ end
 
 @inline halfedge(s::HalfEdgeMesh, e) =
 	(destination(s, prev(s, e)), destination(s, e))
-@inline opposed_vertex(s::HalfEdgeMesh, e) =
+@inline opposite_vertex(s::HalfEdgeMesh, e) =
 	destination(s, next(s, e))
 @inline face_edge(s::HalfEdgeMesh, f, j) = halfedge(s, 3*f-3+j)
 @inline regular_edge(s::HalfEdgeMesh, e) = opposite(s, opposite(s, e)) == e
@@ -668,7 +673,8 @@ function Base.iterate(it::HalfEdgeRadialIterator, s)
 	e == it.start && return nothing
 	return (e, e)
 end
-Base.IteratorSize(::HalfEdgeRadialIterator) = Base.SizeUnknown()
+@inline Base.IteratorSize(::HalfEdgeRadialIterator) = Base.SizeUnknown()
+@inline Base.eltype(::HalfEdgeRadialIterator{H,V}) where{H,V} = H
 
 # find coplanar faces««2
 # returns the equivalence relation
@@ -763,33 +769,33 @@ end
 SpatialSorting.position(b::BBox) = b.min + b.max
 SpatialSorting.merge(b1::BBox, b2::BBox) =
 	BBox{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
-# simplify_points««2
-"""
-    simplify_points(points; ε)
-
-Removes duplicates from the set of points, returning (list of new points,
-map from old index to new index).
-"""
-function simplify_points(points; ε=0)
-	n = length(points)
-	boxes = [ BBox(p, p .+ ε) for p in points ]
-	# `extrema` guarantees that all pairs (i,j) are sorted i < j
-	samepoints = extrema.(SpatialSorting.intersections(boxes))
-	merged = lowest_representatives(samepoints, 1:n)
-# 	println(join(["\n$i=$p" for (i,p) in pairs(points)]))
-# 	println("same points: $samepoints")
-	newindex = similar(merged)
-	newpoints = sizehint!(similar(points, 0), n)
-	for (i, j) in pairs(merged)
-		if i == j # this is a kept point
-			push!(newpoints, points[i])
-			newindex[i] = length(newpoints)
-		else # this is a relabeled point
-			newindex[i] = newindex[j]
-		end
-	end
-	return (newpoints, newindex)
-end
+# # simplify_points««2
+# """
+#     simplify_points(points; ε)
+# 
+# Removes duplicates from the set of points, returning (list of new points,
+# map from old index to new index).
+# """
+# function simplify_points(points; ε=0)
+# 	n = length(points)
+# 	boxes = [ BBox(p, p .+ ε) for p in points ]
+# 	# `extrema` guarantees that all pairs (i,j) are sorted i < j
+# 	samepoints = extrema.(SpatialSorting.intersections(boxes))
+# 	merged = lowest_representatives(samepoints, 1:n)
+# # 	println(join(["\n$i=$p" for (i,p) in pairs(points)]))
+# # 	println("same points: $samepoints")
+# 	newindex = similar(merged)
+# 	newpoints = sizehint!(similar(points, 0), n)
+# 	for (i, j) in pairs(merged)
+# 		if i == j # this is a kept point
+# 			push!(newpoints, points[i])
+# 			newindex[i] = length(newpoints)
+# 		else # this is a relabeled point
+# 			newindex[i] = newindex[j]
+# 		end
+# 	end
+# 	return (newpoints, newindex)
+# end
 # self_intersect««2
 # indexed by pairs of vertices
 # other possibility would be to index by half-edge number
@@ -1222,14 +1228,14 @@ and `0` iff `α` == `β`.
 @inline function circular_sign(u, v)
 # 16 cases to consider: u = (-1, -i, 1, i), same for v
 	if u[2] > 0
-		v[2] ≤ 0 && return -1 # (i,-1), (i,-i), (i,1)
+		v[2] ≤ 0 && return -one(u[2]) # (i,-1), (i,-i), (i,1)
 	elseif u[2] < 0
-		v[2] > 0 && return 1 #(-i,i)
+		v[2] > 0 && return one(u[2]) #(-i,i)
 	elseif u[2] == 0
 		if v[2] == 0
 			return sign(v[1]) - sign(u[1]) #(1,1) (1,-1) (-1,1) (-1,-1)
 		elseif v[2] > 0
-			return 1 #(-1,i) (1,i)
+			return one(u[2]) #(-1,i) (1,i)
 		else
 			# the following line is not needed, but faster than computing det:
 			return -sign(u[1]) #(-1,-i) (1,-i) 
@@ -1252,14 +1258,15 @@ function sort_radial_loop(s::HalfEdgeMesh, e)
 	# the edge, generates the face (and pointing from the edge to the face):
 	# 2d projection of face_vec3 (preserving orientation)
 	he = collect(radial_loop(s, e)) # half-edges
-	ov = [ opposed_vertex(s, e) for e in he ] #opposite vertices
+	ov = [ opposite_vertex(s, e) for e in he ] #opposite vertices
+	dv = [ destination(s, e) == v2 for e in he ]
 	p1 = point(s, v1)
 	fv = [ point(s, v) - p1 for v in ov ] # face vector
 	# face vector, projected in 2d:
 	fv2= [ project2d(proj, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
 # 	println("edge $e = ($v1,$v2): $dir3 proj=$proj")
 # 	for (e1, x, y, z) in zip(he, ov, fv, fv2)
-# 		println("half-edge $e1 = $(halfedge(s, e1)): opp.v=$x, face vec=$y, projects to $z")
+# 		println("# $e1 = $(halfedge(s, e1)): opv=$x, fv3=$y, fv2= $z")
 # 	end
 	face_cmp = @closure (i1, i2) -> let b = circular_sign(fv2[i1], fv2[i2])
 		!iszero(b) && return (b > 0)
@@ -1273,24 +1280,35 @@ function sort_radial_loop(s::HalfEdgeMesh, e)
 		# half-edge number is proportional to face number
 	end
 	reorder = sort(1:length(he), lt=face_cmp)
-	return he[reorder] .* (-1) .^ reorder
+	return he[reorder]
 end
 # multiplicity ««2
-function multiplicity(s::HalfEdgeMesh, same_edges)#««
+function multiplicity(s::HalfEdgeMesh)#««
 	rp = regular_patches(s)
 	ncomp = size(rp.adjacency, 1)
 	levels = LevelStructure(ncomp)
 	for i1 in 2:ncomp, i2 in 1:i1-1
-		eindex = adjacency[i1, i2]
+		eindex = rp.adjacency[i1, i2]
 		iszero(eindex) && continue
 		# regular components i and j meet at edge eindex
 		elist = sort_radial_loop(s, eindex)
+		n = length(elist)
+# 		println("at edge $eindex = $(halfedge(s, eindex)): $elist")
 		plist = rp.label[fld1.(abs.(elist), 3)]
-		for i in 2:length(elist)
-			k = (sign(elist[i-1]) + sign(elist[i])) >> 1
-			connect!(levels, plist[i-1], plist[i], k)
+		dlist = [destination(s, e) for e in elist]
+		# no need to loop around and connect last with first face, this is
+		# taken care of by the level structure:
+		v2 = destination(s, eindex)
+		e1 = elist[1]; p1 = plist[1]; d1 = dlist[1]
+# 		println("$elist\n$plist\n$dlist")
+		for i in 2:n
+			e2 = elist[i]; p2 = plist[i]; d2 = dlist[i]
+			k = 1-(d1==v2)-(d2==v2)
+			connect!(levels, p1, p2, k)
+			e1 = e2; p1 = p2; d1 = d2
 		end
 	end
+	return levels
 end#»»
 #»»1
 function validate(s::HalfEdgeMesh)
@@ -1321,3 +1339,6 @@ end # module
 p(n)=HalfEdgeMesh(n*[SA[-1.,0,0],SA[1,0,0],SA[0,1,0],SA[0,0,1]],
          [[3,2,1],[1,2,4],[3,1,4],[2,3,4]])
 dp = concatenate(p(2), reverse(p(1)))
+
+s1=Main.HalfEdgeMeshes.HalfEdgeMesh{Int64,Int64,SArray{Tuple{3},Float64,1,3}}([4, 28, 19, 1, 47, 9, 12, 29, 6, 41, 32, 7, 22, 25, 27, 15, 21, 38, 14, 24, 48, 35, 18, 20, 3, 13, 37, 2, 8, 36, 34, 11, 45, 31, 26, 30, 16, 44, 17, 43, 10, 46, 40, 23, 33, 42, 5, 39], [1, 7, 5, 5, 4, 1, 3, 1, 4, 2, 3, 4, 7, 5, 6, 5, 8, 6, 7, 8, 5, 6, 8, 7, 7, 6, 5, 1, 3, 7, 3, 2, 6, 6, 7, 3, 6, 8, 5, 2, 4, 8, 8, 6, 2, 4, 5, 8], [4, 43, 34, 47, 19, 23, 22, 24], SArray{Tuple{3},Float64,1,3}[[-2.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0], [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], Tuple{Int8,SArray{Tuple{3},Float64,1,3}}[(-3, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (3, [-1.0, 1.0, 2.0]), (3, [1.0, 1.0, 2.0]), (3, [-0.0, 0.0, 0.0]), (2, [-0.0, -0.0, 0.0]), (-3, [-1.0, 1.0, 1.0]), (-3, [1.0, 1.0, 1.0]), (-3, [-0.0, 0.0, 0.0]), (-3, [-0.0, -0.0, 0.0]), (-3, [-0.0, -0.0, 0.0]), (-3, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (-2, [-0.0, 0.0, 0.0])])
+
