@@ -26,6 +26,7 @@ const VertexId = Int
 # -> for q≈√n, hollow0 is better than hollow1 (cheaper initialization)
 
 # tools ««1
+@inline norm²(v) = dot(v,v)
 # AList ««2
 
 abstract type AbstractAList{K,V} <: AbstractDict{K,V} end
@@ -309,6 +310,7 @@ struct LevelStructure{T} <: AbstractUnionFind{T}
 	@inline LevelStructure(n::Integer) =
 		new{typeof(n)}(collect(1:n), ones(typeof(n), n), zeros(typeof(n), n))
 end
+@inline Base.eltype(u::LevelStructure) = eltype(u.parent)
 function root_and_level(u::LevelStructure, i)
 	l = 0
 	while true
@@ -318,6 +320,33 @@ function root_and_level(u::LevelStructure, i)
 		i = j
 	end
 end
+"""
+    root!(u::LevelStructure)
+
+Returns a standard form for `u`, where each entry has, as its parent, the
+first, lowest-level equivalent entry.
+"""
+function root!(u::LevelStructure)
+	for i in 1:length(u.parent)
+		(r, l) = root_and_level(u, i)
+		u.parent[i] = r
+		u.level[i] = l
+	end
+	minlevel = SortedAList{eltype(u),NTuple{2,eltype(u)}}()
+	for i in 1:length(u.parent)
+		r = u.parent[i]; l = u.level[i]
+		m = get(minlevel, r, nothing)
+		if (m == nothing) || (m[2] > l)
+			minlevel[r] = (i, l)
+		end
+	end
+	for i in 1:length(u.parent)
+		r = u.parent[i]; l = u.level[i]; m = minlevel[r]
+		u.parent[i] = m[1]
+		u.level[i] = l - m[2]
+	end
+	return u
+end
 
 # level[i2] = level[i1] + δ
 function connect!(u::LevelStructure, i1, i2, δ)
@@ -326,7 +355,6 @@ function connect!(u::LevelStructure, i1, i2, δ)
 	# we now want l(i2) = l(i1) + δ, hence
 	# l(r2) + d2 = l(r1) + d1 + δ
 	# l(r2) = l(r1) + d1 - d2 + δ
-	println("connect($i1, $i2, $δ)")
 	if r1 == r2
 		@assert d2 == d1 + δ "connect($i1, $i2, $δ): faces are already connected and multiplicity should be $(d1+δ) (it is $d2). Faces are likely crossed around an edge."
 		return
@@ -338,7 +366,6 @@ function connect!(u::LevelStructure, i1, i2, δ)
 		u.parent[r2] = u.parent[r1]; u.treesize[r1]+= u.treesize[r2]
 		u.level[r2] = d1 + d2 + δ
 	end
-# 	println("now:\n$(u.parent)\n$(u.level)")
 	return u
 end
 
@@ -413,6 +440,10 @@ end
 function equivalence_structure(relation)
 	# first compute names
 	rel_flat = [ r[i] for r in relation for i in 1:2 ]
+	isempty(relation) && return EquivalenceStructure(
+		SortedAList{eltype(eltype(relation)), Int}(),
+		Vector{Int}[])
+
 	(names, rel_idx) = uniquenames(rel_flat)
 	# `names` is the unique list of names
 	# `rel_idx` is the renamed equivalence relation (as small integers)
@@ -572,6 +603,7 @@ end
 @inline opposite_vertex(s::HalfEdgeMesh, e) =
 	destination(s, next(s, e))
 @inline face_edge(s::HalfEdgeMesh, f, j) = halfedge(s, 3*f-3+j)
+@inline face_vertex(s::HalfEdgeMesh, f, j) = destination(s, 3*f-3+j)
 @inline regular_edge(s::HalfEdgeMesh, e) = opposite(s, opposite(s, e)) == e
 
 @inline adjacent_face(s::HalfEdgeMesh, f, j) =
@@ -908,10 +940,8 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 		# create points as needed, and store their index:
 		vindex = MMatrix{6,2,vertex_type(s)}(undef)
 		for (i, (p, (t1, t2))) in pairs(it)
-			idx1 = register_point!(s, pts, in_face, in_edge,
-				i1, t1, p, ε)
-			idx2 = register_point!(s, pts, in_face, in_edge,
-				i2, t2, p, ε)
+			idx1 = register_point!(s, pts, in_face, in_edge, i1, t1, p, ε)
+			idx2 = register_point!(s, pts, in_face, in_edge, i2, t2, p, ε)
 			idx1 ≠ idx2 && push!(same_points, (idx1, idx2))
 			vindex[i,1] = idx1; vindex[i,2] = idx2
 # 		println("   now $(length(points)) points, registered $p=$idx1, $idx2")
@@ -934,6 +964,7 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 	real_dup = dup_points .!= point_rep
 	dup_points = dup_points[real_dup]
 	point_rep  = point_rep[real_dup]
+	global X=same_edges
 	return (
 		points=pts, in_face=in_face,
 		in_edge=in_edge.vertices,
@@ -1246,7 +1277,9 @@ and `0` iff `α` == `β`.
 	return u[1]*v[2]-u[2]*v[1]
 end
 # sort_radial_loop««2
-function sort_radial_loop(s::HalfEdgeMesh, e)
+function sort_radial_loop(s::HalfEdgeMesh, e, pt3 = nothing)
+# used for locate_point:
+# vec3, proj, dir3, dir2scaled, order
 	# prepare geometry information
 	(v1, v2) = halfedge(s, e)
 	dir3 = point(s, v2) - point(s, v1)
@@ -1259,7 +1292,8 @@ function sort_radial_loop(s::HalfEdgeMesh, e)
 	# 2d projection of face_vec3 (preserving orientation)
 	he = collect(radial_loop(s, e)) # half-edges
 	ov = [ opposite_vertex(s, e) for e in he ] #opposite vertices
-	dv = [ destination(s, e) == v2 for e in he ]
+	# we could use this to determine edge orientation:
+# 	dv = [ destination(s, e) == v2 for e in he ]
 	p1 = point(s, v1)
 	fv = [ point(s, v) - p1 for v in ov ] # face vector
 	# face vector, projected in 2d:
@@ -1280,7 +1314,72 @@ function sort_radial_loop(s::HalfEdgeMesh, e)
 		# half-edge number is proportional to face number
 	end
 	reorder = sort(1:length(he), lt=face_cmp)
-	return he[reorder]
+	pt3 == nothing && return he[reorder]
+
+	# find where `pt3 - v1` inserts in radial loop:
+	vec3 = pt3 - p1
+	println("vec3 = $vec3")
+	vec2 = project2d(proj, vec3) .- dot(vec3, dir3) .*dir2scaled
+	@assert !all(iszero,vec2) "half-edge $e aligned with point $vec3"
+	k = searchsorted(fv2[reorder], vec2,
+		lt = (u,v)->circular_sign(u,v) > 0)
+	@assert k.start > k.stop "impossible to determine location at this edge"
+	# possibilities are: (i+1:i) for i in 0..n
+	k.stop == 0 && return he[reorder[end]]
+	return he[reorder[k.stop]]
+end
+# find_good_halfedge««2
+function find_good_halfedge(s::HalfEdgeMesh, i, p)
+	# it is possible that all edges lie in the same plane
+	# (if this is a flat cell), so we pick, as a second point j,
+	# the one which maximizes |y/x|, where
+	# y = ‖pi∧pj‖, x=‖pi·ij‖/‖pi‖²
+	# in other words, we maximize ‖pi∧pj‖²/‖pi·ij‖²
+	# caution: it is possible that pi⋅ij = 0 (edge exactly orthogonal),
+	# in this case we must return j immediately
+	vpi = point(s, i) - p
+	nv = neighbours(s, i)
+	println(collect(nv))
+	((e, j), state) = iterate(nv)
+	vpj = point(s, j) - p
+	xj = dot(vpi, vpj)
+	iszero(xj) && return e
+	xyj = (xj*xj, norm²(cross(vpi, vpj)))
+	best = e
+	while true
+		u = iterate(nv, state)
+		u == nothing && return best
+		((e, k), state) = u
+		vpk = point(s, k) - p
+		xk = dot(vpi, vpk)
+		iszero(xk) && return e
+		xyk = (xk*xk, norm²(cross(vpi, vpk)))
+		if xyk[2]*xyj[1] > xyk[1]*xyj[2]
+			best = e; xyj = xyk
+		end
+	end
+	return best
+end
+# locate_point««2
+"""
+    locate_point(s, labels, comp, p)
+
+Returns `(face, flag)`, where `flag` is zero if p lies outside this face, and one if p lies inside this face.
+"""
+function locate_point(s::HalfEdgeMesh, cc_label, c, p)
+	# find closest vertex to p
+	closest = 0; b = false; z = zero(p[1])
+	for (i, q) in pairs(points(s))
+		cc_label[i] == c || continue
+		z1 = norm²(q-p)
+		(b && z1 ≥ z) && continue
+		closest = i; z = z1
+	end
+	# find a good edge from closest vertex
+	e = find_good_halfedge(s, closest, p)
+	f = sort_radial_loop(s, e, p)
+	# f is a half-edge in the radial loop of e
+	return (fld1(f, 3), destination(s, f) ≠ destination(s, e))
 end
 # multiplicity ««2
 function multiplicity(s::HalfEdgeMesh)#««
@@ -1308,7 +1407,58 @@ function multiplicity(s::HalfEdgeMesh)#««
 			e1 = e2; p1 = p2; d1 = d2
 		end
 	end
-	return levels
+	# at this stage, `levels` contains full relative multiplicity info for
+	# each connected component of the surface. To complete the data, it
+	# remains to organize the components themselves. This needs to be done
+	# for each pair of connected components (not as a graph, and both
+	# directions of a pair), e.g.:
+	# - if c1, c2 ⊂ c3, we don't learn the relation between c1 and c2;
+	# - it is possible that both c1 ⊂ c2 and c2 ⊂ c1 (e.g. reversed faces).
+
+	# first identify the connected components:
+	# face_cc[i] is the connected component of face i
+	# cc_list is the list of all unique labels of connected components
+	# vertex_cc[i] is the label for connected component of vertex i
+	# vmax[i] is the vertex with maximal x in connected comp. cc_list[i]
+	# cc_nest[i] is the nesting level of connected comp. cc_list[i]
+	root!(levels)
+	println("canonical levels=$(levels.level) $(levels.parent)")
+	face_cc = levels.parent[rp.label]
+	println("face_cc=$face_cc")
+	cc_list = unique!(sort(levels.parent))
+	vertex_cc = similar(cc_list, nvertices(s))
+	for (j, f) in pairs(faces(s)), v in f
+		vertex_cc[v] = levels.parent[rp.label[j]]
+	end
+	println("vertex_cc=$vertex_cc")
+	vmax = similar(cc_list)
+	for (i, c) in pairs(cc_list)
+		b = false; z = zero(point(s,1)[1])
+		for (v, l) in pairs(vertex_cc)
+			l ≠ c && continue
+			z1 = point(s, v)[1]
+			(b && z1 ≤ z) && continue
+			vmax[i] = v; z = z1; b = true
+		end
+	end
+	# compute the nesting level for all connected components
+	cc_nest = zeros(Int, length(cc_list))
+	for i1 in 1:length(cc_list), i2 in 1:length(cc_list)
+		i1 == i2 && continue
+		(f, b) = locate_point(s, face_cc, i2, point(s, vmax[i1]))
+		k = b + levels.level[rp.label[f]]
+		println("point $(vmax[i1]) = $(point(s, vmax[i1])) w.r.t. cc $i2: face=$f, flag=$b; total $k")
+		# if k > 0 then i1 inside i2
+		cc_nest[i1]+= k
+	end
+	println("cc_nest = $cc_nest")
+	cc_nest_level = SortedAList(cc_list, cc_nest)
+
+	face_level = Vector{Int}(undef, nfaces(s))
+	for f in 1:nfaces(s)
+		face_level[f] = 1 + levels.level[rp.label[f]] + cc_nest_level[face_cc[f]]
+	end
+	return face_level
 end#»»
 #»»1
 function validate(s::HalfEdgeMesh)
@@ -1330,15 +1480,3 @@ half-edge $e: ->$(destination(s,e)), opp=$opp -> $(destination(s,opp))
 """)
 end
 end # module
-
-
-# h=HalfEdgeMesh(collect(1:4),[[1,2,3],[4,3,2],[4,2,1],[4,1,3]])
-# println("\e[1mrefine:\e[m")
-# h2=refine(h, 5, 1 => [(1,2,5),(2,3,5),(3,1,5)])
-# h3=refine(h, 5, 1 => [(1,2,5),(5,3,1)], 2=>[(4,3,5),(5,2,4)])
-p(n)=HalfEdgeMesh(n*[SA[-1.,0,0],SA[1,0,0],SA[0,1,0],SA[0,0,1]],
-         [[3,2,1],[1,2,4],[3,1,4],[2,3,4]])
-dp = concatenate(p(2), reverse(p(1)))
-
-s1=Main.HalfEdgeMeshes.HalfEdgeMesh{Int64,Int64,SArray{Tuple{3},Float64,1,3}}([4, 28, 19, 1, 47, 9, 12, 29, 6, 41, 32, 7, 22, 25, 27, 15, 21, 38, 14, 24, 48, 35, 18, 20, 3, 13, 37, 2, 8, 36, 34, 11, 45, 31, 26, 30, 16, 44, 17, 43, 10, 46, 40, 23, 33, 42, 5, 39], [1, 7, 5, 5, 4, 1, 3, 1, 4, 2, 3, 4, 7, 5, 6, 5, 8, 6, 7, 8, 5, 6, 8, 7, 7, 6, 5, 1, 3, 7, 3, 2, 6, 6, 7, 3, 6, 8, 5, 2, 4, 8, 8, 6, 2, 4, 5, 8], [4, 43, 34, 47, 19, 23, 22, 24], SArray{Tuple{3},Float64,1,3}[[-2.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 2.0, 0.0], [0.0, 0.0, 2.0], [-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]], Tuple{Int8,SArray{Tuple{3},Float64,1,3}}[(-3, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (3, [-1.0, 1.0, 2.0]), (3, [1.0, 1.0, 2.0]), (3, [-0.0, 0.0, 0.0]), (2, [-0.0, -0.0, 0.0]), (-3, [-1.0, 1.0, 1.0]), (-3, [1.0, 1.0, 1.0]), (-3, [-0.0, 0.0, 0.0]), (-3, [-0.0, -0.0, 0.0]), (-3, [-0.0, -0.0, 0.0]), (-3, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (-2, [-0.0, -0.0, 0.0]), (-2, [-0.0, 0.0, 0.0])])
-
