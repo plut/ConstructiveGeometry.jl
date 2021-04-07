@@ -289,7 +289,7 @@ end
 struct UnionFind{T} <: AbstractUnionFind{T}
 	parent::Vector{T}
 	treesize::Vector{T}
-	@inline UnionFind(undef, n::Integer) =
+	@inline UnionFind(n::Integer) =
 		new{typeof(n)}(collect(1:n), ones(typeof(n), n))
 end
 function Base.union!(u::UnionFind, i, j)
@@ -451,7 +451,7 @@ function equivalence_structure(relation)
 	n = length(names)
 	r = length(rel_idx)
 	# compute transitive closure and representatives of each class:
-	uf = UnionFind(undef, n)
+	uf = UnionFind(n)
 	for i in 1:2:length(rel_idx)
 		union!(uf, rel_idx[i], rel_idx[i+1])
 	end
@@ -716,7 +716,7 @@ function coplanar_faces(s::HalfEdgeMesh; ε = 0)
 	return SpatialSorting.intersections(boxes)
 end
 
-# modifying the structure: concatenation and point renaming««2
+# structure extension««2
 function concatenate(slist::HalfEdgeMesh...)
 	r = HalfEdgeMesh{halfedge_type(first(slist)),
 		vertex_type(first(slist)),point_type(first(slist))}(undef,
@@ -751,6 +751,14 @@ function resize_faces!(s::HalfEdgeMesh, nf)
 	resize!(s.plane, nf)
 	s
 end
+# remove points««2
+"""
+    shift_points!(s, vmap, start, stop, offset)
+
+Deletes points in `s`, replacing interval `start:stop`
+by `start+offset:stop+offset`.
+`vmap` is a table holding the renaming of points (for `destination`).
+"""
 function shift_points!(s::HalfEdgeMesh, vmap, start, stop, offset)
 # 		println("points $start:$stop shifted by $offset")
 	for i in start:stop
@@ -759,6 +767,8 @@ function shift_points!(s::HalfEdgeMesh, vmap, start, stop, offset)
 		vmap[i+offset] = i
 	end
 end
+
+
 function deduplicate_vertices!(s::HalfEdgeMesh, ren)
 	nv = nvertices(s); l = length(ren)
 	vmap = Vector{Int}(undef, nv)
@@ -776,6 +786,92 @@ function deduplicate_vertices!(s::HalfEdgeMesh, ren)
 	s.destination .= view(vmap, s.destination)
 	resize!(s.points, nv-l)
 	resize!(s.edgefrom, nv-l)
+	return s
+end
+# opposite faces««2
+function opposite_faces(s::HalfEdgeMesh)
+	r = NTuple{2,face_type(s)}[]
+	for f in 1:nfaces(s)
+		e1 = 3*f
+		v1 = destination(s, e1)
+		v3 = destination(s, next(s, e1))
+		for e2 in radial_loop(s, e1)
+			# similarly-oriented faces (including this one) don't count:
+			e2 < e1 && continue
+			destination(s, e2) == v1 && continue
+			destination(s, next(s, e2)) == v3 && push!(r, fld1.((e1,e2), 3))
+		end
+# 		i1 = adjacent_face(s, f, 1)
+# 		i2 = adjacent_face(s, f, 2)
+# 		i1 ≠ i2 && continue
+# 		push!(r, (i1, i2))
+	end
+	return r
+end
+# select faces««2
+"""
+    select_faces!(s, fkept)
+
+Select faces in `s` from vector `fkept`.
+"""
+function select_faces!(s::HalfEdgeMesh, fkept)
+	# first step: reconnect edge loops as needed
+	# FIXME: this will fail if any edge loop has (≠2) selected faces
+	# (which should not happen in real cases) (?).
+	ekept = similar(fkept, 3*length(fkept))
+	for (i, k) in pairs(fkept)
+		ekept[3i-2] = ekept[3i-1] = ekept[3i] = k
+	end
+	
+	for e1 in 1:3*nfaces(s)
+		ekept[e1] || continue # skip skipped faces
+		e2 = opposite(s, e1)
+		# case 1: (e1, e2) -> regular edge, do nothing
+		# case 2: fkept[e2] -> do nothing
+		# case 3: iterate (2-step) on e2 untli
+		#   a) e1 is found -> stop
+		#   b) fkept[e2] -> set opposite[e1] = e2
+		ekept[e2] && continue
+		e3 = opposite(s, e2)
+		e3 == e1 && continue
+		while true
+			e2 = opposite(s, e3)
+			if ekept[e2]
+				opposite!(s, e1, e2)
+				break
+			end
+			e3 = opposite(s, e2)
+			e3 == e1 && break
+		end
+	end
+	# second step: compute face/vertex renaming
+	# `emap[i]` is the new name (if `ekept[i]`) of half-edge `i`
+	emap = cumsum(ekept)
+	vkept = falses(nvertices(s))
+	for i in 1:length(emap)
+		vkept[s.destination[i]] |= ekept[i]
+	end
+	vmap = cumsum(vkept)
+	# third step: proceed in renaming everything
+	for i in 1:length(fkept)
+		fkept[i] || continue
+		s.plane[i] = s.plane[fld(emap[3*i], 3)]
+	end
+	for i in 1:nvertices(s)
+		vkept[i] || continue
+		s.edgefrom[vmap[i]] = emap[s.edgefrom[i]]
+		s.points[vmap[i]] = s.points[i]
+	end
+	for i in 1:length(emap)
+		ekept[i] || continue
+		s.destination[emap[i]] = vmap[s.destination[i]]
+		s.opposite[emap[i]] = emap[s.opposite[i]]
+	end
+	resize!(s.opposite, last(emap))
+	resize!(s.destination, last(emap))
+	resize!(s.edgefrom, last(vmap))
+	resize!(s.points, last(vmap))
+	resize!(s.plane, last(emap) ÷ 3)
 	return s
 end
 
@@ -1202,7 +1298,6 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 	# TODO: merge unused points here? this will eventually need to be done
 end
 
-#»»1
 # multiplicity««1
 # regular_patches««2
 """
@@ -1385,27 +1480,40 @@ end
 function multiplicity(s::HalfEdgeMesh)#««
 	rp = regular_patches(s)
 	ncomp = size(rp.adjacency, 1)
+	# `cells`: allows identification of cells bounded by regular patches
+	# cells[2i-1] is inside patch i, cells[2i] is outside it
+	# `levels`: level[i] is the multiplicity of cells[2i-1]
 	levels = LevelStructure(ncomp)
+	# cells is kept implicit for now (this *might* be used later, for
+	# reconnecting edges when selecting faces)
+# 	cells = UnionFind(2*ncomp)
 	for i1 in 2:ncomp, i2 in 1:i1-1
 		eindex = rp.adjacency[i1, i2]
 		iszero(eindex) && continue
 		# regular components i and j meet at edge eindex
 		elist = sort_radial_loop(s, eindex)
 		n = length(elist)
-# 		println("at edge $eindex = $(halfedge(s, eindex)): $elist")
+		# plist is the sorted list of regular patches at this edge
+		# dlist is the list of edge orientations
 		plist = rp.label[fld1.(abs.(elist), 3)]
 		dlist = [destination(s, e) for e in elist]
-		# no need to loop around and connect last with first face, this is
-		# taken care of by the level structure:
 		v2 = destination(s, eindex)
 		e1 = elist[1]; p1 = plist[1]; d1 = dlist[1]
-# 		println("$elist\n$plist\n$dlist")
 		for i in 2:n
 			e2 = elist[i]; p2 = plist[i]; d2 = dlist[i]
+			# patch p2 is positively oriented iff d2==v2, etc.:
+			# if p1 is positively oriented (d1==v2) then cell between p1 and p2
+			# is 2p1 (otherwise 2p1-1);  if p2 is positively oriented (d2==v2),
+			# this same cell is 2p2-1 (else 2p2)
+# 			union!(cells, 2*p1-(d1≠v2), 2*p2-(d2==v2))
 			k = 1-(d1==v2)-(d2==v2)
 			connect!(levels, p1, p2, k)
 			e1 = e2; p1 = p2; d1 = d2
 		end
+		# close the loop by identifying both sides of the last cell
+		# (the level is already computed by the level structure):
+# 		p2 = plist[1]; d2 = dlist[1]
+# 		union!(cells, 2*p1-(d1≠v2), 2*p2-(d2==v2))
 	end
 	# at this stage, `levels` contains full relative multiplicity info for
 	# each connected component of the surface. To complete the data, it
@@ -1457,6 +1565,10 @@ function multiplicity(s::HalfEdgeMesh)#««
 	face_level = Vector{Int}(undef, nfaces(s))
 	for f in 1:nfaces(s)
 		face_level[f] = 1 + levels.level[rp.label[f]] + cc_nest_level[face_cc[f]]
+	end
+	for (f1, f2) in opposite_faces(s)
+		face_level[f1]-= 1
+		face_level[f2]-= 1
 	end
 	return face_level
 end#»»
