@@ -17,7 +17,6 @@ Meshes = "eacbb407-ea5a-433e-ab97-5258b1ca43fa"
 Polyhedra = "67491407-f73d-577b-9b50-8179a7c68029"
 Printf = "de0858da-6303-5e67-8744-51eddeeeb8d7"
 Rotations = "6038ab10-8711-5258-84ad-4b1120ba62dc"
-SparseArrays = "2f01184e-e22b-5df5-ae63-d93ebab69eaf"
 StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Triangle = "56f361f5-126b-55db-87fb-1c71988fcde4"
 

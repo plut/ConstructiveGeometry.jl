@@ -4,7 +4,6 @@ module ConstructiveGeometry
 using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers
-using SparseArrays
 using Logging
 using FastClosures
 using DataStructures

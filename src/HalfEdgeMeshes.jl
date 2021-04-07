@@ -801,10 +801,6 @@ function opposite_faces(s::HalfEdgeMesh)
 			destination(s, e2) == v1 && continue
 			destination(s, next(s, e2)) == v3 && push!(r, fld1.((e1,e2), 3))
 		end
-# 		i1 = adjacent_face(s, f, 1)
-# 		i2 = adjacent_face(s, f, 2)
-# 		i1 ≠ i2 && continue
-# 		push!(r, (i1, i2))
 	end
 	return r
 end
