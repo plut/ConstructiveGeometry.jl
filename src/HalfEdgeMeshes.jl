@@ -1,7 +1,23 @@
+"""
+    HalfEdgeMeshes
+
+This module contains the basic function for operating with half-edge meshes with triangular faces.
+For a general introduction to half-edge data structures,
+see [Rhodes 2013](https://ubm-twvideo01.s3.amazonaws.com/o1/vault/gdc2013/slides/822512 Rhodes_Graham_Math_for_Game \\(2\\).pdf).
+
+This module exports the `HalfEdgeMesh` data type and defines the following functions (not exported):
+ - `faces`, `points`: exports a mesh to a list of triangles.
+ - `concatenate`: disjoint union of meshes.
+ - `combine`: compute the result of a Boolean operation (intersection, union)
+ on meshes.
+ - `Base.reverse`: computes the complement of a mesh; together with `combine`,
+ this allows computation of a Boolean difference of meshes.
+"""
 module HalfEdgeMeshes
 using StaticArrays
 using LinearAlgebra
 using FastClosures
+using Dictionaries
 module LibTriangle
 	using Triangle
 end
@@ -12,108 +28,430 @@ include("SpatialSorting.jl")
 const HalfEdgeId = Int
 const VertexId = Int
 
-# expected sizes, for `n` vertices:
-# half-edges: 6n+O(1)
-# edges: 3n+O(1)
-# faces: 2n+O(1)
-#
-# self-intersection is generally a *curve*, hence crosses Θ(√n) faces
-
-
-# storing a matrix with `q` elements as hollow:
-# hollow1: size=O(n+q), access=O(1+q/n)
-# hollow0: size=O(q), access=O(q/n)
-# -> for q≈√n, hollow0 is better than hollow1 (cheaper initialization)
+# For a mesh having `n` vertices, we expect the following counts:
+#  - 6n + O(1) half-edges;
+#  - 3n + O(1) edges;
+#  - 2n + O(1) faces.
+# The self-intersection of a mesh is generally a curve; hence we expect
+# this self-intersection to involve Θ(√n) faces (and the same order of
+# magnitude for edges and vertices).
+# This has implication on the data structures used for storing this
+# intersection. We first define two types for sparse tables:
+#  - `SparseTable0` for n×n tables with o(n) entries,
+#  - `SparseTable1` for n×n tables with Θ(n) entries.
+# More generally, assuming the matrix has `n` entries,
+# `SparseTable0` has size O(n+q) and acces O(1+q/n),
+# while `SparseTable1` has size O(q) and access O(q/n).
 
 # tools ««1
 @inline norm²(v) = dot(v,v)
-# AList ««2
+# BBox««2
+struct BBox{P}
+	min::P
+	max::P
+	@inline BBox{P}(min, max) where{P} = new{P}(min, max)
+	@inline BBox(min, max) = BBox{typeof(min)}(min, max)
+end
 
-abstract type AbstractAList{K,V} <: AbstractDict{K,V} end
+@inline Base.eltype(::Type{BBox{P}}) where{P} = P
+@inline Base.eltype(b::BBox) = eltype(typeof(b))
 
-@inline (T::Type{<:AbstractAList})(entries::Pair...) =
+@inline Base.min(b::BBox) = b.min; @inline Base.max(b::BBox) = b.max
+@inline Base.:∈(x::AbstractVector, b::BBox) = all(min(b) .≤ x .≤ max(b))
+@inline Base.isempty(b::BBox) = any(min(b) .> max(b))
+@inline Base.intersect(a::BBox, b::BBox) =
+	BBox((max.(min(a), min(b))), (min.(max(a), max(b))))
+@inline boundingbox(v::AbstractVector...) =
+	BBox{eltype(v)}(min.(v...), max.(v...))
+# `SpatialSorting` interface:
+SpatialSorting.position(b::BBox) = b.min + b.max
+SpatialSorting.merge(b1::BBox, b2::BBox) =
+	BBox{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
+# SortedVector««2
+struct SortedVector{K} <: AbstractVector{K}
+	elements::Vector{K}
+end
+Base.getindex(s::SortedVector, i) = getindex(s.elements, i)
+Base.size(s::SortedVector) = size(s.elements)
+Base.convert(T::Type{<:SortedVector}, v::AbstractVector) = T(v)
+@inline Base.in(x, s::SortedVector) = !isempty(searchsorted(s, x))
+	
+@inline function find(s::SortedVector, k)
+	i = searchsorted(s, k)
+	!isempty(i) && return first(i)
+	return nothing
+end
+@inline function find(s::SortedVector, k, ::typeof(insert!))
+	i = searchsorted(s, k)
+	f = first(i)
+	!isempty(i) && return (f, false)
+	insert!(s.elements, f, k)
+	return (f, true)
+end
+@inline function find(s::SortedVector, k, ::typeof(push!))
+	(i, c) = find(s, k, insert!)
+	c || throw(KeyError(k))
+	return i
+end
+
+@inline find(s::AbstractVector, k) = findfirst(isequal(k), s)
+@inline function find(s::Vector, k, ::typeof(push!))
+	push!(s, k)
+	return length(s)
+end
+@inline function find(s::Vector, k, ::typeof(insert!))
+	i = findfirst(isequal(k), s)
+	i ≠ nothing && return (i, false)
+	push!(s, k)
+	return (length(s), true)
+end
+
+@inline function find(s::Base.OneTo, k)
+	@boundscheck (k ∈ s) || return nothing
+	return k
+end
+
+# Associative tables ««2
+
+# three types of associative maps are used:
+# - generic Assoc: (vector of keys, vector of values)
+#   append O(1), lookup O(n)
+# - sorted Assoc: (sorted vector of keys, vector of values)
+#   append O(n), lookup O(log n)
+# - (for dense int keys): (vector of values)
+#   append O(1), lookup O(1)
+
+
+"""
+    AbstractAssoc
+
+ - `setindex!(assoc, val, key)`: update existing key
+ - `push!(assoc, key => val)`: create new key
+ - `insert!(assoc, key => val)`: update or create
+ - `getindex(assoc, key)`: throws error if inexistent
+ - `get(assoc, key, default)`
+ - `index(keys(assoc), key, getindex)`: returns real index (or `nothing`)
+ - `index(keys(assoc), key, push!)`: creates new index
+ - `index(keys(assoc), key, insert!)`: returns existing or create new
+ - `set!(assoc, idx, val)`: set at known index (O(1))
+"""
+abstract type AbstractAssoc{K,V} <: AbstractDict{K,V} end
+
+struct Assoc{K,V} <: AbstractAssoc{K,V}
+	keys::Vector{K}
+	values::Vector{V}
+end
+# TODO: write a TwinAssoc subtype of AbstractAssoc
+# replacing SparseTable
+
+@inline (T::Type{<:AbstractAssoc})(entries::Pair...) =
 	T([first.(entries)...], [last.(entries)...])
 
-Base.keys(a::AbstractAList) = a.keys
-Base.values(a::AbstractAList) = a.values
-Base.haskey(a::AbstractAList, u) = u ∈ keys(a)
-Base.length(a::AbstractAList) = length(keys(a))
+@inline Base.keys(a::AbstractAssoc) = a.keys
+@inline Base.values(a::AbstractAssoc) = a.values
+@inline Base.haskey(a::AbstractAssoc, u) = u ∈ keys(a)
+@inline Base.length(a::AbstractAssoc) = length(keys(a))
+@inline Base.convert(T::Type{<:AbstractAssoc}, ::Tuple{}) = T()
 
-function Base.iterate(a::AbstractAList, s = 1)
+@inline Base.haskey(a::AbstractAssoc, key) = find(keys(a), key) ≠ nothing
+@inline function Base.iterate(a::AbstractAssoc, s = 1)
 	s > length(a) && return nothing
-	return (a.keys[s] => a.values[s], s+1)
+	return (keys(a)[s] => values(a)[s], s+1)
+end
+@inline function set!(a::AbstractAssoc, idx, value)
+	@boundscheck idx == nothing && throw(KeyError(nothing))
+	values(a)[i] = value
+	return a
+end
+
+@inline function Base.getindex(a::AbstractAssoc, key)
+	i = find(keys(a), key)
+	i == nothing && throw(KeyError(key))
+	return values(a)[i]
+end
+@inline function Base.get(a::AbstractAssoc, key, default)
+	i = find(keys(a), key)
+	i == nothing && return default
+	return values(a)[i]
+end
+@inline function Base.setindex!(a::AbstractAssoc, value, key)
+	i = find(keys(a), key)
+	i == nothing && throw(KeyError(key))
+	values(a)[i] = value
+	return a
+end
+@inline function Base.push!(a::AbstractAssoc, (key, value)::Pair)
+	i = find(keys(a), key, push!)
+	insert!(values(a), i, value)
+	return a
+end
+@inline function Base.insert!(a::AbstractAssoc, (key, value)::Pair)
+	(i, create) = find(keys(a), key, insert!)
+	if create
+		insert!(values(a), i, value)
+	else
+		values(a)[i] = value
+	end
 end
 
 """
-    AList{K,V}
+    Assoc{K,V}
 
 Trivial implementation of an associative list.
 Use only for *very small* lists.
 """
-struct AList{K,V} <: AbstractAList{K,V}
+struct Assoc{K,V} <: AbstractAssoc{K,V}
 	keys::Vector{K}
 	values::Vector{V}
 end
-@inline AList{K,V}() where{K,V} = AList{K,V}(K[], V[])
-@inline AList{K,V}(a::AList{K,V}) where{K,V} = AList{K,V}(a.keys, a.values)
-@inline AList(keys::AbstractVector, values::AbstractVector) =
-	AList{eltype(keys),eltype(values)}(keys, values)
+@inline Assoc{K,V}() where{K,V} = Assoc{K,V}(K[], V[])
+@inline Assoc{K,V}(a::Assoc{K,V}) where{K,V} = Assoc{K,V}(a.keys, a.values)
+@inline Assoc(keys::AbstractVector, values::AbstractVector) =
+	Assoc{eltype(keys),eltype(values)}(keys, values)
 
-function Base.getindex(a::AList, u)
-	@inbounds for (i, k) in pairs(keys(a))
-		k == u && return values(a)[i]
-	end
-	throw(KeyError(u))
+"""
+    SortedAssoc{K,V}
+
+Implementation of an associative list with a sorted vector of keys.
+Use only if keys are computed all at once (and pre-sorted).
+"""
+struct SortedAssoc{K,V} <: AbstractAssoc{K,V}
+	keys::SortedVector{K}
+	values::Vector{V}
 end
-function Base.get(a::AList, u, d)
-	@inbounds for (i, k) in pairs(keys(a))
-		k == u && return values(a)[i]
-	end
-	return d
+@inline SortedAssoc{K,V}() where{K,V} = SortedAssoc{K,V}(K[], V[])
+@inline SortedAssoc(keys::AbstractVector, values::AbstractVector) =
+	SortedAssoc{eltype(keys),eltype(values)}(keys, values)
+
+"""
+    VectorAssoc{K,V}
+
+Special case of an associative list where keys are a dense set of integers.
+"""
+struct VectorAssoc{K,V} <: AbstractAssoc{K,V}
+	values::Vector{V}
 end
-function Base.setindex!(a::AList, v, u)
-	@inbounds for (i, k) in pairs(keys(a))
-		(k == u) && (a.values[i] = v; return a)
-	end
-	push!(a.keys, u)
-	push!(a.values, v)
+@inline Base.keys(a::VectorAssoc) = Base.OneTo(length(values(a)))
+VectorAssoc{K,V}(n::Integer) where{K,V<:AbstractAssoc} =
+	VectorAssoc{K,V}([ V() for _ in 1:n])
+@inline function Base.resize!(a::VectorAssoc, n)
+	resize!(values(a), n)
+	return a
+end
+@inline function Base.push!(a::VectorAssoc, (key, value)::Pair)
+	resize!(values(a), key)
+	a[key] = value
 	return a
 end
 
-
-struct SortedAList{K,V} <: AbstractAList{K,V}
-	keys::Vector{K}
-	values::Vector{V}
+# SparseTable««2
+struct TwinAssoc{K,V,X} <: AbstractDict{NTuple{2,K},V}
+	data::X
 end
-@inline SortedAList{K,V}() where{K,V} = SortedAList{K,V}(K[], V[])
-@inline SortedAList(keys::AbstractVector, values::AbstractVector) =
-	SortedAList{eltype(keys),eltype(values)}(keys, values)
+make_twin_assoc(A,B) = TwinAssoc{K,V,A{K,B{K,V}}} where{K,V}
+SparseTable0 = make_twin_assoc(SortedAssoc,Assoc)
+SparseTable1 = make_twin_assoc(VectorAssoc,Assoc)
 
+@inline (T::Type{<:SparseTable1})(n::Integer) =
+	let D = fieldtype(T, :data)
+	T(D([ valtype(D)() for _ in 1:n ]))
+end
+@inline (T::Type{<:SparseTable0})() = T(fieldtype(T,:data)())
+@inline Base.convert(T::Type{<:SparseTable0},::Tuple{}) = T()
 
-Base.haskey(a::SortedAList, u) = !isempty(searchsorted(keys(a), u))
-function Base.getindex(a::SortedAList, u)
-	i = searchsorted(a.keys, u)
-	isempty(i) && throw(KeyError(u))
-	return a.values[first(i)]
+@inline Base.haskey(a::TwinAssoc, (i,j)) =
+	haskey(a.data, i) && haskey(a.data[i], j)
+@inline Base.getindex(a::TwinAssoc, i, j) =
+	getindex(getindex(a.data, i), j)
+@inline Base.setindex!(a::TwinAssoc, v, i, j) =
+	setindex!(getindex(a.data, i), v, j)
+@inline function Base.get(a::TwinAssoc, (i, j), default)
+	haskey(a.data, i) || return default
+	return get(a.data[i], j, default)
 end
-function Base.get(a::SortedAList, u, d)
-	i = searchsorted(a.keys, u)
-	isempty(i) && return d
-	return a.values[first(i)]
-end
-function modify!(f, a::SortedAList, k, init)
-	i = searchsorted(a.keys, k)
-	if isempty(i)
-		insert!(a.keys, first(i), k)
-		insert!(a.values, first(i), init)
+@inline function Base.push!(a::TwinAssoc, ((i, j), v)::Pair)
+	if haskey(a.data, i) # FIXME: we search twice here
+		push!(a.data[i], j => v)
 	else
-		f(a.values, first(i))
+		push!(a.data, i => valtype(a.data)(j => v))
 	end
 	return a
 end
-@inline Base.setindex!(a::SortedAList, y, k) =
-	modify!(a, k, y) do v, i; v[i] = y end
+@inline function Base.insert!(a::TwinAssoc, ((i, j), v)::Pair)
+	if haskey(a.data, i)
+		insert!(a.data[i], j => v)
+	else
+		push!(a.data, i => valtype(a.data)(j => v))
+	end
+	return a
+end
+@inline Base.length(m::TwinAssoc) = sum(length(r) for r in m.data)
+@inline function Base.iterate(m::TwinAssoc) #««
+	u = iterate(m.data)
+	while true
+		u == nothing && return u
+		((i, a), s) = u # a is the alist
+		v = iterate(a)
+		if v ≠ nothing
+			((j, y), t) = v
+			return ((i,j) => y, (i, s, a, t))
+		end
+		u = iterate(m.data, s)
+	end
+end
+@inline function Base.iterate(m::TwinAssoc, (i, s, a, t))
+	while true
+		v = iterate(a, t)
+		if v ≠ nothing
+			((j, y), t) = v
+			return ((i,j) => y, (i, s, a, t))
+		end
+		while true
+			u = iterate(m.data, s)
+			u == nothing && return u
+			((i, a), s) = u
+			v = iterate(a)
+			if v ≠ nothing
+				((j, y), t) = v
+				return ((i,j) => y, (i, s, a, t))
+			end
+		end
+	end
+end #»»
+# function modify!(f, a::SortedAList, k, init)
+# 	i = searchsorted(a.keys, k)
+# 	if isempty(i)
+# 		insert!(a.keys, first(i), k)
+# 		insert!(a.values, first(i), init)
+# 	else
+# 		f(a.values, first(i))
+# 	end
+# 	return a
+# end
 
+# # SparseTable1««2
+# # Associative 2-dimensional tables
+# # this is different from the format used in `SparseArrays`: it is worse
+# # for linear algebra (not needed here) and better for insertion.
+# # this type is for when total number of elements is Θ(n), and indices are int
+# # abstract type AbstractSparseTable{V,T} <: AbstractDict{NTuple{2,V},T} end««
+# # # implements:
+# # # rowkeys(m) - iterator for row keys
+# # # data(m) - iterator for data in i-th row
+# # 
+# # @inline Base.length(m::AbstractSparseTable) = sum(length.(data(m)))
+# # @inline Base.keys(m::AbstractSparseTable) =
+# # 	[(x,y) for (x,v) in zip(rowkeys(m), data(m)) for y in keys(v)]
+# # @inline function Base.iterate(m::AbstractSparseTable)
+# # 	z = zip(rowkeys(m), data(m))
+# # 	u = iterate(z)
+# # 	while true
+# # 		u == nothing && return u
+# # 		((i, a), s) = u # a is the alist
+# # 		v = iterate(a)
+# # 		if v ≠ nothing
+# # 			((j, y), t) = v
+# # 			return ((i,j) => y, (i, s, a, t))
+# # 		end
+# # 		u = iterate(z, s)
+# # 	end
+# # end
+# # @inline function Base.iterate(m::AbstractSparseTable, (i, s, a, t))
+# # 	z = zip(rowkeys(m), data(m))
+# # 	while true
+# # 		v = iterate(a, t)
+# # 		if v ≠ nothing
+# # 			((j, y), t) = v
+# # 			return ((i,j) => y, (i, s, a, t))
+# # 		end
+# # 		while true
+# # 			u = iterate(z, s)
+# # 			u == nothing && return u
+# # 			((i, a), s) = u
+# # 			v = iterate(a)
+# # 			if v ≠ nothing
+# # 				((j, y), t) = v
+# # 				return ((i,j) => y, (i, s, a, t))
+# # 			end
+# # 		end
+# # 	end
+# # end»»
+# """
+#     SparseTable1{V,T}
+# 
+# Sparse 2-dimensional array with index type `V<:Integer` and value type `T`.
+# This is appropriate when the total number of entries is Θ(matrix size).
+# """
+# struct SparseTable1{V<:Integer,T} <: AbstractDict{NTuple{2,V},T}
+# 	data::Vector{Assoc{V,T}}
+# 	SparseTable1{V,T}(data::AbstractVector) where{V,T} = new{V,T}(data)
+# end
+# 
+# # empty constructor:
+# @inline SparseTable1{V,T}(n::Integer) where{V,T} = 
+# 	SparseTable1{V,T}([ Assoc{V,T}() for _ in 1:n ])
+# @inline Base.convert(T::Type{<:SparseTable1}, n::Integer) = T(n)
+# @inline Base.length(l::SparseTable1) = sum(length.(l.data))
+# @inline Base.keys(l::SparseTable1) =
+# 	[(i,j) for i in 1:length(l) for j in l.data[i].keys]
+# @inline function Base.iterate(l::SparseTable1, s=(1,1))
+# 	s[1] > length(l.data) && return nothing
+# 	while s[2] > length(l.data[s[1]])
+# 		s = (s[1]+1, 1)
+# 		s[1] > length(l.data) && return nothing
+# 	end
+# 	a = l.data[s[1]]
+# 	return ((s[1], a.keys[s[2]]) => a.values[s[2]], (s[1], s[2]+1))
+# end
+# @inline Base.haskey(l::SparseTable1, (v1, v2)) =
+# 	v1 ∈ 1:length(l.data) && v2 ∈ keys(l.data[v1])
+# 
+# @inline Base.get(l::SparseTable1, (v1, v2), d) = get(l.data[v1], v2, d)
+# @inline Base.getindex(l::SparseTable1, i) = get(l, i, nothing)
+# @inline Base.setindex!(l::SparseTable1, e, (v1, v2)) =
+# 	setindex!(l.data[v1], e, v2)
+# @inline function Base.resize!(l::SparseTable1, n)
+# 	m = length(l.data)
+# 	resize!(l, n)
+# 	for i in m+1:n l[i] = []; end
+# 	return l
+# end
+# # SparseTable0««2
+# """
+#     SparseTable0{V,T}
+# 
+# Sparse 2-dimensional table with keys of type `(V,V)` and values of type `T`.
+# This is appropriate when the number of entries is o(matrix size).
+# """
+# struct SparseTable0{V,T} <: AbstractDict{NTuple{2,V},T}
+# 	# rows are stored in a SortedAssoc; this could just as well be a
+# 	# SortedDict
+# 	data::SortedAssoc{V,Assoc{V,T}}
+# end
+# @inline SparseTable0{V,T}() where{V,T} =
+# 	SparseTable0{V,T}(SortedAssoc{V,Assoc{V,T}}())
+# @inline SparseTable0{V,T}(::Nothing) where{V,T} = SparseTable0{V,T}()
+# @inline Base.convert(T::Type{<:SparseTable0}, ::Tuple{}) = T()
+# @inline Base.length(m::SparseTable0) = sum(length(x) for x in m.data)
+# @inline Base.getindex(m::SparseTable0, (i,j)) =
+# 	getindex(getindex(m.data, i), j)
+# @inline function Base.get(m::SparseTable0, (i,j), d)
+# 	row = get(m.data, i, nothing)
+# 	row == nothing && return d
+# 	return get(row, j, d)
+# end
+# @inline Base.setindex!(m::SparseTable0, y, (i,j)) =
+# 	modify!(m.data, i, Assoc(j=>y)) do v, k; v[k][j] = y end
+# @inline function Base.iterate(m::SparseTable0, s=(1,1))
+# 	s[1] > length(m.data) && return nothing
+# 	while s[2] > length(m.data.values[s[1]])
+# 		s = (s[1]+1, 1)
+# 		s[1] > length(m.data) && return nothing
+# 	end
+# 	a = m.data.values[s[1]]
+# 	return ((m.data.keys[s[1]], a.keys[s[2]]) => a.values[s[2]], (s[1], s[2]+1))
+# end
+# 
 # LazyMap ««2
 struct LazyMap{Y,X,F} <: AbstractVector{Y}
 	f::F
@@ -124,118 +462,6 @@ end
 
 LazyMap{Y}(f, v) where{Y} = LazyMap{Y,typeof(v),typeof(f)}(f, v)
 lazymap(f,v) = LazyMap{Base.return_types(f,Tuple{eltype(v)})[1]}(f, v)
-
-# SparseTable1««2
-# this is different from the format used in `SparseArrays`: it is worse
-# for linear algebra (not needed here) and better for insertion.
-# this type is for when total number of elements is Θ(n), and indices are int
-# abstract type AbstractSparseTable{V,T} <: AbstractDict{NTuple{2,V},T} end««
-# # implements:
-# # rowkeys(m) - iterator for row keys
-# # data(m) - iterator for data in i-th row
-# 
-# @inline Base.length(m::AbstractSparseTable) = sum(length.(data(m)))
-# @inline Base.keys(m::AbstractSparseTable) =
-# 	[(x,y) for (x,v) in zip(rowkeys(m), data(m)) for y in keys(v)]
-# @inline function Base.iterate(m::AbstractSparseTable)
-# 	z = zip(rowkeys(m), data(m))
-# 	u = iterate(z)
-# 	while true
-# 		u == nothing && return u
-# 		((i, a), s) = u # a is the alist
-# 		v = iterate(a)
-# 		if v ≠ nothing
-# 			((j, y), t) = v
-# 			return ((i,j) => y, (i, s, a, t))
-# 		end
-# 		u = iterate(z, s)
-# 	end
-# end
-# @inline function Base.iterate(m::AbstractSparseTable, (i, s, a, t))
-# 	z = zip(rowkeys(m), data(m))
-# 	while true
-# 		v = iterate(a, t)
-# 		if v ≠ nothing
-# 			((j, y), t) = v
-# 			return ((i,j) => y, (i, s, a, t))
-# 		end
-# 		while true
-# 			u = iterate(z, s)
-# 			u == nothing && return u
-# 			((i, a), s) = u
-# 			v = iterate(a)
-# 			if v ≠ nothing
-# 				((j, y), t) = v
-# 				return ((i,j) => y, (i, s, a, t))
-# 			end
-# 		end
-# 	end
-# end»»
-struct SparseTable1{V<:Integer,T} <: AbstractDict{NTuple{2,V},T}
-	data::Vector{AList{V,T}}
-	SparseTable1{V,T}(data::AbstractVector) where{V,T} = new{V,T}(data)
-end
-
-# empty constructor:
-@inline SparseTable1{V,T}(n::Integer) where{V,T} = 
-	SparseTable1{V,T}([ AList{V,T}() for _ in 1:n ])
-@inline Base.convert(T::Type{<:SparseTable1}, n::Integer) = T(n)
-@inline Base.length(l::SparseTable1) = sum(length.(l.data))
-@inline Base.keys(l::SparseTable1) =
-	[(i,j) for i in 1:length(l) for j in l.data[i].keys]
-@inline function Base.iterate(l::SparseTable1, s=(1,1))
-	s[1] > length(l.data) && return nothing
-	while s[2] > length(l.data[s[1]])
-		s = (s[1]+1, 1)
-		s[1] > length(l.data) && return nothing
-	end
-	a = l.data[s[1]]
-	return ((s[1], a.keys[s[2]]) => a.values[s[2]], (s[1], s[2]+1))
-end
-@inline Base.haskey(l::SparseTable1, (v1, v2)) =
-	v1 ∈ 1:length(l.data) && v2 ∈ keys(l.data[v1])
-
-@inline Base.get(l::SparseTable1, (v1, v2), d) = get(l.data[v1], v2, d)
-@inline Base.getindex(l::SparseTable1, i) = get(l, i, nothing)
-@inline Base.setindex!(l::SparseTable1, e, (v1, v2)) =
-	setindex!(l.data[v1], e, v2)
-@inline function Base.resize!(l::SparseTable1, n)
-	m = length(l.data)
-	resize!(l, n)
-	for i in m+1:n l[i] = []; end
-	return l
-end
-# SparseTable0««2
-# this is appropriate for even more hollow matrices, when total number of
-# entries is o(matrix size); e.g. self-intersection structure
-# rows are stored in a SortedAList; this could just as well be a
-# SortedDict
-struct SparseTable0{V,T} <: AbstractDict{NTuple{2,V},T}
-	data::SortedAList{V,AList{V,T}}
-end
-@inline SparseTable0{V,T}() where{V,T} =
-	SparseTable0{V,T}(SortedAList{V,AList{V,T}}())
-@inline SparseTable0{V,T}(::Nothing) where{V,T} = SparseTable0{V,T}()
-@inline Base.convert(T::Type{<:SparseTable0}, ::Tuple{}) = T()
-@inline Base.length(m::SparseTable0) = sum(length(x) for x in m.data)
-@inline Base.getindex(m::SparseTable0, (i,j)) =
-	getindex(getindex(m.data, i), j)
-@inline function Base.get(m::SparseTable0, (i,j), d)
-	row = get(m.data, i, nothing)
-	row == nothing && return d
-	return get(row, j, d)
-end
-@inline Base.setindex!(m::SparseTable0, y, (i,j)) =
-	modify!(m.data, i, AList(j=>y)) do v, k; v[k][j] = y end
-@inline function Base.iterate(m::SparseTable0, s=(1,1))
-	s[1] > length(m.data) && return nothing
-	while s[2] > length(m.data.values[s[1]])
-		s = (s[1]+1, 1)
-		s[1] > length(m.data) && return nothing
-	end
-	a = m.data.values[s[1]]
-	return ((m.data.keys[s[1]], a.keys[s[2]]) => a.values[s[2]], (s[1], s[2]+1))
-end
 
 # equivalence relations««1
 # uniquenames ««2
@@ -281,9 +507,8 @@ function root(u::AbstractUnionFind, i)
 		i = j
 	end
 end
-function representatives(u::AbstractUnionFind)
-	return [ root(u, i) for i in 1:length(u.parent) ]
-end
+@inline representatives(u::AbstractUnionFind) =
+	[ root(u, i) for i in 1:length(u.parent) ]
 # @inline equivalent(u::AbstractUnionFind, i, j) = root(u, i) == root(u, j)
 
 struct UnionFind{T} <: AbstractUnionFind{T}
@@ -332,13 +557,18 @@ function root!(u::LevelStructure)
 		u.parent[i] = r
 		u.level[i] = l
 	end
-	minlevel = SortedAList{eltype(u),NTuple{2,eltype(u)}}()
+	minlevel = SortedAssoc{eltype(u),NTuple{2,eltype(u)}}()
 	for i in 1:length(u.parent)
 		r = u.parent[i]; l = u.level[i]
 		m = get(minlevel, r, nothing)
-		if (m == nothing) || (m[2] > l)
+		if m == nothing
+			push!(minlevel, r => (i, l))
+		elseif m[2] > l
 			minlevel[r] = (i, l)
 		end
+# 		if (m == nothing) || (m[2] > l)
+# 			push!(minlevel, r => (i, l))
+# 		end
 	end
 	for i in 1:length(u.parent)
 		r = u.parent[i]; l = u.level[i]; m = minlevel[r]
@@ -407,20 +637,32 @@ end
 # enumerate equivalence classes««2
 function equivalence_classes(n, relation;
 	representatives = lowest_representatives(relation, 1:n))
-	# FIXME this assumes relation is Θ(n)
 	g = SparseTable1{Int,Nothing}(n)
 	for (i,j) in pairs(representatives)
-		g[(j,i)] = nothing
+		push!(g, (j,i) => nothing)
 	end
-	return [ keys(u) for u in g.data if !isempty(u) ]
+	return [ keys(u) for u in g.data.values if !isempty(u) ]
 end
 
 # Equivalence structure for arbitrary (sortable) objects««2
+"""
+    EquivalenceStructure
+
+Equivalence structure for arbitrary (sortable) objects
+
+Useful methods:
+ - `elements(s)`: returns uniquesorted list of all elements
+ - `equivalent(s, x,y)`: true iff x, y are equivalent
+ - `class(s, x)`: returns all elements equivlaent to x
+ - `representative(s,x)`: first(class(s,x))
+"""
 # from an element, find an equivalence class identifier (integer)
 # from an equivalence class id, find (sorted) list of equiv. elements
-struct EquivalenceStructure{T}
-	representative::SortedAList{T,Int}
+struct EquivalenceStructure{T,A}
+	representative::A # SortedAssoc{T,Int}, etc.
 	class::Vector{Vector{Int}}
+	@inline EquivalenceStructure(rep::AbstractAssoc, class) =
+		new{keytype(rep),typeof(rep)}(rep, class)
 end
 @inline function index(s::EquivalenceStructure, x)
 	i = searchsortedfirst(keys(s.representative), x)
@@ -436,18 +678,23 @@ end
 @inline classes(s::EquivalenceStructure) =
 	(s.representative.keys[i] for i in s.class)
 @inline elements(s::EquivalenceStructure) = keys(s.representative)
+@inline representative(s::EquivalenceStructure, x) = first(class(s,x))
+@inline function Base.rem(x, s::EquivalenceStructure)
+	i = find(keys(s.representative), x)
+	i == nothing && return x
+	return keys(s.representative)[first(s.class[values(s.representative)[i]])]
+end
 
 function equivalence_structure(relation)
 	# first compute names
 	rel_flat = [ r[i] for r in relation for i in 1:2 ]
 	isempty(relation) && return EquivalenceStructure(
-		SortedAList{eltype(eltype(relation)), Int}(),
+		SortedAssoc{eltype(eltype(relation)), Int}(),
 		Vector{Int}[])
 
 	(names, rel_idx) = uniquenames(rel_flat)
 	# `names` is the unique list of names
 	# `rel_idx` is the renamed equivalence relation (as small integers)
-
 	n = length(names)
 	r = length(rel_idx)
 	# compute transitive closure and representatives of each class:
@@ -462,11 +709,11 @@ function equivalence_structure(relation)
 
 	# index the classes
 	class = [ Int[] for _ in rep_names ]
-	for (i, r) in pairs(rep_idx)
+	@inbounds for (i, r) in pairs(rep_idx)
 		push!(class[r], i)
 	end
 	map(sort!, class)
-	return EquivalenceStructure(SortedAList(names, rep_idx),class)
+	return EquivalenceStructure(SortedAssoc(names, rep_idx),class)
 end
 # half-edge mesh««1
 # half-edge data structure ««2
@@ -545,18 +792,19 @@ function normalized_plane_eq(p1,p2,p3)#««
 		          return (-3, P(v[1], v[2], v[1]*p1[1]+v[2]*p1[2]+p1[3]))
 end#»»
 function mark_edge!(s::HalfEdgeMesh, edge_loc, k, v1, v2)#««
-# 	println("mark_edge!($k = ($v1,$v2))")
+	println("   mark edge ($v1, $v2) at position $k:", get(edge_loc, (2,4), :NOTFOUND))
 	s.destination[k] = v2
 	s.edgefrom[v1] = k
-	edge_loc[(v1,v2)] = k
+# 	haskey(edge_loc, (v1,v2)) && error("haskey: $((v1,v2))")
+	insert!(edge_loc, (v1,v2) => k)
 	j = get(edge_loc, (v2,v1), nothing)
 	if j ≠ nothing
-# 		println("  opposite edge ($v2,$v1) found in table at $j")
 		s.opposite[j] = k
 		s.opposite[k] = j
 	end
 end#»»
 function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)#««
+	println("  mark_face($v1,$v2,$v3)")
 	mark_edge!(s, edge_loc, 3i-2, v3, v1)
 	mark_edge!(s, edge_loc, 3i-1, v1, v2)
 	mark_edge!(s, edge_loc, 3i  , v2, v3)
@@ -716,6 +964,22 @@ function coplanar_faces(s::HalfEdgeMesh; ε = 0)
 	return SpatialSorting.intersections(boxes)
 end
 
+# opposite faces««2
+function opposite_faces(s::HalfEdgeMesh)
+	r = NTuple{2,face_type(s)}[]
+	for f in 1:nfaces(s)
+		e1 = 3*f
+		v1 = destination(s, e1)
+		v3 = destination(s, next(s, e1))
+		for e2 in radial_loop(s, e1)
+			# similarly-oriented faces (including this one) don't count:
+			e2 < e1 && continue
+			destination(s, e2) == v1 && continue
+			destination(s, next(s, e2)) == v3 && push!(r, fld1.((e1,e2), 3))
+		end
+	end
+	return r
+end
 # structure extension««2
 function concatenate(slist::HalfEdgeMesh...)
 	r = HalfEdgeMesh{halfedge_type(first(slist)),
@@ -769,40 +1033,28 @@ function shift_points!(s::HalfEdgeMesh, vmap, start, stop, offset)
 end
 
 
-function deduplicate_vertices!(s::HalfEdgeMesh, ren)
-	nv = nvertices(s); l = length(ren)
+function deduplicate_vertices!(s::HalfEdgeMesh, same_points)
+	nv = nvertices(s)
 	vmap = Vector{Int}(undef, nv)
 
+	replace = keys(same_points.representative)[first.(
+		same_points.class[values(same_points.representative)])]
+	@assert replace == [x % same_points for x in elements(same_points)]
 	start = 1; offset = 0
-	for (i, k) in pairs(keys(ren))
-		current = k-offset
+	for (x,y) in zip(elements(same_points), replace)
+		x == y && continue
+		current = x-offset
 		shift_points!(s, vmap, start, current-1, offset)
 		start = current; offset+= 1
 	end
-	shift_points!(s, vmap, start, nv-l, l)
+	shift_points!(s, vmap, start, nv-offset, offset)
 	# replace points by correct values:
-	vmap[keys(ren)] .= vmap[values(ren)]
+	vmap[elements(same_points)] .= vmap[replace]
 
 	s.destination .= view(vmap, s.destination)
-	resize!(s.points, nv-l)
-	resize!(s.edgefrom, nv-l)
+	resize!(s.points, nv-offset)
+	resize!(s.edgefrom, nv-offset)
 	return s
-end
-# opposite faces««2
-function opposite_faces(s::HalfEdgeMesh)
-	r = NTuple{2,face_type(s)}[]
-	for f in 1:nfaces(s)
-		e1 = 3*f
-		v1 = destination(s, e1)
-		v3 = destination(s, next(s, e1))
-		for e2 in radial_loop(s, e1)
-			# similarly-oriented faces (including this one) don't count:
-			e2 < e1 && continue
-			destination(s, e2) == v1 && continue
-			destination(s, next(s, e2)) == v3 && push!(r, fld1.((e1,e2), 3))
-		end
-	end
-	return r
 end
 # select faces««2
 """
@@ -871,55 +1123,50 @@ function select_faces!(s::HalfEdgeMesh, fkept)
 	return s
 end
 
-# self-intersection««1
-# bbox««2
-struct BBox{P}
-	min::P
-	max::P
-	@inline BBox{P}(min, max) where{P} = new{P}(min, max)
-	@inline BBox(min, max) = BBox{typeof(min)}(min, max)
+# split faces!««2
+"""
+    split_faces
+
+Replaces faces in `s`, as indicated by iterator `fsplit`
+(as (face number) => (replacement triangles)).
+"""
+function split_faces(s::HalfEdgeMesh, points, fsplit)
+	s1 = deepcopy(s)
+	# localize new edges only — this is O(√n), hence SparseTable0:
+	edge_loc = SparseTable0{halfedge_type(s1),vertex_type(s1)}()
+	extend_points!(s1, points)
+	# n is number of face being written
+	n = nfaces(s1)
+	println("\e[1msplit_faces\e[m")
+	for (f, tri) in fsplit
+		length(tri) ≤ 1 && continue # skipped face, or trivial retriangulation
+
+		println("\e[34m$f $(face(s,f)) => $tri\e[m")
+		resize_faces!(s1, nfaces(s1) + length(tri) - 1)
+		((a1,b1,c1), state) = iterate(tri)
+		(v1,v2,v3) = face(s1, f)
+		# before overwriting this face, we save the location of opposed half-edges:
+		# and save location of half-edges from v1, v2, v3:
+		println("h-e $(3*f-2) is $(halfedge(s1, 3*f-2))")
+		println("h-e $(3*f-1) is $(halfedge(s1, 3*f-1))")
+		println("h-e $(3*f-0) is $(halfedge(s1, 3*f-0))")
+		e = opposite(s1, 3*f-2); insert!(edge_loc, (v1,v3) => e); edgefrom!(s1,v1,e)
+		e = opposite(s1, 3*f-1); insert!(edge_loc, (v2,v1) => e); edgefrom!(s1,v2,e)
+		e = opposite(s1, 3*f  ); insert!(edge_loc, (v3,v2) => e); edgefrom!(s1,v3,e)
+		mark_face!(s1, edge_loc, f, a1, b1, c1)
+		# append new faces
+		while true
+			u = iterate(tri, state)
+			u == nothing && break
+			((a,b,c), state) = u
+			n+= 1
+			mark_face!(s1, edge_loc, n, a, b, c)
+		end
+	end
+	return s1
 end
-
-@inline Base.eltype(::Type{BBox{P}}) where{P} = P
-@inline Base.eltype(b::BBox) = eltype(typeof(b))
-
-@inline Base.min(b::BBox) = b.min; @inline Base.max(b::BBox) = b.max
-@inline Base.:∈(x::AbstractVector, b::BBox) = all(min(b) .≤ x .≤ max(b))
-@inline Base.isempty(b::BBox) = any(min(b) .> max(b))
-@inline Base.intersect(a::BBox, b::BBox) =
-	BBox((max.(min(a), min(b))), (min.(max(a), max(b))))
-@inline boundingbox(v::AbstractVector...) =
-	BBox{eltype(v)}(min.(v...), max.(v...))
-SpatialSorting.position(b::BBox) = b.min + b.max
-SpatialSorting.merge(b1::BBox, b2::BBox) =
-	BBox{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
-# # simplify_points««2
-# """
-#     simplify_points(points; ε)
-# 
-# Removes duplicates from the set of points, returning (list of new points,
-# map from old index to new index).
-# """
-# function simplify_points(points; ε=0)
-# 	n = length(points)
-# 	boxes = [ BBox(p, p .+ ε) for p in points ]
-# 	# `extrema` guarantees that all pairs (i,j) are sorted i < j
-# 	samepoints = extrema.(SpatialSorting.intersections(boxes))
-# 	merged = lowest_representatives(samepoints, 1:n)
-# # 	println(join(["\n$i=$p" for (i,p) in pairs(points)]))
-# # 	println("same points: $samepoints")
-# 	newindex = similar(merged)
-# 	newpoints = sizehint!(similar(points, 0), n)
-# 	for (i, j) in pairs(merged)
-# 		if i == j # this is a kept point
-# 			push!(newpoints, points[i])
-# 			newindex[i] = length(newpoints)
-# 		else # this is a relabeled point
-# 			newindex[i] = newindex[j]
-# 		end
-# 	end
-# 	return (newpoints, newindex)
-# end
+#
+# self-intersection««1
 # self_intersect««2
 # indexed by pairs of vertices
 # other possibility would be to index by half-edge number
@@ -942,10 +1189,10 @@ function Base.insert!(s::EdgeInserts, i, allpoints, p, ε = 0)
 		# no previous point on this edge: insertion is trivial
 		v = point(s.mesh, e[2]) - point(s.mesh, e[1])
 		k = findmax(abs.(v))[2]
-		s.sort[e] = (dir = dir_type(s.mesh)(v[k] > 0 ? k : -k), z = [p[k]])
+		push!(s.sort, e => (dir = dir_type(s.mesh)(v[k] > 0 ? k : -k), z = [p[k]]))
 		push!(allpoints, p)
 		newvertex = vertex_type(s.mesh)(length(allpoints))
-		s.vertices[e] = [newvertex]
+		push!(s.vertices, e => [newvertex])
 		return newvertex
 	else
 		t = s.sort[e]
@@ -985,7 +1232,7 @@ function register_point!(s::HalfEdgeMesh, allpoints, in_face, in_edge,#««
 	if !haskey(in_face, i)
 		push!(allpoints, p)
 		newvertex = vertex_type(s)(length(allpoints))
-		in_face[i] = [newvertex]
+		push!(in_face, i => [newvertex])
 		return newvertex
 	end
 	# look for a previous, matched point:
@@ -1017,8 +1264,7 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 	# these will be filtered later to be made unique
 	pts = copy(points(s))
 	same_points = NTuple{2,vertex_type(s)}[]
-# 	in_face=AList(face_type(s)[],Vector{vertex_type(s)}[])
-	in_face = AList{face_type(s),Vector{vertex_type(s)}}()
+	in_face = Assoc{face_type(s),Vector{vertex_type(s)}}()
 	in_edge = EdgeInserts(s)
 	same_edges = NTuple{2,NTuple{2,vertex_type(s)}}[]
 
@@ -1027,7 +1273,6 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 		# this can fail only for a flat triangle:
 		it = TriangleIntersections.inter(triangle(s, i1), triangle(s, i2), ε)
 		isempty(it) && continue
-# 		println("faces $i1=$(face(s,i1)) and $i2=$(face(s,i2)) intersect in $(length(it)) points")
 		
 		# create points as needed, and store their index:
 		vindex = MMatrix{6,2,vertex_type(s)}(undef)
@@ -1036,13 +1281,10 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 			idx2 = register_point!(s, pts, in_face, in_edge, i2, t2, p, ε)
 			idx1 ≠ idx2 && push!(same_points, (idx1, idx2))
 			vindex[i,1] = idx1; vindex[i,2] = idx2
-# 		println("   now $(length(points)) points, registered $p=$idx1, $idx2")
 		end
-# 		println("   registered points: $(vindex[1:length(it),:])")
 		v1 = vindex[1,:]
 		for i in 2:length(it)
 			v2 = vindex[i,:]
-# 			println("matching edge starting at $v1, ending at $v2")
 			for j in 1:2
 				if v1[j] < v2[j]
 					push!(same_edges, ((v1[j], v2[j]), (v1[3-j], v2[3-j])))
@@ -1052,15 +1294,10 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 			end
 		end
 	end
-	(dup_points, point_rep) = lowest_representatives(same_points)
-	real_dup = dup_points .!= point_rep
-	dup_points = dup_points[real_dup]
-	point_rep  = point_rep[real_dup]
-	global X=same_edges
 	return (
 		points=pts, in_face=in_face,
 		in_edge=in_edge.vertices,
-		same_points=SortedAList(dup_points, point_rep),
+		same_points=equivalence_structure(same_points),
 		same_edges=equivalence_structure(same_edges),
 		)
 end#»»
@@ -1096,6 +1333,8 @@ function faces_to_triangulate(s, in_face, in_edge)#««3
 		push!(faces_todo, f)
 		push!(faces_todo_vertices, copy(vlist))
 	end
+	isempty(faces_todo) && return Assoc(faces_todo,
+		[SortedVector(sort!(x)) for x in faces_todo_vertices])
 	# sort and unique faces_todo, and combine corresponding entries
 	# in faces_todo_vertices
 	p = sortperm(faces_todo)
@@ -1114,42 +1353,75 @@ function faces_to_triangulate(s, in_face, in_edge)#««3
 	for l in newfaces_todo_vertices
 		unique!(sort!(l))
 	end
-	return AList(newfaces_todo, newfaces_todo_vertices)
+	return Assoc(newfaces_todo, newfaces_todo_vertices)
 end
 # project_and_triangulate ««2
-function project_and_triangulate(points, direction, vlist, elist)
+function project_and_triangulate(points, direction, vlist, elist, same_points)
 	# this has duplicate points (for matched edges),
 	# which libtriangle does not like => deduplicate points:
+	uniquevertices = [ v % same_points for v in vlist ]
+	unique!(sort!(uniquevertices))
+	uniqueedges = [ minmax(e1 % same_points, e2 % same_points)
+		for (e1, e2) in elist ]
+	unique!(sort!(uniqueedges))
 	# build matrix of coordinates according to `vlist`:
-	vmat = Matrix{Float64}(undef, length(vlist), 2)
+	vmat = Matrix{Float64}(undef, length(uniquevertices), 2)
 	if direction == 1
-		vmat[:,1] .= (points[v][2] for v in vlist)
-		vmat[:,2] .= (points[v][3] for v in vlist)
+		vmat[:,1] .= (points[v][2] for v in uniquevertices)
+		vmat[:,2] .= (points[v][3] for v in uniquevertices)
 	elseif direction ==-1
-		vmat[:,1] .= (points[v][3] for v in vlist)
-		vmat[:,2] .= (points[v][2] for v in vlist)
+		vmat[:,1] .= (points[v][3] for v in uniquevertices)
+		vmat[:,2] .= (points[v][2] for v in uniquevertices)
 	elseif direction == 2
-		vmat[:,1] .= (points[v][3] for v in vlist)
-		vmat[:,2] .= (points[v][1] for v in vlist)
+		vmat[:,1] .= (points[v][3] for v in uniquevertices)
+		vmat[:,2] .= (points[v][1] for v in uniquevertices)
 	elseif direction ==-2
-		vmat[:,1] .= (points[v][1] for v in vlist)
-		vmat[:,2] .= (points[v][3] for v in vlist)
+		vmat[:,1] .= (points[v][1] for v in uniquevertices)
+		vmat[:,2] .= (points[v][3] for v in uniquevertices)
 	elseif direction == 3
-		vmat[:,1] .= (points[v][1] for v in vlist)
-		vmat[:,2] .= (points[v][2] for v in vlist)
+		vmat[:,1] .= (points[v][1] for v in uniquevertices)
+		vmat[:,2] .= (points[v][2] for v in uniquevertices)
 	else @assert direction ==-3
-		vmat[:,1] .= (points[v][2] for v in vlist)
-		vmat[:,2] .= (points[v][1] for v in vlist)
+		vmat[:,1] .= (points[v][2] for v in uniquevertices)
+		vmat[:,2] .= (points[v][1] for v in uniquevertices)
 	end
-	emat = Matrix{Int}(undef, length(elist), 2)
-	emat[:,1] .= collect(e[1] for e in elist)
-	emat[:,2] .= collect(e[2] for e in elist)
-	return LibTriangle.constrained_triangulation(vmat, vlist, emat)
+	emat = Matrix{Int}(undef, length(uniqueedges), 2)
+	emat[:,1] .= collect(e[1] for e in uniqueedges)
+	emat[:,2] .= collect(e[2] for e in uniqueedges)
+# 	println("triangulate: $vmat $uniquevertices $emat")
+	return LibTriangle.constrained_triangulation(vmat, uniquevertices, emat)
 
+end
+
+"""
+    triangles_in
+
+Returns those triangles in `triangulation` (as triple of vertices)
+which have all their vertices in (sorted list) `elist`,
+modulo equivalence relation `same_points`.
+"""
+function triangles_in(triangulation, vlist, same_points)
+	# build associative list in reverse order, to identify points in
+	# `vlist` by their lowest representative:
+	vlist2 = [ x % same_points for x in vlist ]
+	perm = sortperm(vlist2)
+	assoc = SortedAssoc(vlist2[perm], vlist[perm])
+	
+	ret = NTuple{3,eltype(eltype(triangulation))}[]
+	vlist2s = SortedVector(sort(vlist2))
+	for tri in triangulation
+		(v1, v2, v3) = tri
+		v1 ∉ vlist2s && continue
+		v2 ∉ vlist2s && continue
+		v3 ∉ vlist2s && continue
+		push!(ret, (assoc[v1], assoc[v2], assoc[v3]))
+	end
+	return ret
 end
 
 # subtriangulate««2
 function subtriangulate(s::HalfEdgeMesh, ε=0)
+	println("subtriangulate(v=$(nvertices(s)), f=$(nfaces(s)))")
 	si = self_intersect(s, ε)
 	# determine clusters of coplanar faces:
 	# (using compact type for equivalence structure since O(n) faces...)
@@ -1169,13 +1441,11 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 		cluster_index =
 			searchsortedfirst(LazyMap{face_type(s)}(first, clusters), lowrep)
 		current_cluster = clusters[cluster_index]
-# 		println("\e[1mcurrent cluster: $current_cluster\e[m")
 
 		# mark these faces as done
 		start = 1; stop = length(faces_todo)
 		for f in current_cluster
-			j = searchsortedfirst(keys(faces_todo), f, start, stop,
-				Base.Order.Forward)
+			j = searchsortedfirst(keys(faces_todo), f, start,stop,Base.Order.Forward)
 			j > stop && break
 			faces_done[j] = true
 		end
@@ -1208,75 +1478,32 @@ function subtriangulate(s::HalfEdgeMesh, ε=0)
 			end
 		end
 		unique!(sort!(clustervertices))
-		if length(clustervertices) == 3
-			continue
-		end
+		length(clustervertices) == 3 && continue
+
 		unique!(sort!(clusteredges))
 
 		# project and triangulate
-		# first remove duplicate points:
-		uniquevertices = filter(x->get(si.same_points, x, x) == x, clustervertices)
-		uniqueedges = map(e->minmax(get(si.same_points, e[1], e[1]),
-			get(si.same_points, e[2], e[2])), clusteredges)
-		unique!(sort!(uniqueedges))
-
 		newtriangles = project_and_triangulate(si.points,
-			abs(plane(s,f)[1]), uniquevertices, uniqueedges)
+			abs(plane(s,f)[1]), clustervertices, clusteredges, si.same_points)
+# 		println("newtriangles for $current_cluster=$newtriangles")
 
 		# extract triangulation for each face
 		for f in current_cluster
 			j = searchsortedfirst(keys(faces_todo), f)
 			j > length(faces_todo) && continue
-			fvert = values(faces_todo)[j]
-			fvert_unique = [ get(si.same_points,v,v) for v in fvert ]
-			# we build an alist in the other direction, to find the real point
-			# in f associated to a renamed unique point:
-			rename = AList(fvert_unique, fvert)
-			d = plane(s, f)[1] # sign of direction
-			for tri in newtriangles
-				real_tri = map(v->get(rename, v, v), tri)
-				isempty(searchsorted(fvert, real_tri[1])) && continue
-				isempty(searchsorted(fvert, real_tri[2])) && continue
-				isempty(searchsorted(fvert, real_tri[3])) && continue
-				if d > 0
-					push!(faces_tri[j], (real_tri[1],real_tri[2],real_tri[3]))
-				else
-					push!(faces_tri[j], (real_tri[1],real_tri[3],real_tri[2]))
-				end
-			end
+			keys(faces_todo)[j] ≠ f && continue
+			vlist = values(faces_todo)[j]
+			tri = triangles_in(newtriangles, vlist, si.same_points)
+			faces_tri[j] = (plane(s,f)[1] > 0) ? tri : reverse.(tri)
+# 			println(" replacing face $j=\e[34m$(face(s,j)) ($vlist)\e[m => $(faces_tri[j])")
 		end
 	end
 	# apply refinement computed above
-	# localize new edges only — this is O(√n) and hence we need
-	# sparsetable0 only:
-	s1 = deepcopy(s)
-	edge_loc = SparseTable0{halfedge_type(s1),vertex_type(s1)}()
-	extend_points!(s1, si.points)
-	# n is number of face being written, nf total number of faces
-	n = nf = nfaces(s1)
-	for (f, tri) in zip(keys(faces_todo), faces_tri)
-		length(tri) ≤ 1 && continue # skipped face, or trivial retriangulation
+	s1 = split_faces(s, si.points, zip(keys(faces_todo), faces_tri))
 
-		nf+= length(tri) - 1
-		resize_faces!(s1, nf)
-		((a1,b1,c1), state) = iterate(tri)
-		(v1,v2,v3) = face(s1, f)
-		# before overwriting this face, we save the location of opposed half-edges:
-		# and save location of half-edges from v1, v2, v3:
-		e = edge_loc[(v1,v3)] = opposite(s1, 3*f-2); edgefrom!(s1, v1, e)
-		e = edge_loc[(v2,v1)] = opposite(s1, 3*f-1); edgefrom!(s1, v2, e)
-		e = edge_loc[(v3,v2)] = opposite(s1, 3*f  ); edgefrom!(s1, v3, e)
-		mark_face!(s1, edge_loc, f, a1, b1, c1)
-		# append new faces
-		while true
-			u = iterate(tri, state)
-			u == nothing && break
-			((a,b,c), state) = u
-			n+= 1
-			mark_face!(s1, edge_loc, n, a, b, c)
-		end
-	end
 	# build radial cycles for singular half-edges:
+	global S = s1
+	global SI = si
 	he1 = [ edge(s1, e) for e in elements(si.same_edges) ]
 	he2 = [ opposite(s1, e) for e in he1 ]
 	for c in si.same_edges.class
@@ -1391,7 +1618,7 @@ function sort_radial_loop(s::HalfEdgeMesh, e, pt3 = nothing)
 	fv2= [ project2d(proj, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
 # 	println("edge $e = ($v1,$v2): $dir3 proj=$proj")
 # 	for (e1, x, y, z) in zip(he, ov, fv, fv2)
-# 		println("# $e1 = $(halfedge(s, e1)): opv=$x, fv3=$y, fv2= $z")
+# 		println("# $e1 = $(halfedge(s, e1)): opp.v=$x, fv3=$y, fv2=$z")
 # 	end
 	face_cmp = @closure (i1, i2) -> let b = circular_sign(fv2[i1], fv2[i2])
 		!iszero(b) && return (b > 0)
@@ -1409,7 +1636,6 @@ function sort_radial_loop(s::HalfEdgeMesh, e, pt3 = nothing)
 
 	# find where `pt3 - v1` inserts in radial loop:
 	vec3 = pt3 - p1
-	println("vec3 = $vec3")
 	vec2 = project2d(proj, vec3) .- dot(vec3, dir3) .*dir2scaled
 	@assert !all(iszero,vec2) "half-edge $e aligned with point $vec3"
 	k = searchsorted(fv2[reorder], vec2,
@@ -1430,7 +1656,6 @@ function find_good_halfedge(s::HalfEdgeMesh, i, p)
 	# in this case we must return j immediately
 	vpi = point(s, i) - p
 	nv = neighbours(s, i)
-	println(collect(nv))
 	((e, j), state) = iterate(nv)
 	vpj = point(s, j) - p
 	xj = dot(vpi, vpj)
@@ -1495,6 +1720,7 @@ function multiplicity(s::HalfEdgeMesh)#««
 		dlist = [destination(s, e) for e in elist]
 		v2 = destination(s, eindex)
 		e1 = elist[1]; p1 = plist[1]; d1 = dlist[1]
+# 		println("sorted radial loop is $elist")
 		for i in 2:n
 			e2 = elist[i]; p2 = plist[i]; d2 = dlist[i]
 			# patch p2 is positively oriented iff d2==v2, etc.:
@@ -1526,15 +1752,12 @@ function multiplicity(s::HalfEdgeMesh)#««
 	# vmax[i] is the vertex with maximal x in connected comp. cc_list[i]
 	# cc_nest[i] is the nesting level of connected comp. cc_list[i]
 	root!(levels)
-	println("canonical levels=$(levels.level) $(levels.parent)")
 	face_cc = levels.parent[rp.label]
-	println("face_cc=$face_cc")
 	cc_list = unique!(sort(levels.parent))
 	vertex_cc = similar(cc_list, nvertices(s))
 	for (j, f) in pairs(faces(s)), v in f
 		vertex_cc[v] = levels.parent[rp.label[j]]
 	end
-	println("vertex_cc=$vertex_cc")
 	vmax = similar(cc_list)
 	for (i, c) in pairs(cc_list)
 		b = false; z = zero(point(s,1)[1])
@@ -1551,12 +1774,10 @@ function multiplicity(s::HalfEdgeMesh)#««
 		i1 == i2 && continue
 		(f, b) = locate_point(s, face_cc, i2, point(s, vmax[i1]))
 		k = b + levels.level[rp.label[f]]
-		println("point $(vmax[i1]) = $(point(s, vmax[i1])) w.r.t. cc $i2: face=$f, flag=$b; total $k")
 		# if k > 0 then i1 inside i2
 		cc_nest[i1]+= k
 	end
-	println("cc_nest = $cc_nest")
-	cc_nest_level = SortedAList(cc_list, cc_nest)
+	cc_nest_level = SortedAssoc(cc_list, cc_nest)
 
 	face_level = Vector{Int}(undef, nfaces(s))
 	for f in 1:nfaces(s)
@@ -1568,11 +1789,34 @@ function multiplicity(s::HalfEdgeMesh)#««
 	end
 	return face_level
 end#»»
+# operations««1
+"""
+    combine(meshes, μ, ε = 0)
+
+Combines all given `meshes` and return a new mesh containing only
+those faces with multiplicity `μ`.
+The parameter `ε` is the precision used for intersection computation.
+"""
+function combine(meshes, μ, ε = 0)
+	newmesh = subtriangulate(concatenate(meshes...), ε)
+	levels = multiplicity(newmesh)
+	println("newmesh: faces=$(collect(pairs(faces(newmesh)))) levels=$(collect(pairs(levels)))")
+	select_faces!(newmesh, levels .== μ)
+end
+@inline Base.union(meshes::HalfEdgeMesh...; ε = 0) =
+	combine(meshes, 1, ε)
+@inline Base.intersect(meshes::HalfEdgeMesh...; ε = 0) =
+	combine(meshes, length(meshes), ε)
+@inline Base.setdiff(m1::HalfEdgeMesh, m2::HalfEdgeMesh; ε = 0) =
+	combine([m1, reverse(m2)], 2, ε)
 #»»1
 function validate(s::HalfEdgeMesh)
-	for (i, e) in pairs(s.opposite)
-		j = s.opposite[e]
-		j == i || println("edge $i: opposite² = $j")
+	for (i, j) in pairs(s.opposite)
+		j ∈ keys(s.opposite) || println("edge e$i: opposite = $j, invalid")
+		e = s.opposite[j]
+		halfedge(s, j) == reverse(halfedge(s, i)) ||
+		println("edge e$i =$(halfedge(s,i)): opposite e$j = $(halfedge(s,j))")
+# 		e == i || println("edge $i: opposite² = $e")
 	end
 	for (i,e) in pairs(s.edgefrom)
 		j = s.destination[prev(s, e)]
@@ -1587,4 +1831,28 @@ half-edge $e: ->$(destination(s,e)), opp=$opp -> $(destination(s,opp))
   in triangle $j with $(map(i->destination(s,i),(3j-2,3j-1,3j)))
 """)
 end
+function explain(s::HalfEdgeMesh, io::IO = stdout;
+	scale=1, offset=[0.,0.,0.], name="m")
+	println(io, """
+module $name(pos=$offset, c="gray", s=$scale) {
+translate(s*pos) {
+""")
+	for (i, p) in pairs(s.points)
+		println(io, """
+translate(s*$(Vector{Float64}(p))) {
+	color("red") sphere(1);
+	color("black", .8) linear_extrude(1) text("$i", size=5);
+}
+""")
+	end
+	println(io, "color(c, .7) polyhedron([")
+	join(io, [ " s*$(Vector{Float64}(p))" for p in s.points ], ",\n")
+	println(io, "],[")
+	join(io, [ " $(Vector{Int}([f...]) .- 1)" for f in faces(s) ], ",\n")
+	println(io, "]); } }\n$name();")
+end
+@inline explain(s::HalfEdgeMesh, f::AbstractString; kwargs...) =
+	open(f, "w") do io explain(s, io; kwargs...) end
+
+export HalfEdgeMesh
 end # module

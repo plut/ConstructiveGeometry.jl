@@ -1,15 +1,36 @@
-# requirements
- - f->e, e->v, v->v, e->f
- - retriangulation of a face
+# Split of module
+ - **2d subsystem**
+  - interface via simple `Vector{SVector{2}}` objects and short list of
+		functions
+   - maybe even better, interface as parametric types
+  - rename `PolygonXor`? `PolygonalShape`?
+ - **3d subsystem**
+  - interface via `HalfEdgeMesh` and short list of functions
+ - **Definitions of geometric objects**
+  - [x] _2d primitives_: circle, square, polygon
+  - _3d primitives_: sphere, cube, cylinder, surface (?)
+  - Some 3d primitives are accessible via extrusion:
+   - cube, cylinder, frustum, cone
+	 - simplicity vs. efficiency?
+  - _Geometry transforms_: invertible affine transform, projection,
+   linear extrusion, rotational extrusion
+  - _Non-geometry transforms_: `set_parameters`, color
+  - _CG operations_: union, inter, diff, hull, offset, minkowski+, minkowski-
+ - **Syntactic sugar**
+ - **Import/export**
+  - SCAD
+	- STL
+ - **Visualization** (TODO)
+# For version 0.2 (performance update)
  - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document
  operators: LeftBack, LeftFront, RightBack, RightFront, Source, Target,
  Left, Right; Point, Edge
-
-# Immediate work before bumping version:
- - [ ] do something with `listpush!`: replace `Set` by `BitVector` (since
-	 total size is bounded)
- - [ ] use some form of explicit representation for edges
-	 - [ ] may as well use half-edge structure while we're at it
+ - [x] write set of tests for 2d subsystem: number of vertices and paths
+	 for known shapes, etc.
+ - [x] group together what belongs to `Square`, etc. (in particular,
+	 include "scad.jl" at the top instead of bottom)
+ - [x] use some form of explicit representation for edges
+	 - [x] may as well use half-edge structure while we're at it
  - [x] document the changes
  - [x] convert Polygon{Int} to Polygon{Float}
  - [?] clean the type system once and for all:
@@ -18,10 +39,10 @@
   - [x] and only decide on a coord. type at meshing type (as a parameter).
 	- [ ] take advantage to allow exact (rational) arithmetic
  - [?] split in several packages:
-  - [ ] `AbstractGeometry`
+  - [ ] `AbstractGeometry`: remove stale `Meshes` dependency
 	- [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
 	- [x] `AABBTree` -> `SpatialSorting` + `TriangleIntersections`
-	- [ ] `Meshing`
+	- [x] `Meshing` -> `HalfEdgeMeshes`
  - [x] implement ZGZJ's cluster triangulation to prevent crossing faces
   - [x] “thicken” faces (and edges) wrt intersection (i.e. add small,
 		well-defined tolerance). As a parameter in `set_parameters`?
@@ -73,16 +94,17 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [?] split in several files after all (will help in `include()` time)?
  - [ ] 3d => 2d projection
  - [ ] 3d => 2d intersection with plane
- - [x] a common name for meshing objects
-   => **mesh**
+ - [x] a common name for meshing objects => **mesh**
  - [x] check using vs. import
- - [ ] replace `triangulate_between` by an actual Triangulate call
+ - [x] replace `triangulate_between` by an actual Triangulate call
   - [x] likely not possible (these are 3d points in general)
  - [x] write a few examples
  - [x] test suite
  - [x] fix `Offset` for polygon xor
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works
+# For version 0.3 (visualization update)
+ - [ ] add some per-face visualization data (colors?).
 # Performance
  - [ ] try to prevent `TriangleIntersections.inter` from typing
    (e.g. by returning separately the intersection + an array of points,
