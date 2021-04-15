@@ -165,9 +165,10 @@ Complexity is quasi-linear in the number of boxes
 (but also depends on the number of intersecting pairs).
 """
 function intersections(boxes)
+	r = NTuple{2,Int}[]
+	isempty(boxes) && return r
 	t = tree(boxes)
 	n = length(boxes)
-	r = NTuple{2,Int}[]
 	todo = [(1,1)]
 	while !isempty(todo)
 		(a,b) = pop!(todo)
