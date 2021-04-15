@@ -9,9 +9,10 @@ This module exports the `HalfEdgeMesh` data type and defines the following funct
  - `faces`, `points`: exports a mesh to a list of triangles.
  - `concatenate`: disjoint union of meshes.
  - `combine`: compute the result of a Boolean operation (intersection, union)
- on meshes.
+   on meshes.
  - `Base.reverse`: computes the complement of a mesh; together with `combine`,
- this allows computation of a Boolean difference of meshes.
+   this allows computation of a Boolean difference of meshes.
+ - `Base.union`, `Base.intersect`, `Base.setdiff`: shorthand for usual combinations.
 """
 module HalfEdgeMeshes
 using StaticArrays
@@ -24,7 +25,6 @@ end
 include("TriangleIntersections.jl")
 include("SpatialSorting.jl")
 
-# using DataStructures
 const HalfEdgeId = Int
 const VertexId = Int
 
@@ -77,24 +77,6 @@ function simplify_points(points, ε=0)
 	return (i => j for (i, j) in pairs(merged) if i ≠ j)
 end
 
-# key-wise iteration over SortedMultiDict««2
-struct MultiDictByKey{S <:SortedMultiDict}
-	dict::S
-end
-function Base.iterate(g::MultiDictByKey,
-		st=advance((g.dict,beforestartsemitoken(g.dict))))
-	status((g.dict,st)) == 3 && return nothing
-	k = deref_key((g.dict, st))
-	ret = [deref_value((g.dict, st))]
-	while true
-		st = advance((g.dict, st))
-		(status((g.dict,st)) == 3 || deref_key((g.dict,st)) ≠ k) && return (ret, st)
-		push!(ret, deref_value((g.dict, st)))
-	end
-end
-@inline Base.IteratorSize(g::MultiDictByKey) = Base.SizeUnknown()
-@inline values_by_key(s::SortedMultiDict) = MultiDictByKey(s)
-@inline Base.eltype(g::MultiDictByKey) = Vector{valtype(g.dict)}
 # initialize one entry in a dictionary (e.g. of vectors) #««2
 function create_entry!(dict::SortedDict, key, init)
 	idx = findkey(dict, key)
@@ -268,33 +250,9 @@ function lowest_representatives(relation, elements)
 	return rep
 end
 
-# function lowest_representatives(n, relation)
-# 	rep = collect(1:n)
-# 	for (i, j) in relation
-# 		if rep[i] < rep[j]
-# 			rep[j] = rep[i]
-# 		else
-# 			rep[i] = rep[j]
-# 		end
-# 	end
-# 	return rep
-# end
-
 function lowest_representatives(relation)
 	elements = unique!(sort!([r[i] for r in relation for i in 1:2]))
 	return (elements, lowest_representatives(relation, elements))
-end
-
-# enumerate equivalence classes««2
-function equivalence_classes(n, relation;
-	representatives = lowest_representatives(relation, 1:n))
-	T = eltype(eltype(relation))
-	g = SortedMultiDict{T,T}(j => i for (i,j) in pairs(representatives))
-	return collect(values_by_key(g))
-# 	for (i,j) in pairs(representatives)
-# 		push!(g, j => i)
-# 	end
-# 	return [ keys(u) for u in g.data.values if !isempty(u) ]
 end
 
 # Equivalence structure for arbitrary (sortable) objects««2
@@ -330,12 +288,6 @@ end
 @inline class(s::EquivalenceStructure, x) = s.elements[s.class[class_idx(s, x)]]
 @inline representative(s::EquivalenceStructure, x) =
 	s.elements[first(s.class[class_idx(s,x)])]
-# 	first(class(s,x))
-@inline function Base.:%(x, s::EquivalenceStructure)
-	i = index(s, x)
-	i == nothing && return x
-	return s.elements[first(s.class[s.class_idx[i]])]
-end
 
 function equivalence_structure_flat(n::Integer, rel_flat)#««
 	# rel_flat is a flat list: r[1] ∼ r[2], r[3] ∼ r[4] etc.
@@ -358,12 +310,12 @@ function equivalence_structure_flat(n::Integer, rel_flat)#««
 	map(sort!, class)
 	return EquivalenceStructure(Base.OneTo(n), rep_idx, class)
 end#»»
-function equivalence_structure(n::Integer, relation)
+function equivalence_structure(n::Integer, relation)#««
 	isempty(relation) &&
 		return EquivalenceStructure(Base.OneTo(0), Int[], Vector{Int}[])
 	eq1 = equivalence_structure_flat(n, reinterpret(Int, relation))
 	return EquivalenceStructure(Base.OneTo(n), eq1.class_idx, eq1.class)
-end
+end#»»
 function equivalence_structure(relation)#««
 	isempty(relation) &&
 		return EquivalenceStructure(eltype(relation)[], Int[], Vector{Int}[])
@@ -603,7 +555,7 @@ end
 @inline volume(s::HalfEdgeMesh) =
 	sum(dot(u, cross(v, w)) for (u,v,w) in triangles(s))/6
 
-# vertex iterator««2
+# vertex iterator, radial iterator««2
 struct HalfEdgeVertexEdges{H,V}
 	mesh::HalfEdgeMesh{H,V}
 	start::H
@@ -810,7 +762,6 @@ function split_faces!(s::HalfEdgeMesh, fsplit)
 	end
 	radial_loops!(s, edge_loc)
 end
-#
 # concatenate««2
 function concatenate(slist::HalfEdgeMesh...)
 	r = HalfEdgeMesh{halfedge_type(first(slist)),
@@ -1049,17 +1000,15 @@ function subtriangulate!(s::HalfEdgeMesh, ε=0)
 	for icluster in classes(clusters)
 		fcluster = si.faces[icluster]
 		direction = plane(s, si.faces[first(icluster)])[1]
-# 		println("\e[1mtriangulating face cluster $fcluster\e[m")
 
-		allvertices = vcat(view(in_face_v, icluster)...)
-		alledges = vcat(view(in_face_e, icluster)...)
+		# for type-stability, we need empty vectors here:
+		allvertices = vcat(vertex_type(s)[], view(in_face_v, icluster)...)
+		alledges = vcat(NTuple{2,vertex_type(s)}[], view(in_face_e, icluster)...)
 		unique!(sort!(allvertices))
 		unique!(sort!(alledges))
-# 		println(" vertices=$allvertices, edges=$alledges")
 
 		alltriangles = project_and_triangulate(points(s), abs(direction),
 			allvertices, alledges)
-# 		println(" triangles=$alltriangles")
 
 		for i in icluster
 			tri = [ (t[1], t[2], t[3]) for t in alltriangles
@@ -1342,6 +1291,7 @@ function multiplicity(s::HalfEdgeMesh)#««
 	return face_level
 end#»»
 # operations««1
+const _DEFAULT_EPSILON=1/65536
 """
     combine(meshes, μ, ε = 0)
 
@@ -1349,16 +1299,16 @@ Combines all given `meshes` and return a new mesh containing only
 those faces with multiplicity `μ`.
 The parameter `ε` is the precision used for intersection computation.
 """
-function combine(meshes, μ, ε = 0)
+function combine(meshes, μ, ε = _DEFAULT_EPSILON)
 	newmesh = subtriangulate!(concatenate(meshes...), ε)
 	levels = multiplicity(newmesh)
 	select_faces!(newmesh, levels .== μ)
 end
-@inline Base.union(meshes::HalfEdgeMesh...; ε = 0) =
+@inline Base.union(meshes::HalfEdgeMesh...; ε = _DEFAULT_EPSILON) =
 	combine(meshes, 1, ε)
-@inline Base.intersect(meshes::HalfEdgeMesh...; ε = 0) =
+@inline Base.intersect(meshes::HalfEdgeMesh...; ε = _DEFAULT_EPSILON) =
 	combine(meshes, length(meshes), ε)
-@inline Base.setdiff(m1::HalfEdgeMesh, m2::HalfEdgeMesh; ε = 0) =
+@inline Base.setdiff(m1::HalfEdgeMesh, m2::HalfEdgeMesh; ε = _DEFAULT_EPSILON)=
 	combine([m1, reverse(m2)], 2, ε)
 #»»1
 function validate(s::HalfEdgeMesh)
