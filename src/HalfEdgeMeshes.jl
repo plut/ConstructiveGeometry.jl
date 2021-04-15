@@ -459,16 +459,15 @@ end
 	fld1(opposite(s, 3i-1), 3) == j ||
 	fld1(opposite(s, 3i  ), 3) == j
 
-@inline halfedge(s::HalfEdgeMesh, e) =
-	(destination(s, prev(s, e)), destination(s, e))
-@inline opposite_vertex(s::HalfEdgeMesh, e) =
-	destination(s, next(s, e))
+@inline halfedge(s::HalfEdgeMesh, h) =
+	(destination(s, prev(s, h)), destination(s, h))
+@inline opposite_vertex(s::HalfEdgeMesh, h) =
+	destination(s, next(s, h))
 @inline face_edge(s::HalfEdgeMesh, f, j) = halfedge(s, 3*f-3+j)
 @inline face_vertex(s::HalfEdgeMesh, f, j) = destination(s, 3*f-3+j)
-@inline regular_edge(s::HalfEdgeMesh, e) = opposite(s, opposite(s, e)) == e
+@inline regular_edge(s::HalfEdgeMesh, h) = opposite(s, opposite(s, h)) == h
 
-@inline adjacent_face(s::HalfEdgeMesh, f, j) =
-	fld1(opposite(s, 3*f-3+j), 3)
+@inline adjacent_face(s::HalfEdgeMesh, f, j) = fld1(opposite(s, 3*f-3+j), 3)
 @inline adjacent_faces(s::HalfEdgeMesh, f) =
 	map(j->adjacent_face(s, f, j), (1,2,3))
 
@@ -481,8 +480,8 @@ function Base.reverse(s::HalfEdgeMesh)
 	# edgefrom: 3f-2 <-> 3f, and 3f-1 remains in place
 	# destination: 3f-2 in place, 3f-1 ↔ 3f
 	# opposite: 3f-2  in place, 3f-1 ↔ 3f
-	@inline newedgeno(e) = let m = mod(e,3)
-		(m == 1) ? e + 1 : (m == 2) ? e - 1 : e end
+	@inline newedgeno(h) = let m = mod(h,3)
+		(m == 1) ? h + 1 : (m == 2) ? h - 1 : h end
 	for f in 1:nfaces(s)
 		r.destination[3*f  ] = s.destination[3*f-1]
 		r.destination[3*f-1] = s.destination[3*f  ]
@@ -492,8 +491,8 @@ function Base.reverse(s::HalfEdgeMesh)
 		r.opposite[3*f  ] = newedgeno(s.opposite[3*f  ])
 	end
 	for v in 1:nvertices(s)
-		e = s.edgefrom[v]; m = mod(e,3)
-		r.edgefrom[v] = (m == 1) ? e+2 : (m == 2) ? e : e-2
+		h = s.edgefrom[v]; m = mod(h,3)
+		r.edgefrom[v] = (m == 1) ? h+2 : (m == 2) ? h : h-2
 	end
 	return r
 end
@@ -549,14 +548,14 @@ end
 @inline Base.iterate(it::HalfEdgeVertexEdges) =
 	(it.start => destination(it.mesh, it.start), it.start)
 @inline Base.iterate(it::HalfEdgeVertexEdges, s) =
-	let e = next(it.mesh, opposite(it.mesh, s))
-	e == it.start && return nothing
-	return (e => destination(it.mesh, e), e)
+	let h = next(it.mesh, opposite(it.mesh, s))
+	h == it.start && return nothing
+	return (h => destination(it.mesh, h), h)
 end
 Base.IteratorSize(::HalfEdgeVertexEdges) = Base.SizeUnknown()
 function edge(s::HalfEdgeMesh, (v1, v2))
-	for (he, dest) in neighbours(s, v1)
-		dest == v2 && return he
+	for (h, dest) in neighbours(s, v1)
+		dest == v2 && return h
 	end
 	throw(KeyError((v1,v2))); return edgefrom(v1) # type-stability
 end
@@ -565,13 +564,13 @@ struct HalfEdgeRadialIterator{H,V}
 	mesh::HalfEdgeMesh{H,V}
 	start::H
 end
-@inline radial_loop(s::HalfEdgeMesh, e) =
-	HalfEdgeRadialIterator{halfedge_type(s),vertex_type(s)}(s, e)
+@inline radial_loop(s::HalfEdgeMesh, h) =
+	HalfEdgeRadialIterator{halfedge_type(s),vertex_type(s)}(s, h)
 @inline Base.iterate(it::HalfEdgeRadialIterator) = (it.start, it.start)
 function Base.iterate(it::HalfEdgeRadialIterator, s)
-	e = opposite(it.mesh, s)
-	e == it.start && return nothing
-	return (e, e)
+	h = opposite(it.mesh, s)
+	h == it.start && return nothing
+	return (h, h)
 end
 @inline Base.IteratorSize(::HalfEdgeRadialIterator) = Base.SizeUnknown()
 @inline Base.eltype(::HalfEdgeRadialIterator{H,V}) where{H,V} = H
@@ -1033,17 +1032,17 @@ function regular_patches(s::HalfEdgeMesh)
 		while !isempty(todo)
 			current_face = pop!(todo)
 			for k in -2:0
-				e = 3*current_face+k
-				if regular_edge(s, e)
-					next_face = fld1(opposite(s, e), 3)
+				h = 3*current_face+k
+				if regular_edge(s, h)
+					next_face = fld1(opposite(s, h), 3)
 					if iszero(label[next_face])
 						label[next_face] = n
 						push!(todo, next_face)
 					end
 				else # singular edge
-					for e1 in radial_loop(s, e)
+					for e1 in radial_loop(s, h)
 						l = label[fld1(e1,3)]
-						!iszero(l) && (adjacency[l,n] = adjacency[n,l] = e)
+						!iszero(l) && (adjacency[l,n] = adjacency[n,l] = h)
 					end
 				end
 			end
@@ -1080,11 +1079,11 @@ and `0` iff `α` == `β`.
 	return u[1]*v[2]-u[2]*v[1]
 end
 # sort_radial_loop««2
-function sort_radial_loop(s::HalfEdgeMesh, e, pt3 = nothing)
+function sort_radial_loop(s::HalfEdgeMesh, h, pt3 = nothing)
 # used for locate_point:
 # vec3, proj, dir3, dir2scaled, order
 	# prepare geometry information
-	(v1, v2) = halfedge(s, e)
+	(v1, v2) = halfedge(s, h)
 	dir3 = point(s, v2) - point(s, v1)
 	proj = main_axis(dir3)
 	dir2 = project2d(proj, dir3)
@@ -1093,16 +1092,16 @@ function sort_radial_loop(s::HalfEdgeMesh, e, pt3 = nothing)
 	# for each adjacent face, compute a (3d) vector which, together with
 	# the edge, generates the face (and pointing from the edge to the face):
 	# 2d projection of face_vec3 (preserving orientation)
-	he = collect(radial_loop(s, e)) # half-edges
-	ov = [ opposite_vertex(s, e) for e in he ] #opposite vertices
+	hlist = collect(radial_loop(s, h)) # half-edges
+	ov = [ opposite_vertex(s, x) for x in hlist ] #opposite vertices
 	# we could use this to determine edge orientation:
-# 	dv = [ destination(s, e) == v2 for e in he ]
+# 	dv = [ destination(s, h) == v2 for h in hlist ]
 	p1 = point(s, v1)
 	fv = [ point(s, v) - p1 for v in ov ] # face vector
 	# face vector, projected in 2d:
 	fv2= [ project2d(proj, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
-# 	println("edge $e = ($v1,$v2): $dir3 proj=$proj")
-# 	for (e1, x, y, z) in zip(he, ov, fv, fv2)
+# 	println("edge $h = ($v1,$v2): $dir3 proj=$proj")
+# 	for (e1, x, y, z) in zip(hlist, ov, fv, fv2)
 # 		println("# $e1 = $(halfedge(s, e1)): opp.v=$x, fv3=$y, fv2=$z")
 # 	end
 	face_cmp = @closure (i1, i2) -> let b = circular_sign(fv2[i1], fv2[i2])
@@ -1113,22 +1112,22 @@ function sort_radial_loop(s::HalfEdgeMesh, e, pt3 = nothing)
 		# come *before* negative-oriented faces
 		# 2. sort by face number (i.e. decreasing face number for rule 1).
 		# we have as input an alternated list starting with a positive edge:
-		return (-1)^i1*he[i1] < (-1)^i2*he[i2]
+		return (-1)^i1*hlist[i1] < (-1)^i2*hlist[i2]
 		# half-edge number is proportional to face number
 	end
-	reorder = sort(1:length(he), lt=face_cmp)
-	pt3 == nothing && return he[reorder]
+	reorder = sort(1:length(hlist), lt=face_cmp)
+	pt3 == nothing && return hlist[reorder]
 
 	# find where `pt3 - v1` inserts in radial loop:
 	vec3 = pt3 - p1
 	vec2 = project2d(proj, vec3) .- dot(vec3, dir3) .*dir2scaled
-	@assert !all(iszero,vec2) "half-edge $e aligned with point $vec3"
+	@assert !all(iszero,vec2) "half-edge $h aligned with point $vec3"
 	k = searchsorted(fv2[reorder], vec2,
 		lt = (u,v)->circular_sign(u,v) > 0)
 	@assert k.start > k.stop "impossible to determine location at this edge"
 	# possibilities are: (i+1:i) for i in 0..n
-	k.stop == 0 && return he[reorder[end]]
-	return he[reorder[k.stop]]
+	k.stop == 0 && return hlist[reorder[end]]
+	return hlist[reorder[k.stop]]
 end
 # find_good_halfedge««2
 function find_good_halfedge(s::HalfEdgeMesh, i, p)
@@ -1141,22 +1140,22 @@ function find_good_halfedge(s::HalfEdgeMesh, i, p)
 	# in this case we must return j immediately
 	vpi = point(s, i) - p
 	nv = neighbours(s, i)
-	((e, j), state) = iterate(nv)
+	((h, j), state) = iterate(nv)
 	vpj = point(s, j) - p
 	xj = dot(vpi, vpj)
-	iszero(xj) && return e
+	iszero(xj) && return h
 	xyj = (xj*xj, norm²(cross(vpi, vpj)))
-	best = e
+	best = h
 	while true
 		u = iterate(nv, state)
 		u == nothing && return best
-		((e, k), state) = u
+		((h, k), state) = u
 		vpk = point(s, k) - p
 		xk = dot(vpi, vpk)
-		iszero(xk) && return e
+		iszero(xk) && return h
 		xyk = (xk*xk, norm²(cross(vpi, vpk)))
 		if xyk[2]*xyj[1] > xyk[1]*xyj[2]
-			best = e; xyj = xyk
+			best = h; xyj = xyk
 		end
 	end
 	return best
@@ -1177,10 +1176,9 @@ function locate_point(s::HalfEdgeMesh, cc_label, c, p)
 		closest = i; z = z1
 	end
 	# find a good edge from closest vertex
-	e = find_good_halfedge(s, closest, p)
-	f = sort_radial_loop(s, e, p)
-	# f is a half-edge in the radial loop of e
-	return (fld1(f, 3), destination(s, f) ≠ destination(s, e))
+	h = find_good_halfedge(s, closest, p)
+	y = sort_radial_loop(s, h, p) # y is a half-edge in the radial loop of h
+	return (fld1(y, 3), destination(s, y) ≠ destination(s, h))
 end
 # multiplicity ««2
 function multiplicity(s::HalfEdgeMesh)#««
@@ -1197,17 +1195,17 @@ function multiplicity(s::HalfEdgeMesh)#««
 		eindex = rp.adjacency[i1, i2]
 		iszero(eindex) && continue
 		# regular components i and j meet at edge eindex
-		elist = sort_radial_loop(s, eindex)
-		n = length(elist)
+		hlist = sort_radial_loop(s, eindex)
+		n = length(hlist)
 		# plist is the sorted list of regular patches at this edge
 		# dlist is the list of edge orientations
-		plist = rp.label[fld1.(abs.(elist), 3)]
-		dlist = [destination(s, e) for e in elist]
+		plist = rp.label[fld1.(abs.(hlist), 3)]
+		dlist = [destination(s, h) for h in hlist]
 		v2 = destination(s, eindex)
-		e1 = elist[1]; p1 = plist[1]; d1 = dlist[1]
-# 		println("sorted radial loop is $elist")
+		h1 = hlist[1]; p1 = plist[1]; d1 = dlist[1]
+# 		println("sorted radial loop is $hlist")
 		for i in 2:n
-			e2 = elist[i]; p2 = plist[i]; d2 = dlist[i]
+			h2 = hlist[i]; p2 = plist[i]; d2 = dlist[i]
 			# patch p2 is positively oriented iff d2==v2, etc.:
 			# if p1 is positively oriented (d1==v2) then cell between p1 and p2
 			# is 2p1 (otherwise 2p1-1);  if p2 is positively oriented (d2==v2),
@@ -1215,7 +1213,7 @@ function multiplicity(s::HalfEdgeMesh)#««
 # 			union!(cells, 2*p1-(d1≠v2), 2*p2-(d2==v2))
 			k = 1-(d1==v2)-(d2==v2)
 			connect!(levels, p1, p2, k)
-			e1 = e2; p1 = p2; d1 = d2
+			h1 = h2; p1 = p2; d1 = d2
 		end
 		# close the loop by identifying both sides of the last cell
 		# (the level is already computed by the level structure):
@@ -1298,22 +1296,22 @@ end
 #»»1
 function validate(s::HalfEdgeMesh)
 	for (i, j) in pairs(s.opposite)
-		j ∈ keys(s.opposite) || println("edge e$i: opposite = $j, invalid")
-		e = s.opposite[j]
+		j ∈ keys(s.opposite) || println("edge h$i: opposite = $j, invalid")
+		h = s.opposite[j]
 		halfedge(s, j) == reverse(halfedge(s, i)) ||
-		println("edge e$i =$(halfedge(s,i)): opposite e$j = $(halfedge(s,j))")
-# 		e == i || println("edge $i: opposite² = $e")
+		println("edge h$i =$(halfedge(s,i)): opposite h$j = $(halfedge(s,j))")
+# 		h == i || println("edge $i: opposite² = $h")
 	end
-	for (i,e) in pairs(s.edgefrom)
-		j = s.destination[prev(s, e)]
-		j == i || println("vertex $i: edgefrom = $v comes from $j")
+	for (v,h) in pairs(s.edgefrom)
+		j = s.destination[prev(s, h)]
+		j == v || println("vertex $v: edgefrom = $h comes from $j")
 	end
 end
-function explain(s::HalfEdgeMesh, e)
-	opp=opposite(s, e)
-	j=fld1(e, 3)
+function explain(s::HalfEdgeMesh, h)
+	opp=opposite(s, h)
+	j=fld1(h, 3)
 	print("""
-half-edge $e: ->$(destination(s,e)), opp=$opp -> $(destination(s,opp))
+half-edge $h: ->$(destination(s,h)), opp=$opp -> $(destination(s,opp))
   in triangle $j with $(map(i->destination(s,i),(3j-2,3j-1,3j)))
 """)
 end
