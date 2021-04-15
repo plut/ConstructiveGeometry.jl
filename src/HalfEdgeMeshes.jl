@@ -37,7 +37,6 @@ const VertexId = Int
 # magnitude for edges and vertices).
 
 # tools ««1
-@inline norm²(v) = dot(v,v)
 # BBox««2
 struct BBox{P}
 	min::P
@@ -97,6 +96,37 @@ end
 LazyMap{Y}(f, v) where{Y} = LazyMap{Y,typeof(v),typeof(f)}(f, v)
 lazymap(f,v) = LazyMap{Base.return_types(f,Tuple{eltype(v)})[1]}(f, v)
 
+# Geometry««2
+@inline norm²(v) = dot(v,v)
+function main_axis(direction)#««
+	@inbounds (a1, a2, a3) = abs.(direction)
+	if a2 < a1
+		a1 < a3 && @goto max3
+		return direction[1] > 0 ? 1 : -1
+	elseif a2 > a3
+		return direction[2] > 0 ? 2 : -2
+	end; @label max3
+		return direction[3] > 0 ? 3 : -3
+end#»»
+function project2d(axis, vec)#««
+	# orientation-preserving projection:
+	axis == 1 && return (vec[2], vec[3])
+	axis == 2 && return (vec[3], vec[1])
+	axis == 3 && return (vec[1], vec[2])
+	axis ==-1 && return (vec[3], vec[2])
+	axis ==-2 && return (vec[1], vec[3])
+	@assert axis == -3
+	             return (vec[2], vec[1])
+end#»»
+function project1d(axis, vec)#««
+	axis == 1 && return vec[1]
+	axis == 2 && return vec[2]
+	axis == 3 && return vec[3]
+	axis ==-1 && return -vec[1]
+	axis ==-2 && return -vec[2]
+	@assert axis == -3
+	             return -vec[3]
+end#»»
 # equivalence relations««1
 # uniquenames ««2
 """
@@ -337,7 +367,6 @@ struct HalfEdgeMesh{H,V,P}
 	destination::Vector{V}
 	edgefrom::Vector{H} # indexed by VertexId
 	points::Vector{P}
-	plane::Vector{Tuple{Int8,P}} # normalized plane equations
 	# FIXME: convert to structure-of-array?
 end
 
@@ -348,7 +377,6 @@ vertex_type(::Type{<:HalfEdgeMesh{H,V}}) where{H,V,P} = V
 vertex_type(s::HalfEdgeMesh) = vertex_type(typeof(s))
 point_type(::Type{<:HalfEdgeMesh{H,V,P}}) where{H,V,P} = P
 point_type(s::HalfEdgeMesh) = point_type(typeof(s))
-dir_type(::HalfEdgeMesh) = Int8
 
 @inline HalfEdgeMesh{H,V,P}(::UndefInitializer, points, nf::Integer
 	) where{H,V,P} = HalfEdgeMesh{H,V,P}(
@@ -356,65 +384,11 @@ dir_type(::HalfEdgeMesh) = Int8
 	Vector{V}(undef, 3nf),
 	Vector{H}(undef, length(points)),
 	points,
-	Vector{Tuple{Int8,P}}(undef, nf),
 	)
 
 @inline HalfEdgeMesh(::UndefInitializer, points, args...) =
 	HalfEdgeMesh{HalfEdgeId,VertexId,eltype(points)}(undef, points, args...)
 
-function main_axis(direction)#««
-	@inbounds (a1, a2, a3) = abs.(direction)
-	if a2 < a1
-		a1 < a3 && @goto max3
-		return direction[1] > 0 ? 1 : -1
-	elseif a2 > a3
-		return direction[2] > 0 ? 2 : -2
-	end; @label max3
-		return direction[3] > 0 ? 3 : -3
-end#»»
-function project2d(axis, vec)#««
-	# orientation-preserving projection:
-	axis == 1 && return (vec[2], vec[3])
-	axis == 2 && return (vec[3], vec[1])
-	axis == 3 && return (vec[1], vec[2])
-	axis ==-1 && return (vec[3], vec[2])
-	axis ==-2 && return (vec[1], vec[3])
-	@assert axis == -3
-	             return (vec[2], vec[1])
-end#»»
-function project1d(axis, vec)#««
-	axis == 1 && return vec[1]
-	axis == 2 && return vec[2]
-	axis == 3 && return vec[3]
-	axis ==-1 && return -vec[1]
-	axis ==-2 && return -vec[2]
-	@assert axis == -3
-	             return -vec[3]
-end#»»
-function normalized_plane_eq(p1,p2,p3)#««
-	# normalized plane equation through three points
-	direction = cross(p2-p1, p3-p1)
-	@inbounds u1 = direction[1]
-	@inbounds u2 = direction[2]
-	@inbounds u3 = direction[3]
-  @inbounds a1 = abs(u1)
-	@inbounds a2 = abs(u2)
-	@inbounds a3 = abs(u3)
-	P = typeof(p1)
-	if a2 < a1
-		a1 < a3 && @goto max3
-		v = (u2/u1, u3/u1)
-		u1 > 0 && return ( 1, P(v[1], v[2], p1[1]+v[1]*p1[2]+v[2]*p1[3]))
-		          return (-1, P(v[1], v[2], p1[1]+v[1]*p1[2]+v[2]*p1[3]))
-	elseif a2 > a3
-		v = (u1/u2, u3/u2)
-		u2 > 0 && return ( 2, P(v[1], v[2], v[1]*p1[1]+p1[2]+v[2]*p1[3]))
-		          return (-2, P(v[1], v[2], v[1]*p1[1]+p1[2]+v[2]*p1[3]))
-	end; @label max3
-		v = (u1/u3, u2/u3)
-		u3 > 0 && return ( 3, P(v[1], v[2], v[1]*p1[1]+v[2]*p1[2]+p1[3]))
-		          return (-3, P(v[1], v[2], v[1]*p1[1]+v[2]*p1[2]+p1[3]))
-end#»»
 @inline edge_locator(s::HalfEdgeMesh) =
 	SortedDict{NTuple{2,vertex_type(s)},Vector{halfedge_type(s)}}()
 function mark_edge!(s::HalfEdgeMesh, edge_loc, h, v1, v2)#««
@@ -426,7 +400,7 @@ function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)#««
 	mark_edge!(s, edge_loc, 3i-2, v3, v1)
 	mark_edge!(s, edge_loc, 3i-1, v1, v2)
 	mark_edge!(s, edge_loc, 3i  , v2, v3)
-	s.plane[i] = normalized_plane_eq(point(s,v1), point(s,v2), point(s,v3))
+# 	s.plane[i] = normalized_plane_eq(point(s,v1), point(s,v2), point(s,v3))
 end#»»
 function unmark_edge!(s::HalfEdgeMesh, edge_loc, h)
 	l = get(edge_loc, halfedge(s,h), halfedge_type(s)[])
@@ -469,18 +443,16 @@ end
 # simple accessors ««2
 @inline nfaces(s::HalfEdgeMesh) = length(s.opposite) ÷ 3
 @inline nvertices(s::HalfEdgeMesh) = length(s.edgefrom)
-@inline next(::HalfEdgeMesh, n) = n+1 - 3*(n%3==0)
-@inline prev(::HalfEdgeMesh, n) = n-1 + 3*(n%3==1)
-@inline opposite(s::HalfEdgeMesh, e) = s.opposite[e]
-@inline opposite!(s::HalfEdgeMesh, e, x) = s.opposite[e] = x
-@inline destination(s::HalfEdgeMesh, e) = s.destination[e]
-@inline destination!(s::HalfEdgeMesh, e, v) = s.destination[e] = v
+@inline next(::HalfEdgeMesh, h) = h+1 - 3*(h%3==0)
+@inline prev(::HalfEdgeMesh, h) = h-1 + 3*(h%3==1)
+@inline opposite(s::HalfEdgeMesh, h) = s.opposite[h]
+@inline opposite!(s::HalfEdgeMesh, h, x) = s.opposite[h] = x
+@inline destination(s::HalfEdgeMesh, h) = s.destination[h]
+@inline destination!(s::HalfEdgeMesh, h, v) = s.destination[h] = v
 @inline edgefrom(s::HalfEdgeMesh, v) = s.edgefrom[v]
-@inline edgefrom!(s::HalfEdgeMesh, v, e) = s.edgefrom[v] = e
+@inline edgefrom!(s::HalfEdgeMesh, v, h) = s.edgefrom[v] = h
 @inline points(s::HalfEdgeMesh) = s.points
-@inline point(s::HalfEdgeMesh, i) = s.points[i]
-@inline planes(s::HalfEdgeMesh) = s.plane
-@inline plane(s::HalfEdgeMesh, i) = s.plane[i]
+@inline point(s::HalfEdgeMesh, v) = s.points[v]
 
 @inline adjacent_faces(s::HalfEdgeMesh, i, j) =
 	fld1(opposite(s, 3i-2), 3) == j ||
@@ -518,7 +490,6 @@ function Base.reverse(s::HalfEdgeMesh)
 		r.opposite[3*f-2] = newedgeno(s.opposite[3*f-1])
 		r.opposite[3*f-1] = newedgeno(s.opposite[3*f-2])
 		r.opposite[3*f  ] = newedgeno(s.opposite[3*f  ])
-		(d, v) = plane(s, f); r.plane[f] = (-d, v)
 	end
 	for v in 1:nvertices(s)
 		e = s.edgefrom[v]; m = mod(e,3)
@@ -543,15 +514,27 @@ struct HalfEdgeTriangleIterator{H,V,P} <: AbstractVector{NTuple{3,P}}
 	mesh::HalfEdgeMesh{H,V,P}
 end
 
-@inline Base.size(h::HalfEdgeTriangleIterator) = (nfaces(h.mesh),)
-@inline Base.getindex(h::HalfEdgeTriangleIterator, i::Integer) = (
-	point(h.mesh,destination(h.mesh, 3i-2)),
-	point(h.mesh,destination(h.mesh, 3i-1)),
-	point(h.mesh,destination(h.mesh, 3i  )),
+@inline Base.size(it::HalfEdgeTriangleIterator) = (nfaces(it.mesh),)
+@inline Base.getindex(it::HalfEdgeTriangleIterator, i::Integer) = (
+	point(it.mesh,destination(it.mesh, 3i-2)),
+	point(it.mesh,destination(it.mesh, 3i-1)),
+	point(it.mesh,destination(it.mesh, 3i  )),
 	)
 @inline triangles(s::HalfEdgeMesh) =
 	HalfEdgeTriangleIterator{halfedge_type(s),vertex_type(s),point_type(s)}(s)
 @inline triangle(s::HalfEdgeMesh, f) = triangles(s)[f]
+@inline function normal(s::HalfEdgeMesh, f)
+	t = triangle(s, f)
+	return cross(t[2]-t[1], t[3]-t[2])
+end
+@inline main_axis(s::HalfEdgeMesh, f) = main_axis(normal(s, f))
+function normalized_plane(s::HalfEdgeMesh, f)
+	t = triangle(s, f)
+	d = cross(t[2]-t[1], t[3]-t[2])
+	a = main_axis(d)
+	c = @inbounds inv(d[abs(a)])
+	return SA[oftype(c, a), project2d(a, d) .* c..., dot(d, t[1])*c]
+end
 @inline volume(s::HalfEdgeMesh) =
 	sum(dot(u, cross(v, w)) for (u,v,w) in triangles(s))/6
 
@@ -596,9 +579,8 @@ end
 # find coplanar faces««2
 # returns the equivalence relation, as pairs of indices in `flist`:
 function coplanar_faces(s::HalfEdgeMesh, flist, ε = 0)
-	@inline loc((dir, v)) = SA[abs(dir), v...]
 	@inline box(l,ε) = BBox(l, l .+ ε)
-	boxes = [ box(loc(plane(s, f)), ε) for f in flist ]
+	boxes = [ box(normalized_plane(s, f), ε) for f in flist ]
 	return SpatialSorting.intersections(boxes)
 end
 
@@ -622,7 +604,7 @@ end
 function resize_faces!(s::HalfEdgeMesh, nf)
 	resize!(s.opposite, 3nf)
 	resize!(s.destination, 3nf)
-	resize!(s.plane, nf)
+# 	resize!(s.plane, nf)
 	s
 end
 function resize_points!(s::HalfEdgeMesh, nv)
@@ -699,10 +681,10 @@ function select_faces!(s::HalfEdgeMesh, fkept)
 	end
 	vmap = cumsum(vkept)
 	# third step: proceed in renaming everything
-	for i in 1:length(fkept)
-		fkept[i] || continue
-		s.plane[i] = s.plane[fld(emap[3*i], 3)]
-	end
+# 	for i in 1:length(fkept)
+# 		fkept[i] || continue
+# 		s.plane[i] = s.plane[fld(emap[3*i], 3)]
+# 	end
 	for i in 1:nvertices(s)
 		vkept[i] || continue
 		s.edgefrom[vmap[i]] = emap[s.edgefrom[i]]
@@ -731,7 +713,7 @@ function split_faces!(s::HalfEdgeMesh, fsplit)
 	n = nfaces(s)
 	for (f, tri) in fsplit
 		# we don't skip trivial triangulations: they might have singular edges
-# 		length(tri) ≤ 1 && continue # skipped face, or trivial retriangulation
+		length(tri) ≤ 0 && continue # skipped face, or trivial retriangulation
 
 		# before overwriting this face, we save the location of opposed half-edges,
 		(v1,v2,v3) = face(s, f)
@@ -747,6 +729,7 @@ function split_faces!(s::HalfEdgeMesh, fsplit)
 
 		resize_faces!(s, nfaces(s) + length(tri) - 1)
 
+		println("face $f = $((v1,v2,v3)) => $tri")
 		# now iterate over new triangles:
 		((a1,a2,a3), state) = iterate(tri)
 		# mark the new face
@@ -772,19 +755,18 @@ function concatenate(slist::HalfEdgeMesh...)
 	voffset = 0
 	foffset = 0
 	for s in slist
-		(nv, ne, nf) = length(s.edgefrom), length(s.opposite), length(s.plane)
+		(nv, ne) = length(s.edgefrom), length(s.opposite)#, length(s.plane)
 		r.opposite[eoffset+1:eoffset+ne] .= s.opposite .+ eoffset
 		r.destination[eoffset+1:eoffset+ne] .= s.destination .+ voffset
 		r.edgefrom[voffset+1:voffset+nv] .= s.edgefrom .+ eoffset
-		r.plane[foffset+1:foffset+nf] .= s.plane
+# 		r.plane[foffset+1:foffset+nf] .= s.plane
 		eoffset += ne
 		voffset += nv
-		foffset += nf
+# 		foffset += nf
 	end
 	return r
 end
 # self-intersection««1
-# self_intersect««2
 """
     insert_point!(s, etc.)
 
@@ -828,7 +810,7 @@ end
 """
     self_intersect(s)
 
-Returns `(points, in_face, in_edge, singular_edges)` describing the
+Returns `(points, in_face, in_edge)` describing the
 self-intersection graph of `s`.
 """
 function self_intersect(s::HalfEdgeMesh, ε=0)#««
@@ -838,7 +820,6 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 	si = (points=copy(points(s)),
 		in_face = SortedDict{face_type(s),Vector{vertex_type(s)}}(),
 		in_edge=NTuple{3,vertex_type(s)}[],
-		singular_edges=NTuple{2,vertex_type(s)}[],
 		faces = face_type(s)[])
 	# faces will not be renumbered, so it is safe to compute `in_face` now.
 	# on the other hand, `in_edge` is indexed by vertices, so we need to
@@ -860,18 +841,8 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 
 			vindex[i] = idx
 		end
-		# mark singular edges:
-		v1 = vindex[1]
-		for i in 2:length(it)
-			v2 = vindex[i]
-			push!(si.singular_edges, (v1,v2), (v2,v1))
-			v1 = v2
-		end
-		# close loop if needed:
-		length(it) > 2 && push!(si.singular_edges, (v1, vindex[1]), (vindex[1],v1))
 	end
 	unique!(sort!(si.faces))
-	unique!(sort!(si.singular_edges))
 	return si
 end#»»
 # subtriangulation««1
@@ -961,10 +932,13 @@ function subtriangulate!(s::HalfEdgeMesh, ε=0)
 	# insert points in edges
 	in_edge = edge_inserts(s, si.in_edge)
 
-	# determine clusters of coplanar faces:
-	# (only in affected faces)
-	# (using compact type for equivalence structure since O(n) faces...)
+	# determine clusters of coplanar (broken) faces:
 	coplanar_rel = coplanar_faces(s, si.faces, ε)
+	for (i, j) in coplanar_rel
+# 		println("
+# \e[36;1mcoplanar\e[m: f$i=$(face(s,i)): p$(normalized_plane(s,i)), $(triangle(s,i))
+#         ≡ f$j=$(face(s,j)): p$(normalized_plane(s,j)), $(triangle(s,j))")
+	end
 	clusters = equivalence_structure(length(si.faces), coplanar_rel)
 	
 	# compute points by face
@@ -998,8 +972,7 @@ function subtriangulate!(s::HalfEdgeMesh, ε=0)
 		
 	# iterate over all clusters of broken faces
 	for icluster in classes(clusters)
-		fcluster = si.faces[icluster]
-		direction = plane(s, si.faces[first(icluster)])[1]
+		direction = main_axis(s, si.faces[first(icluster)])[1]
 
 		# for type-stability, we need empty vectors here:
 		allvertices = vcat(vertex_type(s)[], view(in_face_v, icluster)...)
@@ -1013,10 +986,22 @@ function subtriangulate!(s::HalfEdgeMesh, ε=0)
 		for i in icluster
 			tri = [ (t[1], t[2], t[3]) for t in alltriangles
 				if issubset(t, in_face_v[i]) ]
-			faces_tri[i] = (plane(s,si.faces[i])[1] > 0) ? tri : reverse.(tri)
+			faces_tri[i] = (main_axis(s,si.faces[i])[1] > 0) ? tri : reverse.(tri)
+			isempty(faces_tri[i]) && println("""
+\e[31mcluster $(si.faces[icluster])\e[m
+	f$([face(s,si.faces[i]) for i in icluster])
+  v$(allvertices)
+  e$(alledges)
+  t$(alltriangles)
+ face $(si.faces[i])=$(face(s,si.faces[i])):
+   v$(in_face_v[i])
+   e$(in_face_e[i])
+   t$(faces_tri[i])
+""")
+ 
 		end
 	end
-	# apply refinement computed above, and get list of singular half-edges
+	# apply refinement computed above
 	split_faces!(s, zip(si.faces, faces_tri))
 	return s
 end

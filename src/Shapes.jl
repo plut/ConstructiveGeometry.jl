@@ -270,12 +270,11 @@ function convolution(p::Path, q::Path)
 end
 p⋆q = convolution(p, q)
 # Minkowski sum#««1
-function minkowski(p, q; fill=:nonzero)
-	r = convolution(p, q)
-	return simplify_paths([r]; fill)
-end
-
-export Path
+# function minkowski(p, q; fill=:nonzero)
+# 	r = convolution(p, q)
+# 	return simplify_paths([r]; fill)
+# end
+# 
 
 # PolygonXor««1
 """
@@ -357,20 +356,23 @@ end
 	PolygonXor{T}(convex_hull([vertices.(shape)...;]))
 
 # Minkowski sum of polygons and their unions ««2
-function minkowski(vp::AbstractVector{<:AbstractVector{<:StaticVector{2}}},
-		vq::AbstractVector{<:AbstractVector{<:StaticVector{2}}}; fill=:nonzero)
-	vr = vec([(convolution(p, q)) for p in vp, q in vq])
-	return simplify_paths(vr; fill)
-end
-function minkowski(p, q)
-	return PolygonXor(minkowski(p, q; fill=:evenodd)...)
-end
-function minkowski(p::PolygonXor, q::PolygonXor)
-	cp = [ coordinates.(vertices(x)) for x in paths(p) ]
-	cq = [ coordinates.(vertices(y)) for y in paths(q) ]
-	return PolygonXor(minkowski(cp, cq, fill=:evenodd)...)
-end
+# function minkowski(vp::AbstractVector{<:AbstractVector{<:StaticVector{2}}},
+# 		vq::AbstractVector{<:AbstractVector{<:StaticVector{2}}}; fill=:nonzero)
+# 	vr = vec([(convolution(p, q)) for p in vp, q in vq])
+# 	return simplify_paths(vr; fill)
+# end
+# function minkowski(p, q)
+# 	return PolygonXor(minkowski(p, q; fill=:evenodd)...)
+# end
+# function minkowski(p::PolygonXor, q::PolygonXor)
+# 	cp = [ coordinates.(vertices(x)) for x in paths(p) ]
+# 	cq = [ coordinates.(vertices(y)) for y in paths(q) ]
+# 	return PolygonXor(minkowski(cp, cq, fill=:evenodd)...)
+# end
 
+# Exports««1
+
+export Path
 export PolygonXor
 end
 

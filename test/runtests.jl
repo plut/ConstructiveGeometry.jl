@@ -2,17 +2,13 @@ using ConstructiveGeometry
 using Test
 using StaticArrays
 using LinearAlgebra
-using ConstructiveGeometry: _FIXED, Vec, Point, Path
-using ConstructiveGeometry: from_clipper, to_clipper
-using ConstructiveGeometry: children, vertices
-using ConstructiveGeometry.SpatialSorting
 
 CG = ConstructiveGeometry
 
 
-function test_from_to(T, x)
-	return @test from_clipper(T, to_clipper(T, x)) == x
-end
+# function test_from_to(T, x)
+# 	return @test from_clipper(T, to_clipper(T, x)) == x
+# end
 
 # @testset "Types" begin #««1
 # @testset "Basic types" begin #««2
@@ -226,8 +222,8 @@ end
 # 		pts(SA[25. 0 0;20 0 -5;15 0 0]), 2)
 # end
 @testset "Surfaces" begin #««1
-using ConstructiveGeometry: Surface, merge, select_faces, mesh
-using ConstructiveGeometry: nvertices, nfaces
+using ConstructiveGeometry: Surface, merge, mesh
+# using ConstructiveGeometry: nvertices, nfaces
 v=[[0,-1],[1,0],[0,1],[-1,0]]
 for j in eachindex(v), i in 1:j-1
 	@test ConstructiveGeometry.circular_lt(v[i], v[j])
