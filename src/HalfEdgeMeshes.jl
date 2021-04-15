@@ -35,17 +35,6 @@ const VertexId = Int
 # The self-intersection of a mesh is generally a curve; hence we expect
 # this self-intersection to involve Θ(√n) faces (and the same order of
 # magnitude for edges and vertices).
-# This has implication on the data structures used for storing this
-# intersection. We first define two types for sparse tables:
-#  - `SparseTable0` for n×n tables with o(n) entries,
-#  - `SparseTable1` for n×n tables with Θ(n) entries.
-# More generally, assuming the matrix has `n` entries,
-# `SparseTable0` has size O(n+q) and acces O(1+q/n),
-# while `SparseTable1` has size O(q) and access O(q/n).
-SparseTable0{K,V} = SortedDict{NTuple{2,K},V}
-SparseTable1{K,V} = SortedDict{NTuple{2,K},V}
-@inline Base.convert(T::Type{<:Union{SparseTable0,SparseTable1}},::Tuple{})=T()
-
 
 # tools ««1
 @inline norm²(v) = dot(v,v)
@@ -225,22 +214,12 @@ function root!(u::LevelStructure)
 	for i in 1:length(u.parent)
 		r = u.parent[i]; l = u.level[i]
 		idx = findkey(minlevel, r)
-		println("findkey($minlevel, $r) = $idx; status $((status((minlevel,idx))))")
 		if status((minlevel, idx)) == 1 # real token
 			m = minlevel[idx]
 			m[2] > l && (minlevel[idx] = (i, l))
 		else # past-end
 			push!(minlevel, r => (i, l))
 		end
-# 		m = get(minlevel, r, nothing)
-# 		if m == nothing
-# 			push!(minlevel, r => (i, l))
-# 		elseif m[2] > l
-# 			minlevel[r] = (i, l)
-# 		end
-# 		if (m == nothing) || (m[2] > l)
-# 			push!(minlevel, r => (i, l))
-# 		end
 	end
 	for i in 1:length(u.parent)
 		r = u.parent[i]; l = u.level[i]; m = minlevel[r]
@@ -489,11 +468,9 @@ end#»»
 function mark_edge!(s::HalfEdgeMesh, edge_loc, h, v1, v2)#««
 	destination!(s, h, v2)
 	edgefrom!(s, v1, h)
-	issubset((1,11),(v1,v2)) && println("\e[1mmark_edge!($h, $v1, $v2)\e[m")
 	push_entry!(edge_loc, (v1,v2), h)
 end#»»
 function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)#««
-	println("make triangle f$i = (v$v1, v$v2, v$v3)")
 	mark_edge!(s, edge_loc, 3i-2, v3, v1)
 	mark_edge!(s, edge_loc, 3i-1, v1, v2)
 	mark_edge!(s, edge_loc, 3i  , v2, v3)
@@ -501,7 +478,6 @@ function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)#««
 end#»»
 function unmark_edge!(s::HalfEdgeMesh, edge_loc, h)
 	l = get(edge_loc, halfedge(s,h), halfedge_type(s)[])
-	issubset((1,11),halfedge(s,h)) && println("\e[31;1munmark_edge!($h, $(halfedge(s,h))): $l\e[m")
 	filter!(≠(h), l)
 end
 function radial_loops!(s::HalfEdgeMesh, edge_loc)
@@ -511,9 +487,9 @@ function radial_loops!(s::HalfEdgeMesh, edge_loc)
 		hlist2 = edge_loc[reverse(e)]
 		unique!(sort!(hlist1))
 		unique!(sort!(hlist2))
-		println("e$e: +h$hlist1 -h$hlist2")
-		for h in hlist1; println(" +h$h=$(halfedge(s,h))"); end
-		for h in hlist2; println(" -h$h=$(halfedge(s,h))"); end
+# 		println("e$e: +h$hlist1 -h$hlist2")
+# 		for h in hlist1; println(" +h$h=$(halfedge(s,h))"); end
+# 		for h in hlist2; println(" -h$h=$(halfedge(s,h))"); end
 		@assert length(hlist1) == length(hlist2)
 		for i in 1:length(hlist1)-1
 			opposite!(s, hlist1[i], hlist2[i])
@@ -624,6 +600,8 @@ end
 @inline triangles(s::HalfEdgeMesh) =
 	HalfEdgeTriangleIterator{halfedge_type(s),vertex_type(s),point_type(s)}(s)
 @inline triangle(s::HalfEdgeMesh, f) = triangles(s)[f]
+@inline volume(s::HalfEdgeMesh) =
+	sum(dot(u, cross(v, w)) for (u,v,w) in triangles(s))/6
 
 # vertex iterator««2
 struct HalfEdgeVertexEdges{H,V}
@@ -688,27 +666,7 @@ function opposite_faces(s::HalfEdgeMesh)
 	end
 	return r
 end
-# structure extension««2
-function concatenate(slist::HalfEdgeMesh...)
-	r = HalfEdgeMesh{halfedge_type(first(slist)),
-		vertex_type(first(slist)),point_type(first(slist))}(undef,
-		vcat(points.(slist)...),
-		sum(nfaces.(slist)))
-	eoffset = 0
-	voffset = 0
-	foffset = 0
-	for s in slist
-		(nv, ne, nf) = length(s.edgefrom), length(s.opposite), length(s.plane)
-		r.opposite[eoffset+1:eoffset+ne] .= s.opposite .+ eoffset
-		r.destination[eoffset+1:eoffset+ne] .= s.destination .+ voffset
-		r.edgefrom[voffset+1:voffset+nv] .= s.edgefrom .+ eoffset
-		r.plane[foffset+1:foffset+nf] .= s.plane
-		eoffset += ne
-		voffset += nv
-		foffset += nf
-	end
-	return r
-end
+# change points««2
 function resize_faces!(s::HalfEdgeMesh, nf)
 	resize!(s.opposite, 3nf)
 	resize!(s.destination, 3nf)
@@ -720,8 +678,6 @@ function resize_points!(s::HalfEdgeMesh, nv)
 	resize!(s.edgefrom, nv)
 	s
 end
-# change points««2
-
 function points!(s::HalfEdgeMesh, newpoints, ε = 0)
 	n = length(newpoints)
 	vmap = Vector{Int}(undef, n)
@@ -810,18 +766,14 @@ function select_faces!(s::HalfEdgeMesh, fkept)
 	return s
 end
 
-# split faces!««2
+# split_faces!««2
 """
     split_faces
 
 Replaces faces in `s`, as indicated by iterator `fsplit`
 (as (face number) => (replacement triangles)).
-Singular edges (indicated as pairs of vertices) are ignored
-(opposite value is undefined),
-and a correspondingly sorted list of singular half-edges is returned.
 """
 function split_faces!(s::HalfEdgeMesh, fsplit)
-	# localize new edges only — this is O(√n), hence SparseTable0:
 	edge_loc = edge_locator(s)
 	# n is number of face being written
 	n = nfaces(s)
@@ -831,7 +783,6 @@ function split_faces!(s::HalfEdgeMesh, fsplit)
 
 		# before overwriting this face, we save the location of opposed half-edges,
 		(v1,v2,v3) = face(s, f)
-		println("save opposites for ($v1, $v2, $v3)")
 		h = opposite(s, 3*f-2)
 		halfedge(s, h) == (v1,v3) && mark_edge!(s, edge_loc, h, v1, v3)
 		h = opposite(s, 3*f-1)
@@ -860,6 +811,27 @@ function split_faces!(s::HalfEdgeMesh, fsplit)
 	radial_loops!(s, edge_loc)
 end
 #
+# concatenate««2
+function concatenate(slist::HalfEdgeMesh...)
+	r = HalfEdgeMesh{halfedge_type(first(slist)),
+		vertex_type(first(slist)),point_type(first(slist))}(undef,
+		vcat(points.(slist)...),
+		sum(nfaces.(slist)))
+	eoffset = 0
+	voffset = 0
+	foffset = 0
+	for s in slist
+		(nv, ne, nf) = length(s.edgefrom), length(s.opposite), length(s.plane)
+		r.opposite[eoffset+1:eoffset+ne] .= s.opposite .+ eoffset
+		r.destination[eoffset+1:eoffset+ne] .= s.destination .+ voffset
+		r.edgefrom[voffset+1:voffset+nv] .= s.edgefrom .+ eoffset
+		r.plane[foffset+1:foffset+nf] .= s.plane
+		eoffset += ne
+		voffset += nv
+		foffset += nf
+	end
+	return r
+end
 # self-intersection««1
 # self_intersect««2
 """
@@ -910,8 +882,6 @@ self-intersection graph of `s`.
 """
 function self_intersect(s::HalfEdgeMesh, ε=0)#««
 	T = eltype(point_type(s))
-# 	edge_points = [ Int[] for _ in edges(s) ]
-# 	edge_coords = [ T[] for _ in edges(s) ]
 
 	boxes = [ boundingbox(t...) for t in triangles(s) ]
 	si = (points=copy(points(s)),
@@ -965,7 +935,6 @@ function project_and_triangulate(points, direction, vlist, elist)
 	else @assert direction ==-3; d = [2,1]
 	end
 	vmat = Matrix{Float64}(undef, length(vlist), 2)
-	println("direction=$direction, d=$d, vlist=$vlist, $(length(points))")
 	vmat[:,1] .= (points[v][d[1]] for v in vlist)
 	vmat[:,2] .= (points[v][d[2]] for v in vlist)
 
@@ -973,37 +942,29 @@ function project_and_triangulate(points, direction, vlist, elist)
 	emat[:,1] .= collect(e[1] for e in elist)
 	emat[:,2] .= collect(e[2] for e in elist)
 # 	println("triangulate: $vmat $vlist $emat")
+
+#=
+plot '/tmp/a' index 0 u 1:2 w p pt 5, '' index 1 u 1:2:3:4:0 w vectors lc palette lw 3, '' index 0 u 1:2:3 w labels font "bold,14"
+=#
+# 	for (i, v) in pairs(vlist)
+# 		println("$(vmat[i,1])\t$(vmat[i,2])\t$v")
+# 	end
+# 	println("\n\n")
+# 	for i in 1:size(emat,1)
+# 		v1 = findfirst(==(emat[i,1]), vlist)
+# 		v2 = findfirst(==(emat[i,2]), vlist)
+# 		println("$(vmat[v1,1])\t$(vmat[v1,2])\t$(vmat[v2,1]-vmat[v1,1])\t$(vmat[v2,2]-vmat[v1,2])")
+# 	end
+# 	println("\n\n")
 	return LibTriangle.constrained_triangulation(vmat, vlist, emat)
-
-end
-
-"""
-    triangles_in
-
-Returns those triangles in `triangulation` (as triple of vertices)
-which have all their vertices in (sorted list) `vlist`.
-"""
-function triangles_in(triangulation, vlist)
-	ret = NTuple{3,eltype(eltype(triangulation))}[]
-	for tri in triangulation
-		isempty(searchsorted(vlist, tri[1])) && continue
-		isempty(searchsorted(vlist, tri[2])) && continue
-		isempty(searchsorted(vlist, tri[3])) && continue
-		push!(ret, (tri[1],tri[2],tri[3]))
-	end
-	return ret
 end
 
 # subtriangulate««2
-# reads a list of triplets (e..., v), inserting vertex v in edge e
-# and returns a list of (e => [v1, …, vn]), sorted in the same direction
-# as the edge
 function edge_inserts(s, in_edge)
 	sort!(in_edge) # this has the effect of grouping points by edge
 	start = 1
 	V = eltype(eltype(in_edge))
 	inserts = (k = NTuple{2,V}[], v = Vector{V}[])
-# 	inserts = Pair{NTuple{2,V},Vector{V}}[]
 	while start <= length(in_edge)
 		# group by in_edge
 		stop = start
@@ -1029,17 +990,14 @@ function edge_inserts(s, in_edge)
 		end
 
 		push!(inserts.k, (v1,v2)); push!(inserts.v, vlist)
-# 		push!(inserts, (v1,v2) => vlist)
 		start = stop
 	end
 	return inserts
 end
 function subtriangulate!(s::HalfEdgeMesh, ε=0)
-	println("subtriangulate!(v=$(nvertices(s)), f=$(nfaces(s)))")
 	si = self_intersect(s, ε)
 	# first renumber points, removing duplicates, including in self-intersect:
 	vmap = points!(s, si.points, ε)
-	println("vmap=", vmap, " max=", maximum(vmap), " pts=", nvertices(s))
 	explain(s, "/tmp/x.scad", scale=30)
 
 	for i in eachindex(si.in_edge)
@@ -1048,7 +1006,6 @@ function subtriangulate!(s::HalfEdgeMesh, ε=0)
 	unique!(sort!(si.in_edge))
 	for i in eachindex(si.in_face)
 		si.in_face[i] = map(x->vmap[x], si.in_face[i])
-		println("in_face[$i] = $(si.in_face[i])")
 	end
 	# insert points in edges
 	in_edge = edge_inserts(s, si.in_edge)
@@ -1092,23 +1049,22 @@ function subtriangulate!(s::HalfEdgeMesh, ε=0)
 	for icluster in classes(clusters)
 		fcluster = si.faces[icluster]
 		direction = plane(s, si.faces[first(icluster)])[1]
-		println("\e[1mtriangulating face cluster $fcluster\e[m")
+# 		println("\e[1mtriangulating face cluster $fcluster\e[m")
 
 		allvertices = vcat(view(in_face_v, icluster)...)
 		alledges = vcat(view(in_face_e, icluster)...)
 		unique!(sort!(allvertices))
 		unique!(sort!(alledges))
-		println(" vertices=$allvertices, edges=$alledges")
+# 		println(" vertices=$allvertices, edges=$alledges")
 
 		alltriangles = project_and_triangulate(points(s), abs(direction),
 			allvertices, alledges)
-		println(" triangles=$alltriangles")
+# 		println(" triangles=$alltriangles")
 
 		for i in icluster
-			tri = triangles_in(alltriangles, in_face_v[i])
+			tri = [ (t[1], t[2], t[3]) for t in alltriangles
+				if issubset(t, in_face_v[i]) ]
 			faces_tri[i] = (plane(s,si.faces[i])[1] > 0) ? tri : reverse.(tri)
-			issubset((1,11), in_face_v[i]) &&
-			println("\e[34mf$(si.faces[i])=v$(face(s,si.faces[i])) d$(sign(plane(s,si.faces[i])[1])):\n  v$(in_face_v[i])\n  e$(in_face_e[i])\n  t$(faces_tri[i])\e[m")
 		end
 	end
 	# apply refinement computed above, and get list of singular half-edges
@@ -1396,7 +1352,6 @@ The parameter `ε` is the precision used for intersection computation.
 function combine(meshes, μ, ε = 0)
 	newmesh = subtriangulate!(concatenate(meshes...), ε)
 	levels = multiplicity(newmesh)
-	println("newmesh: faces=$(collect(pairs(faces(newmesh)))) levels=$(collect(pairs(levels)))")
 	select_faces!(newmesh, levels .== μ)
 end
 @inline Base.union(meshes::HalfEdgeMesh...; ε = 0) =
