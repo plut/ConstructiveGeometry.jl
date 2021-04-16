@@ -1,11 +1,11 @@
 # Split of module
  - **2d subsystem**
-  - interface via simple `Vector{SVector{2}}` objects and short list of
+  - [x] interface via simple `Vector{SVector{2}}` objects and short list of
 		functions
-   - maybe even better, interface as parametric types
-  - rename `PolygonXor`? `PolygonalShape`?
+  - [ ] maybe even better, interface as parametric types
+   rename `PolygonXor`? `PolygonalShape`?
  - **3d subsystem**
-  - interface via `HalfEdgeMesh` and short list of functions
+  - [x] interface via `HalfEdgeMesh` and short list of functions
  - **Definitions of geometric objects**
   - [x] _2d primitives_: circle, square, polygon
   - _3d primitives_: sphere, cube, cylinder, surface (?)
@@ -25,6 +25,10 @@
  - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document
  operators: LeftBack, LeftFront, RightBack, RightFront, Source, Target,
  Left, Right; Point, Edge
+ - [ ] write generic functions for face deletion/insertion in
+	 HalfEdgeMesh, and use that for (a) mesh construction, (b)
+	 subtriangulation, (c) simplification (retriangulate faces, removing
+	 vertices).
  - [x] write set of tests for 2d subsystem: number of vertices and paths
 	 for known shapes, etc.
  - [x] group together what belongs to `Square`, etc. (in particular,
@@ -34,7 +38,7 @@
  - [x] document the changes
  - [x] convert Polygon{Int} to Polygon{Float}
  - [?] clean the type system once and for all:
-  - [x] suggestion: leat `AbstractGeometry` objects have a mess of types
+  - [x] suggestion: let `AbstractGeometry` objects have a mess of types
 		if they so want,
   - [x] and only decide on a coord. type at meshing type (as a parameter).
 	- [ ] take advantage to allow exact (rational) arithmetic
@@ -56,7 +60,6 @@
  - [ ] Minkowski sum in 2d
    - [ ] and Minkowski difference
  - [x] clear meshing parameter propagation
- - [x] `Region`: finish 2d subsystem
  - [x] what to do for polygons with holes? find a representation that
 	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
 	 possibilities include:
@@ -91,15 +94,11 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
 	 - this is simplest (it works as a xor polygon, whereas converting any
 		 xor to this is harder)
  - [x] reorganize inside the file
- - [?] split in several files after all (will help in `include()` time)?
  - [ ] 3d => 2d projection
  - [ ] 3d => 2d intersection with plane
  - [x] a common name for meshing objects => **mesh**
  - [x] check using vs. import
- - [x] replace `triangulate_between` by an actual Triangulate call
-  - [x] likely not possible (these are 3d points in general)
  - [x] write a few examples
- - [x] test suite
  - [x] fix `Offset` for polygon xor
  - [x] choose a correct value for `Clipper` precision
  - [x] check that `convex_hull` works

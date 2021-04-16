@@ -241,7 +241,7 @@ function root!(u::LevelStructure)
 	return u
 end
 
-# level[i2] = level[i1] + δ
+# sets level[i2] = level[i1] + δ
 function connect!(u::LevelStructure, i1, i2, δ)
 	(r1, d1) = root_and_level(u, i1) # l(i1) = l(r1) + d1
 	(r2, d2) = root_and_level(u, i2) # l(i2) = l(r2) + d2
@@ -249,7 +249,26 @@ function connect!(u::LevelStructure, i1, i2, δ)
 	# l(r2) + d2 = l(r1) + d1 + δ
 	# l(r2) = l(r1) + d1 - d2 + δ
 	if r1 == r2
-		@assert d2 == d1 + δ "connect($i1, $i2, $δ): faces are already connected and multiplicity should be $(d1+δ) (it is $d2). Faces are likely crossed around an edge."
+		if d2 ≠ d1 + δ
+			str="connect($i1, $i2, $δ): faces are already connected and multiplicity should be $(d1+δ) (it is $d2). Faces are likely crossed around an edge."
+			l = 0; i =i1
+			str*="\n path for $i1:"
+			while true
+				str*="\n   ($i, level $l) parent[$i]=$(u.parent[i]), level[$i]=$(u.level[i])"
+				j = u.parent[i]; l+= u.level[i]
+				i == j && break
+				i = j
+			end
+			l = 0; i =i2
+			str*="\n path for $i2:"
+			while true
+				str*="\n   ($i, level $l) parent[$i]=$(u.parent[i]), level[$i]=$(u.level[i])"
+				j = u.parent[i]; l+= u.level[i]
+				i == j && break
+				i = j
+			end
+			@assert d2==d1+δ str
+		end
 		return
 	end
 	if u.treesize[r1] < u.treesize[r2]
@@ -257,7 +276,7 @@ function connect!(u::LevelStructure, i1, i2, δ)
 		u.level[r1] = d2 - d1 -δ
 	else
 		u.parent[r2] = u.parent[r1]; u.treesize[r1]+= u.treesize[r2]
-		u.level[r2] = d1 + d2 + δ
+		u.level[r2] = d1 - d2 + δ
 	end
 	return u
 end
@@ -400,7 +419,6 @@ function mark_face!(s::HalfEdgeMesh, edge_loc, i, v1, v2, v3)#««
 	mark_edge!(s, edge_loc, 3i-2, v3, v1)
 	mark_edge!(s, edge_loc, 3i-1, v1, v2)
 	mark_edge!(s, edge_loc, 3i  , v2, v3)
-# 	s.plane[i] = normalized_plane_eq(point(s,v1), point(s,v2), point(s,v3))
 end#»»
 function unmark_edge!(s::HalfEdgeMesh, edge_loc, h)
 	l = get(edge_loc, halfedge(s,h), halfedge_type(s)[])
@@ -603,7 +621,6 @@ end
 function resize_faces!(s::HalfEdgeMesh, nf)
 	resize!(s.opposite, 3nf)
 	resize!(s.destination, 3nf)
-# 	resize!(s.plane, nf)
 	s
 end
 function resize_points!(s::HalfEdgeMesh, nv)
@@ -680,10 +697,6 @@ function select_faces!(s::HalfEdgeMesh, fkept)
 	end
 	vmap = cumsum(vkept)
 	# third step: proceed in renaming everything
-# 	for i in 1:length(fkept)
-# 		fkept[i] || continue
-# 		s.plane[i] = s.plane[fld(emap[3*i], 3)]
-# 	end
 	for i in 1:nvertices(s)
 		vkept[i] || continue
 		s.edgefrom[vmap[i]] = emap[s.edgefrom[i]]
@@ -728,7 +741,7 @@ function split_faces!(s::HalfEdgeMesh, fsplit)
 
 		resize_faces!(s, nfaces(s) + length(tri) - 1)
 
-		println("face $f = $((v1,v2,v3)) => $tri")
+# 		println("face $f = $((v1,v2,v3)) => $tri")
 		# now iterate over new triangles:
 		((a1,a2,a3), state) = iterate(tri)
 		# mark the new face
@@ -754,14 +767,12 @@ function concatenate(slist::HalfEdgeMesh...)
 	voffset = 0
 	foffset = 0
 	for s in slist
-		(nv, ne) = length(s.edgefrom), length(s.opposite)#, length(s.plane)
+		(nv, ne) = length(s.edgefrom), length(s.opposite)
 		r.opposite[eoffset+1:eoffset+ne] .= s.opposite .+ eoffset
 		r.destination[eoffset+1:eoffset+ne] .= s.destination .+ voffset
 		r.edgefrom[voffset+1:voffset+nv] .= s.edgefrom .+ eoffset
-# 		r.plane[foffset+1:foffset+nf] .= s.plane
 		eoffset += ne
 		voffset += nv
-# 		foffset += nf
 	end
 	return r
 end
@@ -809,7 +820,7 @@ end
 """
     self_intersect(s)
 
-Returns `(points, in_face, in_edge)` describing the
+Returns `(points, in_face, in_edge, faces)` describing the
 self-intersection graph of `s`.
 """
 function self_intersect(s::HalfEdgeMesh, ε=0)#««
@@ -820,13 +831,9 @@ function self_intersect(s::HalfEdgeMesh, ε=0)#««
 		in_face = SortedDict{face_type(s),Vector{vertex_type(s)}}(),
 		in_edge=NTuple{3,vertex_type(s)}[],
 		faces = face_type(s)[])
-	# faces will not be renumbered, so it is safe to compute `in_face` now.
-	# on the other hand, `in_edge` is indexed by vertices, so we need to
-	# store now the work to be done later:
 
 	for (f1, f2) in SpatialSorting.intersections(boxes)
 		adjacent_faces(s, f1, f2) && continue
-		# this can fail only for a flat triangle:
 		it = TriangleIntersections.inter(triangle(s, f1), triangle(s, f2), ε)
 		isempty(it) && continue
 		
@@ -1085,8 +1092,8 @@ function sort_radial_loop(s::HalfEdgeMesh, h, pt3 = nothing)
 	# prepare geometry information
 	(v1, v2) = halfedge(s, h)
 	dir3 = point(s, v2) - point(s, v1)
-	proj = main_axis(dir3)
-	dir2 = project2d(proj, dir3)
+	axis = main_axis(dir3)
+	dir2 = project2d(axis, dir3)
 	dir2scaled = dir2 ./dot(dir3, dir3)
 	# collect half-edges and corresponding opposed vertices
 	# for each adjacent face, compute a (3d) vector which, together with
@@ -1099,11 +1106,11 @@ function sort_radial_loop(s::HalfEdgeMesh, h, pt3 = nothing)
 	p1 = point(s, v1)
 	fv = [ point(s, v) - p1 for v in ov ] # face vector
 	# face vector, projected in 2d:
-	fv2= [ project2d(proj, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
-# 	println("edge $h = ($v1,$v2): $dir3 proj=$proj")
-# 	for (e1, x, y, z) in zip(hlist, ov, fv, fv2)
-# 		println("# $e1 = $(halfedge(s, e1)): opp.v=$x, fv3=$y, fv2=$z")
-# 	end
+	fv2= [ project2d(axis, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
+	println("edge h$h = (v$v1,v$v2): $dir3 axis $axis")
+	for (e1, x, y, z) in zip(hlist, ov, fv, fv2)
+		println("# $e1 = $(halfedge(s, e1)): opp.v=$x, fv3=$y, fv2=$z")
+	end
 	face_cmp = @closure (i1, i2) -> let b = circular_sign(fv2[i1], fv2[i2])
 		!iszero(b) && return (b > 0)
 		# we want a consistent ordering between coincident faces.
@@ -1120,7 +1127,7 @@ function sort_radial_loop(s::HalfEdgeMesh, h, pt3 = nothing)
 
 	# find where `pt3 - v1` inserts in radial loop:
 	vec3 = pt3 - p1
-	vec2 = project2d(proj, vec3) .- dot(vec3, dir3) .*dir2scaled
+	vec2 = project2d(axis, vec3) .- dot(vec3, dir3) .*dir2scaled
 	@assert !all(iszero,vec2) "half-edge $h aligned with point $vec3"
 	k = searchsorted(fv2[reorder], vec2,
 		lt = (u,v)->circular_sign(u,v) > 0)
@@ -1203,7 +1210,10 @@ function multiplicity(s::HalfEdgeMesh)#««
 		dlist = [destination(s, h) for h in hlist]
 		v2 = destination(s, eindex)
 		h1 = hlist[1]; p1 = plist[1]; d1 = dlist[1]
-# 		println("sorted radial loop is $hlist")
+		println("sorted radial loop is $hlist")
+		for i in 1:n
+			println("  h$(hlist[i]) to v$(dlist[i]):   f$(face(s, fld1(hlist[i],3))) p$(plist[i])")
+		end
 		for i in 2:n
 			h2 = hlist[i]; p2 = plist[i]; d2 = dlist[i]
 			# patch p2 is positively oriented iff d2==v2, etc.:
