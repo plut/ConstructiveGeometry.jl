@@ -1,7 +1,7 @@
 # Split of module
  - **2d subsystem**
   - [x] interface via simple `Vector{SVector{2}}` objects and short list of
-		functions
+    functions
   - [ ] maybe even better, interface as parametric types
    rename `PolygonXor`? `PolygonalShape`?
  - **3d subsystem**
@@ -11,7 +11,7 @@
   - _3d primitives_: sphere, cube, cylinder, surface (?)
   - Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
-	 - simplicity vs. efficiency?
+   - simplicity vs. efficiency?
   - _Geometry transforms_: invertible affine transform, projection,
    linear extrusion, rotational extrusion
   - _Non-geometry transforms_: `set_parameters`, color
@@ -19,37 +19,51 @@
  - **Syntactic sugar**
  - **Import/export**
   - SCAD
-	- STL
+  - STL
  - **Visualization** (TODO)
 # For version 0.2 (performance update)
+ # corner table http://graphics.stanford.edu/courses/cs468-12-spring/LectureSlides/02_Mesh_Data_Structures.pdf
  - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document
  operators: LeftBack, LeftFront, RightBack, RightFront, Source, Target,
  Left, Right; Point, Edge
  - [ ] write generic functions for face deletion/insertion in
-	 HalfEdgeMesh, and use that for (a) mesh construction, (b)
-	 subtriangulation, (c) simplification (retriangulate faces, removing
-	 vertices).
+   HalfEdgeMesh, and use that for (a) mesh construction, (b)
+   subtriangulation, (c) simplification (retriangulate faces, removing
+   vertices).
+ - [ ] use a singular half-edge data structure such as:
+ https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.11.4605&rep=rep1&type=pdf
+  additions to structure:
+  - if half-edge is a boundary: opposite = 0
+ (and in that case, a simple algorithm finds the next/prev in boundary)
+  - if half-edge is singular: opposite < 0
+ (and actually points to next in radial loop)
+  - singular vertices (e.g. bowtie) now need one separate edgefrom for
+    each regular cone (the first one in trig. order; next ones can be
+    found by walking the shape)
+  - if vertex is singular: edgefrom < 0 (points to a cone structure)
+  - cone structure points to next cone at this vertex + first
+    half-edge in this cone + vertex number
  - [x] write set of tests for 2d subsystem: number of vertices and paths
-	 for known shapes, etc.
+   for known shapes, etc.
  - [x] group together what belongs to `Square`, etc. (in particular,
-	 include "scad.jl" at the top instead of bottom)
+   include "scad.jl" at the top instead of bottom)
  - [x] use some form of explicit representation for edges
-	 - [x] may as well use half-edge structure while we're at it
+   - [x] may as well use half-edge structure while we're at it
  - [x] document the changes
  - [x] convert Polygon{Int} to Polygon{Float}
  - [?] clean the type system once and for all:
   - [x] suggestion: let `AbstractGeometry` objects have a mess of types
-		if they so want,
+    if they so want,
   - [x] and only decide on a coord. type at meshing type (as a parameter).
-	- [ ] take advantage to allow exact (rational) arithmetic
+  - [ ] take advantage to allow exact (rational) arithmetic
  - [?] split in several packages:
   - [ ] `AbstractGeometry`: remove stale `Meshes` dependency
-	- [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
-	- [x] `AABBTree` -> `SpatialSorting` + `TriangleIntersections`
-	- [x] `Meshing` -> `HalfEdgeMeshes`
+  - [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
+  - [x] `AABBTree` -> `SpatialSorting` + `TriangleIntersections`
+  - [x] `Meshing` -> `HalfEdgeMeshes`
  - [x] implement ZGZJ's cluster triangulation to prevent crossing faces
   - [x] “thicken” faces (and edges) wrt intersection (i.e. add small,
-		well-defined tolerance). As a parameter in `set_parameters`?
+    well-defined tolerance). As a parameter in `set_parameters`?
  - [x] fix difference of two touching solids (e.g. noodle extrusion):
  inclusion (as defined on connected components) does not work in this
  case
@@ -61,8 +75,8 @@
    - [ ] and Minkowski difference
  - [x] clear meshing parameter propagation
  - [x] what to do for polygons with holes? find a representation that
-	 must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
-	 possibilities include:
+   must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
+   possibilities include:
 
 |           | U(poly with hole) | (polys) + (holes) | xor list         |
 |-----------|-------------------|-------------------|------------------|
@@ -84,15 +98,15 @@ Same hardness for ⋃(poly+hole) and (polys)+(holes).
 
 Extrude of ⋃(p+h): triangulate faces and build manually.
 
-	  1. union of polygon with holes: trivial to convert
-		(2) list of polys + list of holes,
-		(3) flat xor of polygons]
+    1. union of polygon with holes: trivial to convert
+    (2) list of polys + list of holes,
+    (3) flat xor of polygons]
    - [ ] xor is doable for extrusions but might be harder to convert to
-		 openscad
+     openscad
    - [ ] look in `Makie`
-	 - in `BasicGeometry`: a list of polygons + list of holes
-	 - this is simplest (it works as a xor polygon, whereas converting any
-		 xor to this is harder)
+   - in `BasicGeometry`: a list of polygons + list of holes
+   - this is simplest (it works as a xor polygon, whereas converting any
+     xor to this is harder)
  - [x] reorganize inside the file
  - [ ] 3d => 2d projection
  - [ ] 3d => 2d intersection with plane
@@ -124,20 +138,20 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [x] simple base types (`Point` is good; has basic operations + rand)
  - [ ] `GeometryBasics.jl`:
    - [ ] a bit more basic algorithms (meshing of spheres, cylinders?)
-	   - only very basic stuff
+     - only very basic stuff
    - [ ] `MeshIO.jl` works with `GeometryBasics`
    - [ ] `Point` is bad
    - [ ] mesh types are awfully long and depend on bad `Point` type
 # Basic types
  - [ ] use abstract types wherever possible
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
-	 types
-	  [ ] probably requires making `Vec` a separate type from `SArray`
-		(to avoid piracy)
+   types
+    [ ] probably requires making `Vec` a separate type from `SArray`
+    (to avoid piracy)
  - [x] add a `symmetry` parameter for circles
    - [ ] (and spheres?)
  - [ ] clarify `Path`: maybe add `points` iterator and `matrix` abstract
-	 conversion. Or make `Path` an actual struct type and add accessors.
+   conversion. Or make `Path` an actual struct type and add accessors.
  - [ ] this needs a plane object type (which could be the image by a 2x3
    multmatrix of `:full`), for intersections etc.
  - [ ] think of using `LabelledArrays.jl` (`SLArray`) as an alternative to
@@ -155,8 +169,8 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    and `project()` (or `cut()`).
    It would also allow, say, convex hull with a translated 2d object.
  - [ ] before deciding what *“should”* be done, write a set of examples of
-	 **what it should do** (for various operations, e.g. linear maps,
-	 Minkowski, hull) and then decide how to best implement this behavior
+   **what it should do** (for various operations, e.g. linear maps,
+   Minkowski, hull) and then decide how to best implement this behavior
  - [ ] Objects should really have *two* dimensions: intrinsic and embedding.
  E.g. a `square(1)` has dimensions `(2,2)`, while its translation by
  `[0,0,1]` has dimensions `(2,3)` and an embedding given by the
@@ -168,7 +182,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
 # Primitives
  - [ ] decide whether primitives always have origin=0
    - this is probably simpler for generating points (translating later)
-	 - and transparent for the user: the constructor can do the translation
+   - and transparent for the user: the constructor can do the translation
  - [x] add trivial types for EmptyUnion and EmptyIntersect
  - [?] decide whether to use Square or square as a name
  suggestion: `Square` is the raw constructor;
@@ -184,15 +198,15 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] using `:` for transforms is very tempting:
 ```
    color(red):
-	 translate([-1,1,1-]):
-	 square(3)
+   translate([-1,1,1-]):
+   square(3)
 ```
  - [ ] find something like OpenSCAD' # ! % operators.
   - [ ] integer%solid (with various highlight colors)
   - [ ] and find a way to propagate this through the hierarchy
    (a) prefix multiplication by integer constant
-	 (b) unary operators: + - ! √ ~ ¬
-	 (c) ad-hoc `Transform` with one-letter name, e.g. `H*square(1)`
+   (b) unary operators: + - ! √ ~ ¬
+   (c) ad-hoc `Transform` with one-letter name, e.g. `H*square(1)`
  - [ ] think of replacing parameters by kwargs
  - [x]  `∪`, `∩`, `\`: booleans
  - [ ] `+ ⊕` Minkowski sum; translation
@@ -201,16 +215,16 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] `:` convex hull ?
  - [ ] `~` complement
  - [ ] `×` extrusion (scalar => linear_extrude; interval =>
-	 rotate_extrude; path => path_extrude)
+   rotate_extrude; path => path_extrude)
  - [x] `*` multmatrix; scaling
  - [ ] make kwargs open for user extension (e.g. rounded squares)
 # Transformations
  - [ ] make transformations even lazier, so that they are evaluated only once
    their subjects (and more importantly, their dimension) are known
  - [x] call Clipper to provide offset algorithm
-	+ orientation, area, pointinpolygon
-	+ this provides polygon intersection, difference, …
-	+ also offset and `get_bounds`
+  + orientation, area, pointinpolygon
+  + this provides polygon intersection, difference, …
+  + also offset and `get_bounds`
  - [x] draw(path, width) (using Clipper.offset)
  - [x] convex hull (in dim 2)
  - [x] convex hull (in dim 3)
@@ -219,7 +233,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] : overload extrude() (for paths, angles, numbers)
  - [ ] minkowski has a convexity parameter
   - [ ] `convexity`'s place is in `SetParameters`
-	 - we don't need convexity
+   - we don't need convexity
  - [ ] Complex * 2d object
  - [?] a move system (= a representation of abstract affine rotations)
    - [ ] allow `NamedTuple` for this
@@ -260,7 +274,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] add a display method that shows the tree
  - [ ] try 2 strategies for n-ary intersection/union:
    - [ ] merge all structures and compute multiplicity with ray-shooting,
-	 - [x] or reduce with binary op
+   - [x] or reduce with binary op
  - [ ] icosphere (from Blender)
  - [ ] sphere made from extruding a half-circle
  - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
@@ -283,3 +297,5 @@ common, strings, constants, errors,
 bezier, threading, rounding, partitions, knurling, skin, hull,
 triangulation
 polyhedra, screws, metric\_screws
+
+# vim: et:

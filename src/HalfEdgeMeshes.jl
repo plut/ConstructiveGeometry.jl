@@ -25,8 +25,7 @@ end
 include("TriangleIntersections.jl")
 include("SpatialSorting.jl")
 
-const HalfEdgeId = Int
-const VertexId = Int
+const _HALFEDGE_INDEX_TYPE = Int
 
 # For a mesh having `n` vertices, we expect the following counts:
 #  - 6n + O(1) half-edges;
@@ -381,33 +380,188 @@ function equivalence_structure(relation)#««
 end#»»
 # half-edge mesh««1
 # half-edge data structure ««2
-struct HalfEdgeMesh{H,V,P}
-	opposite::Vector{H}
-	destination::Vector{V}
-	edgefrom::Vector{H} # indexed by VertexId
-	points::Vector{P}
-	# FIXME: convert to structure-of-array?
+struct HalfEdgeMesh{I<:Signed,P} # I is index type (integer), P is point type
+	                       # of type:
+	points::Vector{P}      # v->P
+	opposite::Vector{I}    # h->h (or -h if singular edge)
+	destination::Vector{I} # h->v
+	edgefrom::Vector{I}    # v->h (or -c if singular vertex)
+# 	cone_next::Vector{I}   # c->c
+# 	cone_edge::Vector{I}   # c->h
 end
 
-halfedge_type(::Type{<:HalfEdgeMesh{H}}) where{H,V,P} = H
-halfedge_type(s::HalfEdgeMesh) = halfedge_type(typeof(s))
-@inline face_type(s) = halfedge_type(s)
-vertex_type(::Type{<:HalfEdgeMesh{H,V}}) where{H,V,P} = V
-vertex_type(s::HalfEdgeMesh) = vertex_type(typeof(s))
-point_type(::Type{<:HalfEdgeMesh{H,V,P}}) where{H,V,P} = P
-point_type(s::HalfEdgeMesh) = point_type(typeof(s))
+# struct MeshException <: Exception # cone
+# 	what
+# end
 
-@inline HalfEdgeMesh{H,V,P}(::UndefInitializer, points, nf::Integer
-	) where{H,V,P} = HalfEdgeMesh{H,V,P}(
-	Vector{H}(undef, 3nf),
-	Vector{V}(undef, 3nf),
-	Vector{H}(undef, length(points)),
+@inline index_type(::Type{<:HalfEdgeMesh{I}}) where{I} = I
+# several names for the same type, for clarity:
+@inline vertex_type(m::HalfEdgeMesh) = index_type(typeof(m))
+@inline halfedge_type(m::HalfEdgeMesh) = index_type(typeof(m))
+@inline face_type(m::HalfEdgeMesh) = index_type(typeof(m))
+# @inline cone_type(m::HalfEdgeMesh) = index_type(typeof(m))
+point_type(::Type{<:HalfEdgeMesh{I,P}}) where{I,P} = P
+point_type(m::HalfEdgeMesh) = point_type(typeof(m))
+
+@inline HalfEdgeMesh{I,P}(::UndefInitializer, points, nf::Integer
+	) where{I,P} = HalfEdgeMesh{I,P}(
 	points,
+	Vector{I}(undef, 3nf),
+	Vector{I}(undef, 3nf),
+	Vector{I}(undef, length(points)),
+# 	I[], # cone
+# 	I[],
 	)
 
 @inline HalfEdgeMesh(::UndefInitializer, points, args...) =
-	HalfEdgeMesh{HalfEdgeId,VertexId,eltype(points)}(undef, points, args...)
+	HalfEdgeMesh{_HALFEDGE_INDEX_TYPE,eltype(points)}(undef, points, args...)
 
+# simple accessors ««2
+@inline nfaces(m::HalfEdgeMesh) = length(m.opposite) ÷ 3
+@inline nvertices(m::HalfEdgeMesh) = length(m.edgefrom)
+# @inline ncones(m::HalfEdgeMesh) = length(m.cone_next)
+# operations on half-edges
+@inline next(::HalfEdgeMesh, h) = h+1 - 3*(h%3==0)
+@inline prev(::HalfEdgeMesh, h) = h-1 + 3*(h%3==1)
+@inline opposite(m::HalfEdgeMesh, h) = m.opposite[h]
+@inline opposite!(m::HalfEdgeMesh, h, x) = m.opposite[h] = x
+@inline destination(m::HalfEdgeMesh, h) = m.destination[h]
+@inline destination!(m::HalfEdgeMesh, h, v) = m.destination[h] = v
+@inline hisregular(m::HalfEdgeMesh, h) = opposite(m, h) > 0
+# operations on vertices
+@inline edgefrom(m::HalfEdgeMesh, v) = m.edgefrom[v]
+@inline edgefrom!(m::HalfEdgeMesh, v, h) = m.edgefrom[v] = h
+@inline visregular(m::HalfEdgeMesh, v) = edgefrom(m, v) > 0
+@inline points(m::HalfEdgeMesh) = m.points
+@inline point(m::HalfEdgeMesh, v) = m.points[v]
+# operatoins on cones
+# @inline firstedge(m::HalfEdgeMesh, c) = m.cone_edge[c]
+
+# O(1) operators««2
+# faces
+@inline adjacent_faces(s::HalfEdgeMesh, i, j) =
+	fld1(opposite(s, 3i-2), 3) == j ||
+	fld1(opposite(s, 3i-1), 3) == j ||
+	fld1(opposite(s, 3i  ), 3) == j
+@inline face_edge(s::HalfEdgeMesh, f, j) = halfedge(s, 3*f-3+j)
+@inline face_vertex(s::HalfEdgeMesh, f, j) = destination(s, 3*f-3+j)
+@inline adjacent_face(s::HalfEdgeMesh, f, j) = fld1(opposite(s, 3*f-3+j), 3)
+@inline adjacent_faces(s::HalfEdgeMesh, f) =
+	map(j->adjacent_face(s, f, j), (1,2,3))
+
+# half-edges
+@inline origin(m::HalfEdgeMesh, h) = destination(m, prev(m, h))
+@inline halfedge(m::HalfEdgeMesh, h) = (origin(m, h), destination(m, h))
+@inline opposite_vertex(m::HalfEdgeMesh, h) =
+	destination(m, next(m, h))
+# 1 = regular, 0 = border, -1 = singular
+@inline edge_type(m::HalfEdgeMesh, h) = sign(opposite(m,h))
+@inline regular_edge(m::HalfEdgeMesh, h) = opposite(m, opposite(m, h)) == h
+
+# cones
+# @inline cone_vertex(m::HalfEdgeMesh, c) = origin(m, firstedge(m, c))
+
+# face/triangle iterators««2
+struct HalfEdgeFaceIterator{I} <: AbstractVector{NTuple{3,I}}
+	mesh::HalfEdgeMesh{I}
+end
+
+@inline Base.size(h::HalfEdgeFaceIterator) = (nfaces(h.mesh),)
+@inline Base.getindex(h::HalfEdgeFaceIterator, i::Integer) =
+	(destination(h.mesh,3i-2), destination(h.mesh,3i-1), destination(h.mesh,3i))
+@inline faces(s::HalfEdgeMesh) = HalfEdgeFaceIterator(s)
+@inline face(s::HalfEdgeMesh, f) = faces(s)[f]
+
+struct HalfEdgeTriangleIterator{I,P} <: AbstractVector{NTuple{3,P}}
+	mesh::HalfEdgeMesh{I,P}
+end
+
+@inline Base.size(it::HalfEdgeTriangleIterator) = (nfaces(it.mesh),)
+@inline Base.getindex(it::HalfEdgeTriangleIterator, i::Integer) = (
+	point(it.mesh,destination(it.mesh, 3i-2)),
+	point(it.mesh,destination(it.mesh, 3i-1)),
+	point(it.mesh,destination(it.mesh, 3i  )),
+	)
+@inline triangles(s::HalfEdgeMesh) =
+	HalfEdgeTriangleIterator{halfedge_type(s),point_type(s)}(s)
+@inline triangle(s::HalfEdgeMesh, f) = triangles(s)[f]
+@inline function normal(s::HalfEdgeMesh, f)
+	t = triangle(s, f)
+	return cross(t[2]-t[1], t[3]-t[2])
+end
+@inline main_axis(s::HalfEdgeMesh, f) = main_axis(normal(s, f))
+function normalized_plane(s::HalfEdgeMesh, f)
+	t = triangle(s, f)
+	d = cross(t[2]-t[1], t[3]-t[2])
+	a = main_axis(d)
+	c = @inbounds inv(d[abs(a)])
+	return SA[oftype(c, a), project2d(a, d) .* c..., dot(d, t[1])*c]
+end
+@inline volume(s::HalfEdgeMesh) =
+	sum(dot(u, cross(v, w)) for (u,v,w) in triangles(s))/6
+
+# star iterator««2
+struct HalfEdgeVertexEdges{I}
+	mesh::HalfEdgeMesh{I}
+	start::I # half-edge
+end
+@inline function neighbours(m::HalfEdgeMesh, v, h = edgefrom(m, v))
+	# the parameter `h` allows to pass the first half-edge of a singular cone
+# 	h > 0 || throw(MeshException(("singular vertex", v)))
+	return HalfEdgeVertexEdges(m, h)
+end
+@inline Base.eltype(::Type{HalfEdgeVertexEdges{I}}) where{I} = Pair{I,I}
+@inline Base.iterate(it::HalfEdgeVertexEdges) =
+	(it.start => destination(it.mesh, it.start), it.start)
+@inline function Base.iterate(it::HalfEdgeVertexEdges, s)
+	o = opposite(it.mesh, s); iszero(o) && return nothing
+	h = next(it.mesh, o); h == it.start && return nothing
+	return (h => destination(it.mesh, h), h)
+end
+Base.IteratorSize(::HalfEdgeVertexEdges) = Base.SizeUnknown()
+function edge(m::HalfEdgeMesh, (v1, v2))
+	for (h, dest) in neighbours(m, v1)
+		dest == v2 && return h
+	end
+	throw(KeyError((v1,v2))); return edgefrom(v1) # type-stability
+end
+
+# # cone iterator««2
+# struct ConeIterator{I}
+# 	mesh::HalfEdgeMesh{I}
+# 	start::I
+# end
+# @inline Base.eltype(it::ConeIterator) = cone_type(it.mesh)
+# @inline Base.IteratorSize(::ConeIterator) = Base.SizeUnknown()
+# 
+# @inline function cones(m::HalfEdgeMesh, v)
+# 	c = edgefrom(m, v)
+# 	c < 0 || throw(MeshException(("regular vertex", v)))
+# 	return ConeIterator(m, -c)
+# end
+# function Base.iterate(it::ConeIterator) = (it.start, it.start)
+# function Base.iterate(it::ConeIterator, s)
+# 	t = it.mesh.cone_next(s)
+# 	t == it.start && return nothing
+# 	return (t, t)
+# end
+# radial iterator««2
+struct HalfEdgeRadialIterator{I}
+	mesh::HalfEdgeMesh{I}
+	start::I
+end
+@inline radial_loop(m::HalfEdgeMesh, h) = HalfEdgeRadialIterator(m, h)
+@inline Base.iterate(it::HalfEdgeRadialIterator) = (it.start, it.start)
+function Base.iterate(it::HalfEdgeRadialIterator, s)
+	h = opposite(it.mesh, s)
+# 	h > 0 || throw(MeshException(("non-singular edge", s, h))) # cone
+	h == it.start && return nothing
+	return (h, h)
+end
+@inline Base.IteratorSize(::HalfEdgeRadialIterator) = Base.SizeUnknown()
+@inline Base.eltype(::HalfEdgeRadialIterator{I}) where{I} = I
+
+# constructor from points and faces««2
 @inline edge_locator(s::HalfEdgeMesh) =
 	SortedDict{NTuple{2,vertex_type(s)},Vector{halfedge_type(s)}}()
 function mark_edge!(s::HalfEdgeMesh, edge_loc, h, v1, v2)#««
@@ -424,7 +578,7 @@ function unmark_edge!(s::HalfEdgeMesh, edge_loc, h)
 	l = get(edge_loc, halfedge(s,h), halfedge_type(s)[])
 	filter!(≠(h), l)
 end
-function radial_loops!(s::HalfEdgeMesh, edge_loc)
+function radial_loops!(s::HalfEdgeMesh, edge_loc)#««
 	for (e, hlist1) in edge_loc
 		e[1] > e[2] && continue # we do two this only once per edge
 		isempty(hlist1) && continue
@@ -442,9 +596,8 @@ function radial_loops!(s::HalfEdgeMesh, edge_loc)
 		opposite!(s, last(hlist1), last(hlist2))
 		opposite!(s, last(hlist2), first(hlist1))
 	end
-end
-
-function HalfEdgeMesh(points, faces)
+end#»»
+function HalfEdgeMesh(points, faces)#««
 	nv = length(points)
 	@assert all(length.(faces) .== 3)
 	s = HalfEdgeMesh(undef, points, length(faces))
@@ -456,142 +609,7 @@ function HalfEdgeMesh(points, faces)
 	end
 	radial_loops!(s, edge_loc)
 	return s
-end
-
-# simple accessors ««2
-@inline nfaces(s::HalfEdgeMesh) = length(s.opposite) ÷ 3
-@inline nvertices(s::HalfEdgeMesh) = length(s.edgefrom)
-@inline next(::HalfEdgeMesh, h) = h+1 - 3*(h%3==0)
-@inline prev(::HalfEdgeMesh, h) = h-1 + 3*(h%3==1)
-@inline opposite(s::HalfEdgeMesh, h) = s.opposite[h]
-@inline opposite!(s::HalfEdgeMesh, h, x) = s.opposite[h] = x
-@inline destination(s::HalfEdgeMesh, h) = s.destination[h]
-@inline destination!(s::HalfEdgeMesh, h, v) = s.destination[h] = v
-@inline edgefrom(s::HalfEdgeMesh, v) = s.edgefrom[v]
-@inline edgefrom!(s::HalfEdgeMesh, v, h) = s.edgefrom[v] = h
-@inline points(s::HalfEdgeMesh) = s.points
-@inline point(s::HalfEdgeMesh, v) = s.points[v]
-
-@inline adjacent_faces(s::HalfEdgeMesh, i, j) =
-	fld1(opposite(s, 3i-2), 3) == j ||
-	fld1(opposite(s, 3i-1), 3) == j ||
-	fld1(opposite(s, 3i  ), 3) == j
-
-@inline halfedge(s::HalfEdgeMesh, h) =
-	(destination(s, prev(s, h)), destination(s, h))
-@inline opposite_vertex(s::HalfEdgeMesh, h) =
-	destination(s, next(s, h))
-@inline face_edge(s::HalfEdgeMesh, f, j) = halfedge(s, 3*f-3+j)
-@inline face_vertex(s::HalfEdgeMesh, f, j) = destination(s, 3*f-3+j)
-@inline regular_edge(s::HalfEdgeMesh, h) = opposite(s, opposite(s, h)) == h
-
-@inline adjacent_face(s::HalfEdgeMesh, f, j) = fld1(opposite(s, 3*f-3+j), 3)
-@inline adjacent_faces(s::HalfEdgeMesh, f) =
-	map(j->adjacent_face(s, f, j), (1,2,3))
-
-function Base.reverse(s::HalfEdgeMesh)
-	r = HalfEdgeMesh{halfedge_type(s), vertex_type(s), point_type(s)}(
-		undef, points(s), nfaces(s))
-	# reverse all half-edges:
-	# (31)(12)(23) to (21)(13)(32)
-	#
-	# edgefrom: 3f-2 <-> 3f, and 3f-1 remains in place
-	# destination: 3f-2 in place, 3f-1 ↔ 3f
-	# opposite: 3f-2  in place, 3f-1 ↔ 3f
-	@inline newedgeno(h) = let m = mod(h,3)
-		(m == 1) ? h + 1 : (m == 2) ? h - 1 : h end
-	for f in 1:nfaces(s)
-		r.destination[3*f  ] = s.destination[3*f-1]
-		r.destination[3*f-1] = s.destination[3*f  ]
-		r.destination[3*f-2] = s.destination[3*f-2]
-		r.opposite[3*f-2] = newedgeno(s.opposite[3*f-1])
-		r.opposite[3*f-1] = newedgeno(s.opposite[3*f-2])
-		r.opposite[3*f  ] = newedgeno(s.opposite[3*f  ])
-	end
-	for v in 1:nvertices(s)
-		h = s.edgefrom[v]; m = mod(h,3)
-		r.edgefrom[v] = (m == 1) ? h+2 : (m == 2) ? h : h-2
-	end
-	return r
-end
-
-# faces iterator««2
-struct HalfEdgeFaceIterator{H,V} <: AbstractVector{NTuple{3,V}}
-	mesh::HalfEdgeMesh{H,V}
-end
-
-@inline Base.size(h::HalfEdgeFaceIterator) = (nfaces(h.mesh),)
-@inline Base.getindex(h::HalfEdgeFaceIterator, i::Integer) =
-	(destination(h.mesh,3i-2), destination(h.mesh,3i-1), destination(h.mesh,3i))
-@inline faces(s::HalfEdgeMesh) =
-	HalfEdgeFaceIterator{halfedge_type(s),vertex_type(s)}(s)
-@inline face(s::HalfEdgeMesh, f) = faces(s)[f]
-
-struct HalfEdgeTriangleIterator{H,V,P} <: AbstractVector{NTuple{3,P}}
-	mesh::HalfEdgeMesh{H,V,P}
-end
-
-@inline Base.size(it::HalfEdgeTriangleIterator) = (nfaces(it.mesh),)
-@inline Base.getindex(it::HalfEdgeTriangleIterator, i::Integer) = (
-	point(it.mesh,destination(it.mesh, 3i-2)),
-	point(it.mesh,destination(it.mesh, 3i-1)),
-	point(it.mesh,destination(it.mesh, 3i  )),
-	)
-@inline triangles(s::HalfEdgeMesh) =
-	HalfEdgeTriangleIterator{halfedge_type(s),vertex_type(s),point_type(s)}(s)
-@inline triangle(s::HalfEdgeMesh, f) = triangles(s)[f]
-@inline function normal(s::HalfEdgeMesh, f)
-	t = triangle(s, f)
-	return cross(t[2]-t[1], t[3]-t[2])
-end
-@inline main_axis(s::HalfEdgeMesh, f) = main_axis(normal(s, f))
-function normalized_plane(s::HalfEdgeMesh, f)
-	t = triangle(s, f)
-	d = cross(t[2]-t[1], t[3]-t[2])
-	a = main_axis(d)
-	c = @inbounds inv(d[abs(a)])
-	return SA[oftype(c, a), project2d(a, d) .* c..., dot(d, t[1])*c]
-end
-@inline volume(s::HalfEdgeMesh) =
-	sum(dot(u, cross(v, w)) for (u,v,w) in triangles(s))/6
-
-# vertex iterator, radial iterator««2
-struct HalfEdgeVertexEdges{H,V}
-	mesh::HalfEdgeMesh{H,V}
-	start::H
-end
-@inline neighbours(s::HalfEdgeMesh, v) =
-	HalfEdgeVertexEdges{halfedge_type(s),vertex_type(s)}(s, edgefrom(s,v))
-@inline Base.eltype(::Type{HalfEdgeVertexEdges{H,V}}) where{H,V} = Pair{H,V}
-@inline Base.iterate(it::HalfEdgeVertexEdges) =
-	(it.start => destination(it.mesh, it.start), it.start)
-@inline Base.iterate(it::HalfEdgeVertexEdges, s) =
-	let h = next(it.mesh, opposite(it.mesh, s))
-	h == it.start && return nothing
-	return (h => destination(it.mesh, h), h)
-end
-Base.IteratorSize(::HalfEdgeVertexEdges) = Base.SizeUnknown()
-function edge(s::HalfEdgeMesh, (v1, v2))
-	for (h, dest) in neighbours(s, v1)
-		dest == v2 && return h
-	end
-	throw(KeyError((v1,v2))); return edgefrom(v1) # type-stability
-end
-
-struct HalfEdgeRadialIterator{H,V}
-	mesh::HalfEdgeMesh{H,V}
-	start::H
-end
-@inline radial_loop(s::HalfEdgeMesh, h) =
-	HalfEdgeRadialIterator{halfedge_type(s),vertex_type(s)}(s, h)
-@inline Base.iterate(it::HalfEdgeRadialIterator) = (it.start, it.start)
-function Base.iterate(it::HalfEdgeRadialIterator, s)
-	h = opposite(it.mesh, s)
-	h == it.start && return nothing
-	return (h, h)
-end
-@inline Base.IteratorSize(::HalfEdgeRadialIterator) = Base.SizeUnknown()
-@inline Base.eltype(::HalfEdgeRadialIterator{H,V}) where{H,V} = H
+end#»»
 
 # find coplanar faces««2
 # returns the equivalence relation, as pairs of indices in `flist`:
@@ -617,6 +635,32 @@ function opposite_faces(s::HalfEdgeMesh)
 	end
 	return r
 end
+# reverse mesh««2
+function Base.reverse(s::HalfEdgeMesh)
+	r = (typeof(s))(undef, points(s), nfaces(s))
+	# reverse all half-edges:
+	# (31)(12)(23) to (21)(13)(32)
+	#
+	# edgefrom: 3f-2 <-> 3f, and 3f-1 remains in place
+	# destination: 3f-2 in place, 3f-1 ↔ 3f
+	# opposite: 3f-2  in place, 3f-1 ↔ 3f
+	@inline newedgeno(h) = let m = mod(h,3)
+		(m == 1) ? h + 1 : (m == 2) ? h - 1 : h end
+	for f in 1:nfaces(s)
+		r.destination[3*f  ] = s.destination[3*f-1]
+		r.destination[3*f-1] = s.destination[3*f  ]
+		r.destination[3*f-2] = s.destination[3*f-2]
+		r.opposite[3*f-2] = newedgeno(s.opposite[3*f-1])
+		r.opposite[3*f-1] = newedgeno(s.opposite[3*f-2])
+		r.opposite[3*f  ] = newedgeno(s.opposite[3*f  ])
+	end
+	for v in 1:nvertices(s)
+		h = s.edgefrom[v]; m = mod(h,3)
+		r.edgefrom[v] = (m == 1) ? h+2 : (m == 2) ? h : h-2
+	end
+	return r
+end
+
 # change points««2
 function resize_faces!(s::HalfEdgeMesh, nf)
 	resize!(s.opposite, 3nf)
@@ -759,13 +803,11 @@ function split_faces!(s::HalfEdgeMesh, fsplit)
 end
 # concatenate««2
 function concatenate(slist::HalfEdgeMesh...)
-	r = HalfEdgeMesh{halfedge_type(first(slist)),
-		vertex_type(first(slist)),point_type(first(slist))}(undef,
+	r = (typeof(first(slist)))(undef,
 		vcat(points.(slist)...),
 		sum(nfaces.(slist)))
 	eoffset = 0
 	voffset = 0
-	foffset = 0
 	for s in slist
 		(nv, ne) = length(s.edgefrom), length(s.opposite)
 		r.opposite[eoffset+1:eoffset+ne] .= s.opposite .+ eoffset
@@ -990,21 +1032,9 @@ function subtriangulate!(s::HalfEdgeMesh, ε=0)
 			allvertices, alledges)
 
 		for i in icluster
-			tri = [ (t[1], t[2], t[3]) for t in alltriangles
+			tri = [ (t[1],t[2],t[3]) for t in alltriangles
 				if issubset(t, in_face_v[i]) ]
 			faces_tri[i] = (main_axis(s,si.faces[i])[1] > 0) ? tri : reverse.(tri)
-			isempty(faces_tri[i]) && println("""
-\e[31mcluster $(si.faces[icluster])\e[m
-	f$([face(s,si.faces[i]) for i in icluster])
-  v$(allvertices)
-  e$(alledges)
-  t$(alltriangles)
- face $(si.faces[i])=$(face(s,si.faces[i])):
-   v$(in_face_v[i])
-   e$(in_face_e[i])
-   t$(faces_tri[i])
-""")
- 
 		end
 	end
 	# apply refinement computed above
@@ -1107,10 +1137,10 @@ function sort_radial_loop(s::HalfEdgeMesh, h, pt3 = nothing)
 	fv = [ point(s, v) - p1 for v in ov ] # face vector
 	# face vector, projected in 2d:
 	fv2= [ project2d(axis, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
-	println("edge h$h = (v$v1,v$v2): $dir3 axis $axis")
-	for (e1, x, y, z) in zip(hlist, ov, fv, fv2)
-		println("# $e1 = $(halfedge(s, e1)): opp.v=$x, fv3=$y, fv2=$z")
-	end
+# 	println("edge h$h = (v$v1,v$v2): $dir3 axis $axis")
+# 	for (e1, x, y, z) in zip(hlist, ov, fv, fv2)
+# 		println("# $e1 = $(halfedge(s, e1)): opp.v=$x, fv3=$y, fv2=$z")
+# 	end
 	face_cmp = @closure (i1, i2) -> let b = circular_sign(fv2[i1], fv2[i2])
 		!iszero(b) && return (b > 0)
 		# we want a consistent ordering between coincident faces.
@@ -1210,10 +1240,10 @@ function multiplicity(s::HalfEdgeMesh)#««
 		dlist = [destination(s, h) for h in hlist]
 		v2 = destination(s, eindex)
 		h1 = hlist[1]; p1 = plist[1]; d1 = dlist[1]
-		println("sorted radial loop is $hlist")
-		for i in 1:n
-			println("  h$(hlist[i]) to v$(dlist[i]):   f$(face(s, fld1(hlist[i],3))) p$(plist[i])")
-		end
+# 		println("sorted radial loop is $hlist")
+# 		for i in 1:n
+# 			println("  h$(hlist[i]) to v$(dlist[i]):   f$(face(s, fld1(hlist[i],3))) p$(plist[i])")
+# 		end
 		for i in 2:n
 			h2 = hlist[i]; p2 = plist[i]; d2 = dlist[i]
 			# patch p2 is positively oriented iff d2==v2, etc.:
