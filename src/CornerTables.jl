@@ -1,9 +1,11 @@
 # TODO:
+#  - locate_point
 #  - reverse all faces of a mesh
 #  - simplify (retriangulate) faces
 #  - add per-face attributes
 #  - maybe precompute all face normals
 #  - clarify API
+#  - make level computation output-sensitive
 """
     CornerTables
 
@@ -43,6 +45,8 @@ const _INDEX_TYPE = Int
 # The self-intersection of a mesh is generally a curve; hence we expect
 # this self-intersection to involve Θ(√n) faces (and the same order of
 # magnitude for edges and vertices).
+#
+# Most algorithms here are output-aware
 
 # tools ««1
 @inline replace0!(::Nothing, args...) = nothing
@@ -396,9 +400,19 @@ end
 @inline next(it::MeshIterator{fancorners}, m, c) = after(m, c)
 @inline stop(it::MeshIterator{fancorners}, m, c) = (c==it.start)||!issimple(c)
 
+# FIXME: give a way to iterate over a simple edge
 @inline radial(m::CornerTable, c::Corner) = MeshIterator{radial}(m, c)
 @inline next(it::MeshIterator{radial}, m, c) = Multi(opposite(m, c))
 @inline stop(it::MeshIterator{radial}, m, c) = c == it.start
+@inline function genradial(m::CornerTable, c::Corner)
+	op = opposite(m, c)
+	if issimple(op)
+		return (c, op)
+	else
+		return radial(m, c)
+	end
+end
+	
 
 # @inline closedfan(m::CornerTable, c::Corner) = MeshIterator{closedfan}(m, g)
 # @inline next(it::MeshIterator{closedfan},m, c) = after(m, c)
@@ -477,7 +491,7 @@ end
 # fans««2
 "creates the first fan at vertex `v`"
 function create_fan!(m::CornerTable, v::Vertex, x::Integer)
-	println("\e[34;1mcreate_fan!($v)\e[m")
+# 	println("\e[34;1mcreate_fan!($v)\e[m")
 	global M=deepcopy(m)
 	@assert !issingular(corner(m, v)) # this must be the *first* fan
 	push!(m.fan_first, x)
@@ -486,7 +500,7 @@ function create_fan!(m::CornerTable, v::Vertex, x::Integer)
 end
 "appends a new fan to same vertex as `k`"
 function append_fan!(m::CornerTable, k::Fan, x::Integer)
-	println("\e[34;1mappend_fan!($k, $x)\e[m")
+# 	println("\e[34;1mappend_fan!($k, $x)\e[m")
 	push!(m.fan_first, x)
 	push!(m.fan_next, m.fan_next[Int(k)])
 	m.fan_next[Int(k)] = nfans(m)
@@ -494,7 +508,7 @@ function append_fan!(m::CornerTable, k::Fan, x::Integer)
 end
 "creates a new single-corner fan at this vertex; returns fan number"
 function new_fan!(m::CornerTable, v::Vertex, c::Corner)
-	println("\e[34;1mnew_fan!($v, $c)\e[m")
+# 	println("\e[34;1mnew_fan!($v, $c)\e[m")
 	cv = corner(m, v)
 	if isisolated(cv)
 		k = create_fan!(m, v, fan_open(c))
@@ -528,7 +542,7 @@ end
 
 "moves a fan from index k to index x"
 function move_fan!(m::CornerTable, k::Fan, x::Fan, t = nothing)
-	println("\e[34;1mmove_fan!($k, $x)\e[m")
+# 	println("\e[34;1mmove_fan!($k, $x)\e[m")
 	corner!(m, fanvertex(m, k), Corner(x))
 	fan_next!(m, fan_prev(m, k), x)
 	fan_next!(m, x, fan_next(m, k))
@@ -536,7 +550,7 @@ function move_fan!(m::CornerTable, k::Fan, x::Fan, t = nothing)
 	t ≠ nothing && replace!(t, k => x)
 end
 function delete_fan!(m::CornerTable, k::Fan, t = nothing)
-	println("\e[34;1mdelete_fan!($k)\e[m")
+# 	println("\e[34;1mdelete_fan!($k)\e[m")
 	@assert k ≠ implicitfan
 	n = fan_next(m, k)
 	v = fanvertex(m, k)
@@ -561,7 +575,7 @@ function delete_fan!(m::CornerTable, k::Fan, t = nothing)
 end
 "connects two open fans together (k2 after k1)."
 function glue_fans!(m::CornerTable, k1, k2, t = nothing)
-	println("\e[34;1mglue_fans!($k1, $k2) $t\e[m")
+# 	println("\e[34;1mglue_fans!($k1, $k2) $t\e[m")
 	@assert fanvertex(m, k1) == fanvertex(m, k2)
 	@assert isopenfan(fan_first(m, k1))
 	@assert isopenfan(fan_first(m, k2))
@@ -580,7 +594,7 @@ end
 
 "splits fan `k` at a simple edge, making `c` its new first corner. Returns the pair of fans (before, after)"
 @inline function split_fan!(m::CornerTable, k::Fan, c::Corner, t = nothing)
-	println("  \e[34msplit_fan!($k, $c) $(vertex(m,c))\e[m")
+# 	println("  \e[34msplit_fan!($k, $c) $(vertex(m,c))\e[m")
 	if k == implicitfan
 		@assert false
 # 		v = vertex(m, c)
@@ -628,7 +642,7 @@ end#»»
 # corners««2
 "moves a corner from index c to index x (used by move_face!)"
 function move_corner!(m::CornerTable, c::Corner, x::Corner)
-	println("move_corner!($c, $x)")
+# 	println("move_corner!($c, $x)")
 	# replace all references to corner c by x
 	v = vertex(m, c)
 	cv = corner(m, v)
@@ -667,41 +681,41 @@ function edge!(m::CornerTable, klist, clist, i1)#««
 	# i1+3:  fan inside corner
 	# i1+6:  fan after corner
 	c = clist[i1+12]; cout = clist[i3+3]; cin = clist[i2]
-	println("\e[34;7mglue_edge($c $(base(m,c))) klist[5]=$(klist[5])\e[m")
-	verbose(m)
-	println("""
-\e[1m$c (i1=$i1) apex=$(vertex(m,c)) cin=$cin, out=$cout\e[m
-  right=$(right(m,c)) fans out=$(klist[i2])→in=$(klist[i2+3])
-  left=$(left(m,c)) fans in=$(klist[i3+3])→out=$(klist[i3+6])""")
+# 	println("\e[34;7mglue_edge($c $(base(m,c))) klist[5]=$(klist[5])\e[m")
+# 	verbose(m)
+# 	println("""
+# \e[1m$c (i1=$i1) apex=$(vertex(m,c)) cin=$cin, out=$cout\e[m
+#   right=$(right(m,c)) fans out=$(klist[i2])→in=$(klist[i2+3])
+#   left=$(left(m,c)) fans in=$(klist[i3+3])→out=$(klist[i3+6])""")
 	if !isboundary(cin) # there is already an inner corner
 		op_in = opposite(m, cin)
 		if isboundary(op_in) # op_in is the last edge in its fan
-			println("\e[1mmake new multiple 2-edge $([c,cin])\e[m")
+# 			println("\e[1mmake new multiple 2-edge $([c,cin])\e[m")
 			multi!(m, [c, cin])
 		elseif issimple(op_in) # we break a simple edge
-		println("\e[1mmake new multiple 3-edge $([c,cin,cout]) $(base(m,c))\e[m")
-		println("around $(left(m,c)): $(klist[[i3,i3+3,i3+6]]) around $(right(m,c)): $(klist[[i2,i2+3,i2+6]])")
+# 		println("\e[1mmake new multiple 3-edge $([c,cin,cout]) $(base(m,c))\e[m")
+# 		println("around $(left(m,c)): $(klist[[i3,i3+3,i3+6]]) around $(right(m,c)): $(klist[[i2,i2+3,i2+6]])")
 			@assert op_in == cout
 			multi!(m, [c, cin, cout])
 # 			println("edge ($cin, $cout) is simple")
 # 			verbose(m, klist[i2])
 # 			verbose(m, klist[i3+3])
 			(u1, u2) = split_fan!(m, klist[i2+3], clist[i2+6])
-			println("result of split_fan!: ($u1, $u2)")
+# 			println("result of split_fan!: ($u1, $u2)")
 			(u3, u4) = split_fan!(m, klist[i3+6], clist[i3+9])
-			println("\e[34;1mresults of split_fan!: $u1 $u2, $u3 $u4\e[m")
+# 			println("\e[34;1mresults of split_fan!: $u1 $u2, $u3 $u4\e[m")
 		else # already a multiple edge
-			println("\e[1mappend $c to (inner) multiple edge $op_in\e[m")
+# 			println("\e[1mappend $c to (inner) multiple edge $op_in\e[m")
 			add_multi!(m, Multi(op_in), c)
 		end
 	elseif !isboundary(cout) # there is an outer corner, but no inner
 		op_out = opposite(m, cout)
 		@assert !issimple(op_out)
 		if ismultiple(op_out)
-			println("\e[1mappend $c to (outer) multiple edge $op_out\e[m")
+# 			println("\e[1mappend $c to (outer) multiple edge $op_out\e[m")
 			add_multi!(m, Multi(op_out), c)
 		else # op_out is a boundary: we are creating a simple edge
-			println("\e[1mcreate simple edge $c -- $cout ($cin)\e[m")
+# 			println("\e[1mcreate simple edge $c -- $cout ($cin)\e[m")
 			opposite!(m, c, cout); opposite!(m, cout, c)
 			glue_fans!(m, klist[i2], klist[i2+3], klist)
 			glue_fans!(m, klist[i3+3], klist[i3+6], klist)
@@ -709,35 +723,25 @@ function edge!(m::CornerTable, klist, clist, i1)#««
 	end
 end#»»
 function cut_edge!(m::CornerTable, c::Corner, t = nothing)#««
-	println("\e[35;7mcut_edge $c = $(base(m,c))\e[m")
-	verbose(m)
-	println("  first corner for $(vertex(m,c)) = $(corner(m,vertex(m,c)))")
+# 	println("\e[35;7mcut_edge $c = $(base(m,c))\e[m")
+# 	verbose(m)
+# 	println("  first corner for $(vertex(m,c)) = $(corner(m,vertex(m,c)))")
 	# 1. cut fans if needed
 	p = prev(c)
 	n = next(c)
 	@assert isregular(c)
 	op = opposite(m, c)
-	println("  opposite($c) = $op")
 	if isboundary(op) # nothing to do
 	elseif issimple(op)
 		# simple edge: we need to split fans at both vertices v2 and v3
-		println("\e[1m  cutting *simple edge* $c--$op = $(base(m,c))\e[m")
+# 		println("\e[1m  cutting *simple edge* $c--$op = $(base(m,c))\e[m")
 		k2 = fan(m, n)
-		println("1  corner($(vertex(m,n)))=$(corner(m,vertex(m,n)))")
-		println("   fan k2 for $n=$k2 at $(right(m, c))")
 		k3 = fan(m, p)
-		println("2  corner($(vertex(m,n)))=$(corner(m,vertex(m,n)))")
-		println("   fan k3 for $p=$k3 at $(left(m, c))")
-		println("3  corner($(vertex(m,n)))=$(corner(m,vertex(m,n)))")
-		println("4  corner($(vertex(m,n)))=$(corner(m,vertex(m,n)))")
 		split_fan!(m, k2, n)
-		println("5  corner($(vertex(m,n)))=$(corner(m,vertex(m,n)))")
 		split_fan!(m, k3, next(op))
-		println("  now at $(right(m, c)): $(corner(m, right(m, c)))")
-		println("  now at $(left(m, c)): $(corner(m, left(m, c)))")
 		opposite!(m, op, Corner(0))
 		opposite!(m, c, Corner(0))
-		verbose(m)
+# 		verbose(m)
 		# delete a simple edge: replace by two boundaries
 	else # multiple edge; removing one edge may change it to boundary or simple
 		# to simple: only if there are three edges (c, c1, c2) in the loop...
@@ -770,8 +774,8 @@ end#»»
 "attaches all three corners and edges of a face"
 function set_face!(m::CornerTable{I}, nf, vlist) where{I}
 	n = 3*Int(nf)-3
-	println("\e[32;7mset_face!($nf, $vlist)\e[m")
-	verbose(m)
+# 	println("\e[32;7mset_face!($nf, $vlist)\e[m")
+# 	verbose(m)
 	v1 = vlist[1]; v2=vlist[2]; v3=vlist[3]
 	explicit_fan!(m, v1)
 	explicit_fan!(m, v2)
@@ -783,33 +787,14 @@ function set_face!(m::CornerTable{I}, nf, vlist) where{I}
 	findedge(m, v1, v2, v3, clist, klist, 1)
 	findedge(m, v2, v3, v1, clist, klist, 2)
 	findedge(m, v3, v1, v2, clist, klist, 3)
-	println("computed klist=$klist")
-	println("\e[31;1m1*********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n*******\n\e[m")
 	for i in (1,2,3)
-	println("\e[31;1m2*********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n*******\n\e[m")
 		clist[i+12] = Corner(n+i)
-	println("\e[31;1m3*********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n*******\n\e[m")
 		opposite!(m, clist[i+12], Corner(0))
-	println("\e[31;1m4*********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n***$(ncorners(m)) corners***vertex(4)=$(ncorners(m) >= 4 ? m.vertex[4] : "")**\n\e[m")
-		println("i+12=$(i+12)")
-		ncorners(m) >= 4 && println(m.vertex[4])
-		println("vertex!(m, $(clist[i+12]), $(vlist[i]))")
 		vertex!(m, clist[i+12], vlist[i])
-		ncorners(m) >= 4 && println(m.vertex[4])
-	println("\e[31;1m5*********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n***$(ncorners(m)) corners***vertex(4)=$(ncorners(m) >= 4 ? m.vertex[4] : "")**\n\e[m")
 		klist[i+3] = new_fan!(m, vlist[i], clist[i+12])
-	println("\e[31;1m6*********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n*******\n\e[m")
-		println("  create klist[$(i+3)]=$(klist[i+3])")
 	end
-# 	println("klist = $klist\nclist=$(collect(filter(((x,y),)->Int(y)≠0,pairs(clist))))")
-	println("\e[31;1m**********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n*******\n\e[m")
-	println("\e[36;7mclist=$clist\e[m")
 	edge!(m, klist, clist, 1)
-	println("\e[31;1m**********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n*******\n\e[m")
-	println("\e[36;7mclist=$clist\e[m")
 	edge!(m, klist, clist, 2)
-	println("\e[31;1m**********clist[2]=$(clist[2]) $(Int(clist[2]) > 0 ? base(m,clist[2]) : "")\n*******\n\e[m")
-	println("\e[36;7mclist=$clist\e[m")
 	edge!(m, klist, clist, 3)
 	implicit_fan!(m, v1)
 	implicit_fan!(m, v2)
@@ -823,8 +808,8 @@ function append_face!(m::CornerTable{I}, vlist) where{I}#««
 end#»»
 "disconnects all edges and corners of a face"
 function cut_face!(m::CornerTable, f::Face)
-	println("\e[31;7mcut_face!($f $(vertices(m,f)))\e[m")
-	verbose(m)
+# 	println("\e[31;7mcut_face!($f $(vertices(m,f)))\e[m")
+# 	verbose(m)
 	c1 = corner(f, Side(1)); v1 = vertex(m, c1); explicit_fan!(m, v1)
 	c2 = corner(f, Side(2)); v2 = vertex(m, c2); explicit_fan!(m, v2)
 	c3 = corner(f, Side(3)); v3 = vertex(m, c3); explicit_fan!(m, v3)
@@ -839,8 +824,8 @@ function cut_face!(m::CornerTable, f::Face)
 	implicit_fan!(m, v1)
 	implicit_fan!(m, v2)
 	implicit_fan!(m, v3)
-	println("\e[31;7mafter cut_face!($f $(vertices(m,f))):\e[m")
-	verbose(m)
+# 	println("\e[31;7mafter cut_face!($f $(vertices(m,f))):\e[m")
+# 	verbose(m)
 	global M=deepcopy(m)
 # 	@assert f ∈ (Face(1),Face(5),Face(2),Face(6),)
 end
@@ -1340,7 +1325,6 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 			isfirst = true
 			for tri in alltriangles
 				issubset(tri, in_face_v[i]) || continue
-				println("face $(si.faces[i]): $tri ⊂ $(in_face_v[i])")
 				if isfirst
 					f = si.faces[i]; cut_face!(m, f); isfirst = false
 				else
@@ -1449,18 +1433,18 @@ function sort_radial_loop(m::CornerTable, c0, pt3 = nothing)#««
 	# for each adjacent face, compute a (3d) vector which, together with
 	# the edge, generates the face (and pointing from the edge to the face):
 	# 2d projection of face_vec3 (preserving orientation)
-	clist = collect(radial(m, c0)) # corners around this multiple edge
-	vlist = [ vertex(m, c) for c in clist ]
+	clist = collect(genradial(m, c0)) # corners around this multiple edge
 	# we could use this to determine edge orientation:
 # 	dv = [ destination(m, h) == v2 for h in hlist ]
 	p1 = point(m, v1)
-	fv = [ point(m, v) - p1 for v in vlist ] # face vector
+	fv = [ point(m, vertex(m, c)) - p1 for c in clist ]
+# 	fv = [ point(m, v) - p1 for v in vlist ] # face vector
 	# face vector, projected in 2d:
 	fv2= [ project2d(axis, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
-# 	println("edge h$h = (v$v1,v$v2): $dir3 axis $axis")
-# 	for (e1, x, y, z) in zip(hlist, ov, fv, fv2)
-# 		println("# $e1 = $(halfedge(m, e1)): opp.v=$x, fv3=$y, fv2=$z")
-# 	end
+	println("\e[7msort_radial_edge $c0=$(base(m,c0)): $dir3 axis $axis\e[m")
+	for (c, y, z) in zip(clist, fv, fv2)
+		println("# $c = $(vertex(m,c)) $(base(m, c)): fv3=$y, fv2=$z")
+	end
 	face_cmp = @closure (i1, i2) -> let b = circular_sign(fv2[i1], fv2[i2])
 		!iszero(b) && return (b > 0)
 		# we want a consistent ordering between coincident faces.
@@ -1478,16 +1462,17 @@ function sort_radial_loop(m::CornerTable, c0, pt3 = nothing)#««
 	# find where `pt3 - v1` inserts in radial loop:
 	vec3 = pt3 - p1
 	vec2 = project2d(axis, vec3) .- dot(vec3, dir3) .*dir2scaled
+	println("\e[34mpt3=$pt3, vec3=$vec3, vec2=$vec2\e[m")
 	@assert !all(iszero,vec2) "half-edge $h aligned with point $vec3"
 	k = searchsorted(fv2[reorder], vec2,
 		lt = (u,v)->circular_sign(u,v) > 0)
 	@assert k.start > k.stop "impossible to determine location at this edge"
 	# possibilities are: (i+1:i) for i in 0..n
-	k.stop == 0 && return hlist[reorder[end]]
+	k.stop == 0 && return clist[reorder[end]]
 	return clist[reorder[k.stop]]
 end#»»
 # find_good_halfedge««2
-function find_good_halfedge(s::CornerTable, i, p)
+function find_good_edge(m::CornerTable, i, p)
 	# it is possible that all edges lie in the same plane
 	# (if this is a flat cell), so we pick, as a second point j,
 	# the one which maximizes |y/x|, where
@@ -1495,24 +1480,25 @@ function find_good_halfedge(s::CornerTable, i, p)
 	# in other words, we maximize ‖pi∧pj‖²/‖pi·ij‖²
 	# caution: it is possible that pi⋅ij = 0 (edge exactly orthogonal),
 	# in this case we must return j immediately
-	vpi = point(s, i) - p
-	nv = neighbours(s, i)
-	((h, j), state) = iterate(nv)
-	vpj = point(s, j) - p
+	vpi = point(m, i) - p
+	fc = vertexcorners(m, i)
+	# in triangle uvw, c is vertex u (edge vw), we want edge uv (corner w)
+	((_, c), state) = iterate(fc); c = prev(c); cj = left(m, c)
+	vpj = point(m, cj) - p
 	xj = dot(vpi, vpj)
-	iszero(xj) && return h
+	iszero(xj) && return c
 	xyj = (xj*xj, norm²(cross(vpi, vpj)))
-	best = h
+	best = c
 	while true
-		u = iterate(nv, state)
+		u = iterate(fc, state)
 		u == nothing && return best
-		((h, k), state) = u
-		vpk = point(s, k) - p
+		((_, c), state) = u; c = prev(c); ck = left(m, c)
+		vpk = point(m, ck) - p
 		xk = dot(vpi, vpk)
-		iszero(xk) && return h
+		iszero(xk) && return c
 		xyk = (xk*xk, norm²(cross(vpi, vpk)))
 		if xyk[2]*xyj[1] > xyk[1]*xyj[2]
-			best = h; xyj = xyk
+			best = c; xyj = xyk
 		end
 	end
 	return best
@@ -1523,19 +1509,19 @@ end
 
 Returns `(face, flag)`, where `flag` is zero if p lies outside this face, and one if p lies inside this face.
 """
-function locate_point(s::CornerTable, cc_label, c, p)
+function locate_point(m::CornerTable, cc_label, c, p)
 	# find closest vertex to p
 	closest = 0; b = false; z = zero(p[1])
-	for (i, q) in pairs(points(s))
+	for (i, q) in pairs(points(m))
 		cc_label[i] == c || continue
 		z1 = norm²(q-p)
 		(b && z1 ≥ z) && continue
 		closest = i; z = z1
 	end
 	# find a good edge from closest vertex
-	h = find_good_halfedge(s, closest, p)
-	y = sort_radial_loop(s, h, p) # y is a half-edge in the radial loop of h
-	return (fld1(y, 3), destination(s, y) ≠ destination(s, h))
+	c = find_good_edge(m, Vertex(closest), p)
+	y = sort_radial_loop(m, c, p) # y is a half-edge in the radial loop of h
+	return (face(y), right(m, y) ≠ right(m, c))
 end
 # multiplicity ««2
 function multiplicity(m::CornerTable{I}) where{I}#««
@@ -1620,7 +1606,7 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 	for i1 in 1:length(cc_list), i2 in 1:length(cc_list)
 		i1 == i2 && continue
 		(f, b) = locate_point(m, face_cc, i2, point(m, vmax[i1]))
-		k = b + levels.level[rp.label[f]]
+		k = b + levels.level[rp.label[Int(f)]]
 		# if k > 0 then i1 inside i2
 		cc_nest[i1]+= k
 	end
