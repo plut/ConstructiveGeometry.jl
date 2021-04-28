@@ -25,8 +25,8 @@ include("Shapes.jl")
 using .Shapes
 # include("SpatialSorting.jl")
 # include("TriangleIntersections.jl")
-include("HalfEdgeMeshes.jl")
-using .HalfEdgeMeshes
+include("CornerTables.jl")
+using .CornerTables
 include("scad.jl")
 
 # Types««1
@@ -446,7 +446,7 @@ Cube = Ortho{3}
 @inline scad_info(s::Cube) = (:cube, (size=s.size,))
 function mesh(s::Cube, parameters)
 	pts = vertices(s, parameters)
-	return HalfEdgeMesh(pts, [ # 12 triangular faces:
+	return CornerTable(pts, [ # 12 triangular faces:
 	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
 	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
 	 (2, 1, 5), (5, 6, 2), (3, 1, 2), (2, 4, 3),
@@ -476,7 +476,7 @@ end
 
 @inline scad_info(s::Surface) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
-@inline mesh(s::Surface, parameters) = HalfEdgeMesh(s.points, s.faces)
+@inline mesh(s::Surface, parameters) = CornerTable(s.points, s.faces)
 
 
 # Constructive geometry operations««1
@@ -532,11 +532,11 @@ symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
 
 # Union««2
 CSGUnion = constructed_solid_type(:union)
-# this calls union of HalfEdgeMesh or PolygonXor as needed:
+# this calls union of CornerTable or PolygonXor as needed:
 @inline mesh(s::CSGUnion{2}, parameters) =
 	union(mesh(x, parameters) for x in children(s))
 @inline mesh(s::CSGUnion{3}, parameters) =
-	HalfEdgeMeshes.combine([mesh(x, parameters) for x in children(s)], 1,
+	CornerTables.combine([mesh(x, parameters) for x in children(s)], 1,
 		parameters.ε)
 @inline union(a1::AbstractGeometry{D}, a2::AbstractGeometry{D}) where{D} =
 	CSGUnion{D}(unroll2(a1, a2, Val(:union)))
