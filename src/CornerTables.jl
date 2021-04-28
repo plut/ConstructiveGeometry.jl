@@ -492,7 +492,7 @@ function simplify_points!(m::CornerTable{I}, ε = 0) where{I}
 			for i in c; push!(newname, i => v); end
 			push!(oldnames, v => c)
 		end
-		merge_point!(m, a1, b1)
+		merge_point!(m, v, u)
 
 	end
 	return newname
