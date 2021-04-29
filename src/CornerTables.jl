@@ -320,10 +320,10 @@ end
 	return cross(t[2]-t[1], t[3]-t[2])
 end
 @inline main_axis(m::CornerTable, f::Face) = main_axis(normal(m, f))
-function normalized_plane(m::CornerTable, f::Face)
+function normalized_plane(m::CornerTable, f::Face; absolute=false)
 	t = triangle(m, f)
 	d = cross(t[2]-t[1], t[3]-t[2])
-	a = main_axis(d)
+	a = main_axis(d); absolute && (a = abs(a))
 	c = @inbounds inv(d[abs(a)])
 	return SA[oftype(c, a), project2d(a, d) .* c..., dot(d, t[1])*c]
 end
@@ -471,32 +471,36 @@ function merge_point!(m::CornerTable, v::Vertex, x::Vertex)
 	nvertices!(m, nvertices(m)-1)
 end
 
+struct Renaming{T}
+	newname::SortedDict{T,T,Base.Order.ForwardOrdering}
+	oldnames::SortedDict{T,Vector{T},Base.Order.ForwardOrdering}
+	@inline Renaming{T}() where{T} =
+		new{T}(SortedDict{T,T}(), SortedDict{T,Vector{T}}())
+end
+@inline newname(r::Renaming, a) = get(r.newname, a, a)
+@inline oldnames(r::Renaming, a) = get(r.oldnames, a, [a])
+@inline function link!(r::Renaming, (l, a))
+	for i in l; push!(r.newname, i => a); end
+	push!(r.oldnames, a => l)
+end
+
 "removes ε-duplicates from point of m, and returns list of substitutions
 (as `oldindex=>newindex` iterator)"
 function simplify_points!(m::CornerTable{I}, ε = 0) where{I}
 	repl = simplify_points(points(m), ε)
-	newname = SortedDict{Vertex{I},Vertex{I}}()
-	oldnames = SortedDict{Vertex{I},Vector{Vertex{I}}}()
+	r = Renaming{Vertex{I}}()
 	for (a, b) in repl
-		a1 = get(newname, a, a)
-		b1 = get(newname, b, b)
+		a1 = newname(r, a)
+		b1 = newname(r, b)
+		l = lastvertex(m) # call this before merge_point!
 		a1 == b1 && continue
 		(u,v) = minmax(a1, b1)
-		c = [get(oldnames, a1, [a]); get(oldnames, b1, [b])]
-		l = lastvertex(m) # call this before merge_point!
+		link!(r, [oldnames(r, a1); oldnames(r, b1)] => u)
 
-		for i in c; push!(newname, i => u); end
-		push!(oldnames, u => c)
-
-		if v ≠ l
-			c = get(oldnames, l, [l])
-			for i in c; push!(newname, i => v); end
-			push!(oldnames, v => c)
-		end
+		v ≠ l && link!(r, oldnames(r, l) => v)
 		merge_point!(m, v, u)
-
 	end
-	return newname
+	return r.newname
 end
 # fans««2
 "creates the first fan at vertex `v`"
@@ -632,10 +636,11 @@ function findedge(m::CornerTable, u, v, w, clist, klist, i)#««
 # 	clist[i] = clist[i+3] = clist[i+6] = clist[i+9] = Corner(0)
 	klist[i] = klist[i+6] = implicitfan
 	clist[i] = clist[i+3] = Corner(0)
+# 	println("rotating around $u, looking for ($v, $w) (i=$i)")
 	for (k, c) in vertexcorners(m, u)
 		n = next(c); r = vertex(m, n)
 		p = prev(c); l = vertex(m, p)
-# 		println("  at ($k, $c): r=$r, l=$l")
+# 		println("  at ($k, $c): $(vertex(m,c)) $(base(m,c)) r=$r, l=$l")
 # 		(r == v) && println("   right is v=$v, storing clist[$i] ← $p")
 # 		(l == v) && println("   left is v=$v, storing klist[$i] ← $k")
 # 		(r == w) && println("   right is w=$w, storing clist[$(i+3)] ← p, klist[$(i+6)] ← $k")
@@ -684,8 +689,7 @@ function edge!(m::CornerTable, klist, clist, i1)#««
 	# i1+3:  (new) fan inside corner
 	# i1+6:  fan after corner
 	c = clist[i1+6]; cout = clist[i3+3]; cin = clist[i2]
-# 	println("\e[34;7m glue_edge($c $(base(m,c))) cout=$cout cin=$cin\e[m"); valfans(m); verbose(m); global ME=deepcopy(m)
-# 	verbose(m)
+# 	println("\e[34;7m glue_edge($c $(base(m,c))) cout=$cout cin=$cin\e[m");verbose(m); global ME=deepcopy(m)
 	if !isboundary(cin) # there is already an inner corner
 		op_in = opposite(m, cin)
 		if isboundary(op_in) # op_in is the last edge in its fan
@@ -769,7 +773,7 @@ end#»»
 function set_face!(m::CornerTable{I}, f, vlist, a = nothing) where{I}
 	attribute!(m, f, a)
 	n = 3*Int(f)-3
-# 	println("\e[32;7mset_face!($f, $vlist)\e[m"); valfans(m, f)
+# 	println("\e[32;7mset_face!($f, $vlist)\e[m"); verbose(m); valfans(m, f)
 	v1 = vlist[1]; v2=vlist[2]; v3=vlist[3]
 	explicit_fan!(m, v1)
 	explicit_fan!(m, v2)
@@ -795,6 +799,7 @@ function set_face!(m::CornerTable{I}, f, vlist, a = nothing) where{I}
 # $v3 fans: $(klist[[3,6,9]]) in=$(clist[1]) out=$(clist[5])
 # """)
 # 	println("clist=$clist")
+# 	for c in clist; Int(c) > 0 && println("$c: $(vertex(m,c)) $(base(m,c))"); end
 # 	println("klist=$klist")
 	edge!(m, klist, clist, 1)
 	edge!(m, klist, clist, 2)
@@ -863,12 +868,12 @@ end#»»
 # returns the equivalence relation, as pairs of indices in `flist`:
 function coplanar_faces(m::CornerTable, flist, ε = 0)
 	@inline box(l,ε) = BBox(l, l .+ ε)
-	boxes = [ box(normalized_plane(m, f), ε) for f in flist ]
+	boxes = [ box(normalized_plane(m, f, absolute=true), ε) for f in flist ]
 	return SpatialSorting.intersections(boxes)
 end
 
 function opposite_faces(m::CornerTable)
-	r = NTuple{2,Vertex{index_type(m)}}[]
+	r = NTuple{2,Face{index_type(m)}}[]
 	for f in allfaces(m)
 		c1 = corner(f, Side(1))
 		ismultiple(opposite(m, c1)) || continue
@@ -887,8 +892,6 @@ end
 function coplanar_clusters(m::CornerTable, ε = 0)
 	rel = coplanar_faces(m, allfaces(m), ε)
 	rel2= [(Face(x),Face(y)) for (x,y) in rel if isadjacent(m, Face(x),Face(y))]
-	global R=rel2
-	global E=(equivalence_structure(rel2))
 	return collect(classes(equivalence_structure(rel2)))
 end
 # reverse, concatenate««2
@@ -901,9 +904,9 @@ function Base.reverse(m::CornerTable)#««
 	ncorners!(r, ncorners(m))
 	r.corner .= newcorner.(m.corner)
 	for n in 3:3:ncorners(r)
-		r.opposite[n-2] = newopp(m.opposite[n  ]); r.vertex[n-2] = m.vertex[n  ]
-		r.opposite[n-1] = newopp(m.opposite[n-1]); r.vertex[n-1] = m.vertex[n-1]
-		r.opposite[n  ] = newopp(m.opposite[n-2]); r.vertex[n  ] = m.vertex[n-2]
+		r.opposite[n-2] = newopp(m.opposite[n-2]); r.vertex[n-2] = m.vertex[n-2]
+		r.opposite[n-1] = newopp(m.opposite[n-0]); r.vertex[n-1] = m.vertex[n-0]
+		r.opposite[n  ] = newopp(m.opposite[n-1]); r.vertex[n  ] = m.vertex[n-1]
 	end
 	nfans!(r, nfans(m))
 	r.fan_next .= m.fan_next
@@ -1120,7 +1123,7 @@ function project_and_triangulate(m::CornerTable, direction, vlist,elist=nothing)
 		emat = Matrix{Int}(undef, length(elist), 2)
 		emat[:,1] .= collect(Int(e[1]) for e in elist)
 		emat[:,2] .= collect(Int(e[2]) for e in elist)
-		println("triangulate: $vmat $vlist $emat")
+# 		println("triangulate: $vmat $vlist $emat")
 		tri = LibTriangle.constrained_triangulation(vmat, vref, emat)
 #=
 plot '/tmp/a' index 0 u 1:2 w p pt 5, '' index 1 u 1:2:3:4:0 w vectors lc palette lw 3, '' index 0 u 1:2:3 w labels font "bold,14"
@@ -1227,33 +1230,33 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 		
 	# iterate over all clusters of broken faces
 	for icluster in classes(clusters)
-		direction = main_axis(m, si.faces[first(icluster)])[1]
+		direction = main_axis(m, si.faces[first(icluster)])
 
-		# for type-stability, we need empty vectors here:
-		allvertices = vcat(similar(in_face_v, 0), view(in_face_v, icluster)...)
-		alledges = vcat(similar(in_face_e, 0), view(in_face_e, icluster)...)
-		unique!(sort!(allvertices))
-		unique!(sort!(alledges))
+		# type-stable versions of vcat:
+		allvertices = unique!(sort!(reduce(vcat, view(in_face_v, icluster))))
+		alledges = unique!(sort!(reduce(vcat, view(in_face_e, icluster))))
 
 		alltriangles = project_and_triangulate(m, abs(direction),
 			allvertices, alledges)
-		println("\e[1mcluster $icluster\e[m $(in_face_v[icluster]) => $(collect(alltriangles))")
+# 		println("\e[1mcluster $icluster\e[m $direction $(in_face_v[icluster]) => $(collect(alltriangles))")
+# 		for i in icluster; f = si.faces[i]; println(" $f: $(vertices(m,f)) $(main_axis(m,f)>0)"); end
 
 		# apply face refinement:
 		for i in icluster
 			f = si.faces[i]
 			a = attribute(m, f)
-			orient = main_axis(m,f)[1] > 0
+			orient = main_axis(m,f) > 0
 			isfirst = true
 			for tri in alltriangles
 				issubset(tri, in_face_v[i]) || continue
+				orient || (tri = reverse(tri))
 				if isfirst
 					cut_face!(m, f); isfirst = false
 				else
 					nfaces!(m, nfaces(m)+1); f = lastface(m)
 					attribute!(m, f, a)
 				end
-				set_face!(m, f, orient ? tri : reverse(tri), a)
+				set_face!(m, f, tri, a)
 			end
 		end
 	end
@@ -1463,7 +1466,7 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 		p1 = plist[1]; o1 = olist[1]
 # 		println("sorted radial loop is $clist")
 # 		for i in 1:n
-# 			println("  $(clist[i]) $(dlist[i]):   face $(face(clist[i]))=$(vertices(m,face(clist[i])))  p$(plist[i])")
+# 			println("  $(clist[i]) $(olist[i]):   face $(face(clist[i]))=$(vertices(m,face(clist[i])))  p$(plist[i])")
 # 		end
 		for i in 2:n
 			p2 = plist[i]; o2 = olist[i]
@@ -1529,20 +1532,22 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 		face_level[f] = 1 + levels.level[rp.label[f]] + cc_nest[c]
 	end
 	for (f1, f2) in opposite_faces(m)
-		face_level[f1]-= 1
-		face_level[f2]-= 1
+		face_level[Int(f1)]-= 1
+		face_level[Int(f2)]-= 1
 	end
 	return face_level
 end#»»
 # simplification (retriangulate faces) ««1
-function simplify(m::CornerTable, ε = _DEFAULT_EPSILON)
+function simplify!(m::CornerTable, ε = _DEFAULT_EPSILON)
 	for cluster in coplanar_clusters(m, ε)
 		direction = main_axis(m, first(cluster))
 		vlist = Vertex{index_type(m)}[]
+		# TODO: detect cluster border and triangulate *that* only
+		# (this would work with non-connected cluster as well)
 		for f in cluster; push!(vlist, vertices(m, f)...); end
-		println("$cluster => $vlist")
-		triangles = collect(project_and_triangulate(m, abs(direction),  vlist))
-		println("  => $(length(triangles)) faces: $triangles")
+		tri = collect(project_and_triangulate(m, abs(direction),  vlist))
+# 		length(tri) == length(cluster) && continue
+		println("$cluster: $(length(cluster)) => $(length(tri))\n  $cluster\n  $([vertices(m,f) for f in cluster])\n  $tri")
 	end
 end
 # operations««1
