@@ -5,17 +5,18 @@
   - [ ] maybe even better, interface as parametric types
    rename `PolygonXor`? `PolygonalShape`?
  - **3d subsystem**
-  - [x] interface via `HalfEdgeMesh` and short list of functions
+  - [x] interface via `CornerTables` and short list of functions
+   - [ ] document this list of functions
  - **Definitions of geometric objects**
   - [x] _2d primitives_: circle, square, polygon
   - _3d primitives_: sphere, cube, cylinder, surface (?)
-  - Some 3d primitives are accessible via extrusion:
+  - [ ] Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
    - simplicity vs. efficiency?
-  - _Geometry transforms_: invertible affine transform, projection,
+  - [ ]_Geometry transforms_: invertible affine transform, projection,
    linear extrusion, rotational extrusion
-  - _Non-geometry transforms_: `set_parameters`, color
-  - _CG operations_: union, inter, diff, hull, offset, minkowski+, minkowski-
+  - [ ] _Non-geometry transforms_: `set_parameters`, color
+  - [ ] _CG operations_: union, inter, diff, hull, offset, minkowski+, minkowski-
  - **Syntactic sugar**
  - **Import/export**
   - SCAD
@@ -26,23 +27,12 @@
  - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document
  operators: LeftBack, LeftFront, RightBack, RightFront, Source, Target,
  Left, Right; Point, Edge
- - [ ] write generic functions for face deletion/insertion in
+ - [+] write generic functions for face deletion/insertion in
    HalfEdgeMesh, and use that for (a) mesh construction, (b)
    subtriangulation, (c) simplification (retriangulate faces, removing
    vertices).
- - [ ] use a singular half-edge data structure such as:
+ - [+] use a singular half-edge data structure such as:
  https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.11.4605&rep=rep1&type=pdf
-  additions to structure:
-  - if half-edge is a boundary: opposite = 0
- (and in that case, a simple algorithm finds the next/prev in boundary)
-  - if half-edge is singular: opposite < 0
- (and actually points to next in radial loop)
-  - singular vertices (e.g. bowtie) now need one separate edgefrom for
-    each regular cone (the first one in trig. order; next ones can be
-    found by walking the shape)
-  - if vertex is singular: edgefrom < 0 (points to a cone structure)
-  - cone structure points to next cone at this vertex + first
-    half-edge in this cone + vertex number
  - [x] write set of tests for 2d subsystem: number of vertices and paths
    for known shapes, etc.
  - [x] group together what belongs to `Square`, etc. (in particular,
@@ -60,7 +50,7 @@
   - [ ] `AbstractGeometry`: remove stale `Meshes` dependency
   - [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
   - [x] `AABBTree` -> `SpatialSorting` + `TriangleIntersections`
-  - [x] `Meshing` -> `HalfEdgeMeshes`
+  - [x] `Meshing` -> `CornerTables`
  - [x] implement ZGZJ's cluster triangulation to prevent crossing faces
   - [x] “thicken” faces (and edges) wrt intersection (i.e. add small,
     well-defined tolerance). As a parameter in `set_parameters`?

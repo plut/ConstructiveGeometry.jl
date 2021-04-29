@@ -35,6 +35,7 @@ include("EquivalenceStructures.jl")
 using .EquivalenceStructures
 
 const _INDEX_TYPE = Int
+const _DEFAULT_EPSILON=1/65536
 
 # For a mesh having `n` vertices, we expect the following counts:
 #  - 6n + O(1) half-edges;
@@ -860,9 +861,9 @@ function CornerTable(points, faces, attributes = Iterators.repeated(nothing))#«
 end#»»
 # coplanar and opposite faces««2
 # returns the equivalence relation, as pairs of indices in `flist`:
-function coplanar_faces(s::CornerTable, flist, ε = 0)
+function coplanar_faces(m::CornerTable, flist, ε = 0)
 	@inline box(l,ε) = BBox(l, l .+ ε)
-	boxes = [ box(normalized_plane(s, f), ε) for f in flist ]
+	boxes = [ box(normalized_plane(m, f), ε) for f in flist ]
 	return SpatialSorting.intersections(boxes)
 end
 
@@ -881,6 +882,14 @@ function opposite_faces(m::CornerTable)
 		end
 	end
 	return r
+end
+
+function coplanar_clusters(m::CornerTable, ε = 0)
+	rel = coplanar_faces(m, allfaces(m), ε)
+	rel2= [(Face(x),Face(y)) for (x,y) in rel if isadjacent(m, Face(x),Face(y))]
+	global R=rel2
+	global E=(equivalence_structure(rel2))
+	return collect(classes(equivalence_structure(rel2)))
 end
 # reverse, concatenate««2
 function Base.reverse(m::CornerTable)#««
@@ -1090,7 +1099,7 @@ function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
 end#»»
 # subtriangulation««1
 # project_and_triangulate ««2
-function project_and_triangulate(m::CornerTable, direction, vlist, elist)
+function project_and_triangulate(m::CornerTable, direction, vlist,elist=nothing)
 	# build matrix of coordinates according to `vlist`:
 	    if direction == 1 d = [2,3]
 	elseif direction ==-1 d = [3,2]
@@ -1105,26 +1114,30 @@ function project_and_triangulate(m::CornerTable, direction, vlist, elist)
 
 	vref = Int.(vlist)
 
-	emat = Matrix{Int}(undef, length(elist), 2)
-	emat[:,1] .= collect(Int(e[1]) for e in elist)
-	emat[:,2] .= collect(Int(e[2]) for e in elist)
-	println("triangulate: $vmat $vlist $emat")
-
+	if elist == nothing
+		tri = LibTriangle.basic_triangulation(vmat, vref)
+	else
+		emat = Matrix{Int}(undef, length(elist), 2)
+		emat[:,1] .= collect(Int(e[1]) for e in elist)
+		emat[:,2] .= collect(Int(e[2]) for e in elist)
+		println("triangulate: $vmat $vlist $emat")
+		tri = LibTriangle.constrained_triangulation(vmat, vref, emat)
 #=
 plot '/tmp/a' index 0 u 1:2 w p pt 5, '' index 1 u 1:2:3:4:0 w vectors lc palette lw 3, '' index 0 u 1:2:3 w labels font "bold,14"
 =#
-	for (i, v) in pairs(vlist)
-		println("$(vmat[i,1])\t$(vmat[i,2])\t$v")
+# 	for (i, v) in pairs(vlist)
+# 		println("$(vmat[i,1])\t$(vmat[i,2])\t$v")
+# 	end
+# 	println("\n\n")
+# 	for i in 1:size(emat,1)
+# 		v1 = findfirst(==(Vertex(emat[i,1])), vlist)
+# 		v2 = findfirst(==(Vertex(emat[i,2])), vlist)
+# 		println("$(vmat[v1,1])\t$(vmat[v1,2])\t$(vmat[v2,1]-vmat[v1,1])\t$(vmat[v2,2]-vmat[v1,2])")
+# 	end
+# 	println("\n\n")
 	end
-	println("\n\n")
-	for i in 1:size(emat,1)
-		v1 = findfirst(==(Vertex(emat[i,1])), vlist)
-		v2 = findfirst(==(Vertex(emat[i,2])), vlist)
-		println("$(vmat[v1,1])\t$(vmat[v1,2])\t$(vmat[v2,1]-vmat[v1,1])\t$(vmat[v2,2]-vmat[v1,2])")
-	end
-	println("\n\n")
-	return ((Vertex(t[1]), Vertex(t[2]), Vertex(t[3]))
-		for t in LibTriangle.constrained_triangulation(vmat, vref, emat))
+
+	return ((Vertex(t[1]), Vertex(t[2]), Vertex(t[3])) for t in tri)
 end
 
 # subtriangulate««2
@@ -1246,7 +1259,6 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 	end
 	return m
 end
-
 # multiplicity««1
 # regular_patches««2
 """
@@ -1522,8 +1534,18 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 	end
 	return face_level
 end#»»
+# simplification (retriangulate faces) ««1
+function simplify(m::CornerTable, ε = _DEFAULT_EPSILON)
+	for cluster in coplanar_clusters(m, ε)
+		direction = main_axis(m, first(cluster))
+		vlist = Vertex{index_type(m)}[]
+		for f in cluster; push!(vlist, vertices(m, f)...); end
+		println("$cluster => $vlist")
+		triangles = collect(project_and_triangulate(m, abs(direction),  vlist))
+		println("  => $(length(triangles)) faces: $triangles")
+	end
+end
 # operations««1
-const _DEFAULT_EPSILON=1/65536
 """
     combine(meshes, μ, ε = 0)
 
