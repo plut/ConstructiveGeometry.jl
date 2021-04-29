@@ -3,8 +3,18 @@ using Test
 using StaticArrays
 using LinearAlgebra
 
-CG = ConstructiveGeometry
+G = ConstructiveGeometry
 
+@testset "2d" begin#««1
+nva(s::G.Shapes.PolygonXor) = (length.(s.paths), G.Shapes.area(s))
+r1 = G.Square(2.,1)
+r2 = G.Square(1.,2)
+r3 = G.Square(3.,3)
+# r4 = G.Translate([4,4], G.Square(1,1))
+@test nva(mesh(union(r1,r2))) == ([6], 3)
+@test nva(mesh(union(r1,r3))) == ([4], 9)
+# @test nva(mesh(union(r1,r4))) == ([4,4], 3)
+end
 
 # function test_from_to(T, x)
 # 	return @test from_clipper(T, to_clipper(T, x)) == x
@@ -221,63 +231,64 @@ CG = ConstructiveGeometry
 # @test check_inter(pts(SA[28. 0 0;12 0 0;20 0 -8]),
 # 		pts(SA[25. 0 0;20 0 -5;15 0 0]), 2)
 # end
-@testset "Surfaces" begin #««1
-using ConstructiveGeometry: Surface, merge, mesh
-# using ConstructiveGeometry: nvertices, nfaces
-v=[[0,-1],[1,0],[0,1],[-1,0]]
-for j in eachindex(v), i in 1:j-1
-	@test ConstructiveGeometry.circular_lt(v[i], v[j])
-end
-nvf(s) = (CG.nvertices(s), CG.nfaces(s))
-p=Surface([[-1.,0,0],[1,0,0],[0,1,0],[0,0,1]],
-         [[3,2,1],[4,1,2],[4,3,1],[4,2,3]])
-@test nvf(mesh(2p \ p)) == (8, 12)
-# @test connected_components([:a, :b, :c, :d, :e], [[1,2],[1,3],[4,5]]) ==
-# 	[([:a, :b, :c], [[1,2],[1,3]]),
-# 	 ([:d, :e], [[1,2]]) ]
-function pyramid(t=[0,0,0], n=0)
-	points = ([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
-  faces = [[4,3,2],[2,1,4],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
-	faces1 = [ f .+ n for f in faces ]
-	return surface(points, faces1)
-end
-p1 = pyramid()
-p2 = pyramid([1,0,0])
-u12 = mesh(p1 ∪ p2)
-i12 = mesh(p1 ∩ p2)
-d12 = mesh(p1 \ p2)
-@test nvf(u12) == (14, 24)
-@test nvf(i12) == (8, 12)
-@test nvf(d12) == (8, 12)
-
-function tetrahedron(;center=[0,0,0], radius=1)
-	return surface([center+radius*[1,0,-.5], center+radius*[-1,0,-.5],
-		center+radius*[0,1,.5],center+radius*[0,-1,.5]],
-		[[1,3,4],[1,2,3],[1,4,2],[2,4,3]])
-end
-
-t1 = tetrahedron()
-t2 = 2t1
-t3 = [3,0,0]+t1
-@test nvf(mesh(t1∪t2)) == (4,4)
-@test nvf(mesh(t1∪t3)) == (8,8)
-@test nvf(mesh(t1∩t2)) == (4,4)
-@test nvf(mesh(t1∩t3)) == (0,0)
-@test nvf(mesh(t1\t1)) == (0,0)
-@test nvf(mesh(t1\t3)) == (4,4)
-@test nvf(mesh(t1\t2)) == (0,0) # t1 ⊂ t2
-@test nvf(mesh(t2\t1)) == (8,8)
-
-end
-@testset "Difference of rotate_extrude()" begin# ««1
-m1=mesh(rotate_extrude(10,[2,0]+circle(1)))
-m2=mesh(rotate_extrude(11,[2,0]+circle(.5)))
-@debug "###### difference ######"
-m3=mesh(m1\m2)
-@test CG.nfaces(m3) == 2*CG.nvertices(m3)
-end
-#»»1
+# @testset "Surfaces" begin #««1
+# using ConstructiveGeometry: Surface, merge, mesh
+# # using ConstructiveGeometry: nvertices, nfaces
+# v=[[0,-1],[1,0],[0,1],[-1,0]]
+# for j in eachindex(v), i in 1:j-1
+# 	@test ConstructiveGeometry.circular_lt(v[i], v[j])
+# end
+# nvf(s) = (CG.nvertices(s), CG.nfaces(s))
+# p=Surface([[-1.,0,0],[1,0,0],[0,1,0],[0,0,1]],
+#          [[3,2,1],[4,1,2],[4,3,1],[4,2,3]])
+# @test nvf(mesh(2p \ p)) == (8, 12)
+# # @test connected_components([:a, :b, :c, :d, :e], [[1,2],[1,3],[4,5]]) ==
+# # 	[([:a, :b, :c], [[1,2],[1,3]]),
+# # 	 ([:d, :e], [[1,2]]) ]
+# function pyramid(t=[0,0,0], n=0)
+# 	points = ([ t, t+[2.,0,0], t+[2,2,0], t+[0,2,0], t+[1,1,1]])
+#   faces = [[4,3,2],[2,1,4],[1,2,5],[2,3,5],[3,4,5],[4,1,5]]
+# 	faces1 = [ f .+ n for f in faces ]
+# 	return surface(points, faces1)
+# end
+# p1 = pyramid()
+# p2 = pyramid([1,0,0])
+# u12 = mesh(p1 ∪ p2)
+# i12 = mesh(p1 ∩ p2)
+# d12 = mesh(p1 \ p2)
+# @test nvf(u12) == (14, 24)
+# @test nvf(i12) == (8, 12)
+# @test nvf(d12) == (8, 12)
+# 
+# function tetrahedron(;center=[0,0,0], radius=1)
+# 	return surface([center+radius*[1,0,-.5], center+radius*[-1,0,-.5],
+# 		center+radius*[0,1,.5],center+radius*[0,-1,.5]],
+# 		[[1,3,4],[1,2,3],[1,4,2],[2,4,3]])
+# end
+# 
+# t1 = tetrahedron()
+# t2 = 2t1
+# t3 = [3,0,0]+t1
+# @test nvf(mesh(t1∪t2)) == (4,4)
+# @test nvf(mesh(t1∪t3)) == (8,8)
+# @test nvf(mesh(t1∩t2)) == (4,4)
+# @test nvf(mesh(t1∩t3)) == (0,0)
+# @test nvf(mesh(t1\t1)) == (0,0)
+# @test nvf(mesh(t1\t3)) == (4,4)
+# @test nvf(mesh(t1\t2)) == (0,0) # t1 ⊂ t2
+# @test nvf(mesh(t2\t1)) == (8,8)
+# 
+# end
+# @testset "Difference of rotate_extrude()" begin# ««1
+# m1=mesh(rotate_extrude(10,[2,0]+circle(1)))
+# m2=mesh(rotate_extrude(11,[2,0]+circle(.5)))
+# @debug "###### difference ######"
+# m3=mesh(m1\m2)
+# @test CG.nfaces(m3) == 2*CG.nvertices(m3)
+# end
+# #»»1
 @testset "Spatial sorting" begin#««
+include("../src/SpatialSorting.jl")
 # Bounding box««
 struct BoundingBox{N,T}
 	min::SVector{N,T}

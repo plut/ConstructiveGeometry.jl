@@ -534,7 +534,7 @@ symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
 CSGUnion = constructed_solid_type(:union)
 # this calls union of CornerTable or PolygonXor as needed:
 @inline mesh(s::CSGUnion{2}, parameters) =
-	union(mesh(x, parameters) for x in children(s))
+	Shapes.clip(:union, (mesh(x, parameters) for x in children(s))...,)
 @inline mesh(s::CSGUnion{3}, parameters) =
 	CornerTables.combine([mesh(x, parameters) for x in children(s)], 1,
 		parameters.ε)
@@ -543,11 +543,15 @@ CSGUnion = constructed_solid_type(:union)
 
 # Intersection««2
 CSGInter = constructed_solid_type(:intersection)
-@inline mesh(s::CSGInter, parameters) =
-	intersect(mesh(x, parameters) for x in children(s))
+@inline mesh(s::CSGInter{2}, parameters) =
+	Shapes.clip(:intersection, (mesh(x,parameters) for x in children(s))...,)
+@inline mesh(s::CSGInter{3}, parameters) =
+	CornerTables.combine([mesh(x,parameters) for x in children(s)],
+		length(children(s)), parameters.ε)
+@inline intersect(a1::AbstractGeometry{D}, a2::AbstractGeometry{D}) where{D} =
+	CSGInter{D}(unroll2(a1, a2, Val(:intersection)))
 # FIXME allow intersection of 2d and 3d primitives (as 2d result)
-@inline intersect(a1::AbstractGeometry, a2::AbstractGeometry) =
-	CSGInter{minimum(embeddim.((a1,a2)))}(unroll2(a1, a2, Val(:intersection)))
+#  - first intersect with a plane (TODO)
 
 # Difference««2
 # this is a binary operator:
@@ -1227,7 +1231,7 @@ mesh(x::Surface, parameters...) = x
 #»»1
 # Converting 3d objects to Surfaces««1
 # Primitive objects««2
-mesh(s::Surface, parameters) = s
+# mesh(s::Surface, parameters) = s
 
 function vertices(s::Cube, parameters)
 	z = zero(coordtype(s))

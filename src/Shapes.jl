@@ -347,9 +347,9 @@ end
 @inline clip(op, s::PolygonXor{T}...) where{T} =
 	PolygonXor{T}(reduce((p,q)->clip(op, paths(p), paths(q), fill=:evenodd), s))
 
-@inline Base.union(s::PolygonXor...) = clip(:union, s...)
-@inline Base.intersect(s::PolygonXor...) = clip(:intersection, s...)
-@inline Base.setdiff(s1::PolygonXor, s2::PolygonXor) = clip(:difference, s1, s2)
+# @inline Base.union(s::PolygonXor...) = clip(:union, s...)
+# @inline Base.intersect(s::PolygonXor...) = clip(:intersection, s...)
+# @inline Base.setdiff(s1::PolygonXor, s2::PolygonXor) = clip(:difference, s1, s2)
 
 @inline area(shape::PolygonXor) = sum(area.(paths(shape)))
 @inline convex_hull(shape::PolygonXor{T}...) where{T} =
