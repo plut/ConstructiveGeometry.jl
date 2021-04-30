@@ -13,6 +13,9 @@ using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers # for Clipper
 using FastClosures
+module LibTriangle
+	using Triangle
+end
 import Clipper
 
 Path{D,T} = Vector{SVector{D,T}}
@@ -306,9 +309,9 @@ function perimeters(p::PolygonXor)
 	firstindex = zeros(Int, length(p.paths))
 	firstindex[1] = 0
 	for i in 1:length(p.paths)-1
-		firstindex[i+1] = firstindex[i] + nvertices(p.paths[i])
+		firstindex[i+1] = firstindex[i] + length(p.paths[i])
 	end
-	return [[firstindex[i]+1 : firstindex[i] + nvertices(p.paths[i]);]
+	return [[firstindex[i]+1 : firstindex[i] + length(p.paths[i]);]
 		for i in eachindex(p.paths)]
 end
 
@@ -323,7 +326,7 @@ returns a vector mapping individual polygons of `s` to:
 """
 function identify_polygons(s::PolygonXor)
 	n = length(paths(s))
-	m = [ point_in_polygon(vertices(p)[1], q) for p in paths(s), q in paths(s) ]
+	m = [ point_in_polygon(first(p), q) for p in paths(s), q in paths(s) ]
 	index = zeros(Int, n)
 	hole = zeros(Int, n)
 	c = 0 # number of connected components
@@ -370,6 +373,29 @@ end
 # 	return PolygonXor(minkowski(cp, cq, fill=:evenodd)...)
 # end
 
+# Triangulation««1
+function triangulate(m::PolygonXor)
+	v = vertices(m)
+	id = identify_polygons(m)
+	peri = perimeters(m)
+	is_hole = falses(length(v))
+	edges = Matrix{Int}(undef, sum(length.(peri)), 2)
+	c = 0
+	for (k, p) in pairs(peri)
+		id[k] < 0 && (is_hole[p] .= true)
+		n = length(p)
+		for i in 1:n, j in 1:2
+			edges[c+i,j] = p[mod1(i+j-1,n)]
+		end
+		c+= n
+	end
+	println("edges=$edges")
+	tri = LibTriangle.constrained_triangulation(
+		Matrix{Float64}([transpose.(v)...;]),
+		collect(1:length(v)), edges)
+	# remove triangle made entirely of hole vertices
+	return tri[[!all(is_hole[t]) for t in tri]]
+end
 # Exports««1
 
 export Path

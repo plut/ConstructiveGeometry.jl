@@ -5,21 +5,69 @@ using LinearAlgebra
 
 G = ConstructiveGeometry
 
-@testset "2d" begin#««1
+@testset "2d" begin#««
 nva(s::G.Shapes.PolygonXor) = (length.(s.paths), G.Shapes.area(s))
 r1 = G.Square(2.,1)
 r2 = G.Square(1.,2)
 r3 = G.Square(3.,3)
-# r4 = G.Translate([4,4], G.Square(1,1))
+r4 = G.AffineTransform(G.TranslationMap([4,4]), G.Square(1,1))
 @test nva(mesh(union(r1,r2))) == ([6], 3)
 @test nva(mesh(union(r1,r3))) == ([4], 9)
-# @test nva(mesh(union(r1,r4))) == ([4,4], 3)
+@test nva(mesh(union(r1,r4))) == ([4,4], 3)
+@test nva(mesh(intersect(r1,r2))) == ([4], 1)
+@test nva(mesh(intersect(r2,r1))) == ([4], 1)
+@test nva(mesh(intersect(r1,r3))) == ([4], 2)
+@test nva(mesh(intersect(r3,r1))) == ([4], 2)
+@test nva(mesh(intersect(r1,r4))) == ([], 0)
+@test nva(mesh(setdiff(r1,r2))) == ([4], 1)
+@test nva(mesh(setdiff(r3,r1))) == ([6], 7)
+end#»»
+@testset "Spatial sorting" begin#««
+include("../src/SpatialSorting.jl")
+# Bounding box««
+struct BoundingBox{N,T}
+	min::SVector{N,T}
+	max::SVector{N,T}
 end
 
-# function test_from_to(T, x)
-# 	return @test from_clipper(T, to_clipper(T, x)) == x
-# end
+BoundingBox{N}(min::AbstractVector, max::AbstractVector) where{N} =
+	BoundingBox{N,promote_type(eltype(min), eltype(max))}(min, max)
+BoundingBox(min::StaticVector{N}, max::StaticVector{N}) where{N} =
+	BoundingBox{N}(min, max)
+function BoundingBox(min::AbstractVector, max::AbstractVector)
+	length(min) == length(max) || throw(DimensionMismatch(
+	"min and max must have same length ($(length(min)),$(length(max)))"))
+	return BoundingBox{length(min)}(min, max)
+end
 
+@inline Base.merge(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
+	BoundingBox{N}(min.(box1.min, box2.min), max.(box1.max, box2.max))
+@inline Base.:∩(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
+	BoundingBox{N}(max.(box1.min, box2.min), min.(box1.max, box2.max))
+@inline Base.isempty(box::BoundingBox) = any(box.min .> box.max)
+@inline SpatialSorting.position(box::BoundingBox) = box.min + box.max
+
+function rbb(int1, int2, n)
+	v = rand(int1, n)
+	w = rand(int2, n)
+	return BoundingBox(v, v+w)
+end
+boxes=[ rbb(1:500, 1:10, 3) for _ in 1:3000 ]
+
+function validate(boxes)
+	int = extrema.(SpatialSorting.intersections(boxes))
+	for i = 1:length(boxes), j = 1:i-1
+		a = SpatialSorting.intersects(boxes[i], boxes[j])
+		b = (j,i) ∈ int
+		(a ≠ b) && return false
+	end
+	return true
+end
+
+@test validate(boxes)
+
+#»»
+end#»»
 # @testset "Types" begin #««1
 # @testset "Basic types" begin #««2
 # V = Point(1,2)
@@ -287,50 +335,4 @@ end
 # @test CG.nfaces(m3) == 2*CG.nvertices(m3)
 # end
 # #»»1
-@testset "Spatial sorting" begin#««
-include("../src/SpatialSorting.jl")
-# Bounding box««
-struct BoundingBox{N,T}
-	min::SVector{N,T}
-	max::SVector{N,T}
-end
-
-BoundingBox{N}(min::AbstractVector, max::AbstractVector) where{N} =
-	BoundingBox{N,promote_type(eltype(min), eltype(max))}(min, max)
-BoundingBox(min::StaticVector{N}, max::StaticVector{N}) where{N} =
-	BoundingBox{N}(min, max)
-function BoundingBox(min::AbstractVector, max::AbstractVector)
-	length(min) == length(max) || throw(DimensionMismatch(
-	"min and max must have same length ($(length(min)),$(length(max)))"))
-	return BoundingBox{length(min)}(min, max)
-end
-
-@inline Base.merge(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
-	BoundingBox{N}(min.(box1.min, box2.min), max.(box1.max, box2.max))
-@inline Base.:∩(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
-	BoundingBox{N}(max.(box1.min, box2.min), min.(box1.max, box2.max))
-@inline Base.isempty(box::BoundingBox) = any(box.min .> box.max)
-@inline SpatialSorting.position(box::BoundingBox) = box.min + box.max
-
-function rbb(int1, int2, n)
-	v = rand(int1, n)
-	w = rand(int2, n)
-	return BoundingBox(v, v+w)
-end
-boxes=[ rbb(1:500, 1:10, 3) for _ in 1:3000 ]
-
-function validate(boxes)
-	int = extrema.(SpatialSorting.intersections(boxes))
-	for i = 1:length(boxes), j = 1:i-1
-		a = SpatialSorting.intersects(boxes[i], boxes[j])
-		b = (j,i) ∈ int
-		(a ≠ b) && return false
-	end
-	return true
-end
-
-@test validate(boxes)
-
-#»»
-end#»»
 # vim: noet ts=2 fmr=««,»»

@@ -1,12 +1,15 @@
 # Split of module
+ - *new file:* convex hulls
  - **2d subsystem**
   - [x] interface via simple `Vector{SVector{2}}` objects and short list of
     functions
   - [ ] maybe even better, interface as parametric types
    rename `PolygonXor`? `PolygonalShape`?
+  - *TODO*: add half-plane intersections in this module
+  - *TODO*: reconstruct polygonal shape by list of segments (for project)
  - **3d subsystem**
   - [x] interface via `CornerTables` and short list of functions
-   - [ ] document this list of functions
+   - [x] document this list of functions
  - **Definitions of geometric objects**
   - [x] _2d primitives_: circle, square, polygon
   - _3d primitives_: sphere, cube, cylinder, surface (?)
@@ -22,6 +25,7 @@
   - SCAD
   - STL
  - **Visualization** (TODO)
+ - **Convex hull** (in its own file)
 # For version 0.2 (performance update)
  # corner table http://graphics.stanford.edu/courses/cs468-12-spring/LectureSlides/02_Mesh_Data_Structures.pdf
  - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document
