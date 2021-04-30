@@ -11,21 +11,20 @@ using Logging
 using FastClosures
 # using DataStructures
 
-import Polyhedra # for convex hull
-import GLPK
-
-# using MiniQhull
 import Rotations
 import Colors: Colors, Colorant
 import Clipper
-
 
 import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
 import Base: *, +, -, ∈, inv, sign, iszero
 
+# sub-packages:
+include("ConvexHull.jl")
+using .ConvexHull
 include("Shapes.jl")
 using .Shapes
+
 # include("SpatialSorting.jl")
 # include("TriangleIntersections.jl")
 include("CornerTables.jl")
@@ -314,46 +313,61 @@ function fibonacci_sphere_points(T::Type{<:Real}, n::Int)
 end
 @inline fibonacci_sphere_points(r::Real, parameters...) =
 	r*fibonacci_sphere_points(real_type(r), sphere_nvertices(r, parameters...))
-
-# Polyhedra interface««1
-@inline polyhedra_lib(T::Type{<:Real}) =
-	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
-
-# fixing an oversight in Polyhedra.jl: it has multiplications but no
-# divisions
-@inline Base.:(/)(h::Polyhedra.HyperPlane, α::Real) =
-	Polyhedra.HyperPlane(h.a / α, h.β / α)
-
-# converts path to matrix with points as rows:
-@inline poly_vrep(points::Path) = vcat(transpose.(Vector.(points))...)
-@inline poly_vrep(points::Matrix) = points
-@inline poly_eltype(points::Path) = eltype(eltype(points))
-@inline poly_eltype(points::Matrix) = eltype(points)
+# tools for rotate extrusion««2
 """
-    vpoly(points...)
+    _rotate_extrude(point, data, parameters)
 
-Returns a `Polyhedra.polyhedron` in vrep from a list of points.
+Extrudes a single point, returning a vector of 3d points
+(x,y) ↦ (x cosθ, x sinθ, y).
 """
-@inline function vpoly(points; lib=true)
-	PH = Polyhedra
-	if lib
-		return PH.polyhedron(PH.vrep(poly_vrep(points)),
-			polyhedra_lib(poly_eltype(points)))
-	else
-		return PH.polyhedron(PH.vrep(poly_vrep(points)))
+function _rotate_extrude(p::StaticVector{2}, angle, parameters)
+	@assert p[1] ≥ 0
+	# special case: point is on the y-axis; returns a single point:
+	T = parameters.type
+	iszero(p[1]) && return [SVector{3,T}(p[1], p[1], p[2])]
+	n = cld(sides(p[1], parameters) * angle, 360)
+
+	ω = Complex{T}(cosd(angle/n), sind(angle/n))
+	z = Vector{Complex{T}}(undef, n+1)
+	z[1] = one(T)
+	for i in 2:n
+		@inbounds z[i] = z[i-1]*ω; z[i]/= abs(z[i])
 	end
+	# close the loop:
+	z[n+1] = Complex{T}(cosd(angle), sind(angle))
+	return [SVector{3,T}(p[1]*real(u), p[1]*imag(u), p[2]) for u in z]
 end
+"""
+    ladder_triangles(n1, n2, start1, start2)
 
-# HRepElement is the supertype of HalfSpace and HyperPlane
-@inline direction(h::Polyhedra.HRepElement) = h.a
-@inline function normalize(h::Polyhedra.HRepElement)
-	n = norm(direction(h))
-	(n ≠ 0) ? (h / n) : h
+Given two integers m, n, triangulate as a ladder between these integers;
+example: ladder(5, 4, a, b)
+
+    a──a+1──a+2──a+3──a+4
+    │ ╱ ╲  ╱   ╲ ╱  ╲  │
+    b────b+1────b+2───b+3
+
+Returns the m+n-2 triangles (a,b,a+1), (b,b+1,a+1), (a+1,b+1,a+2)…
+"""
+function ladder_triangles(n1, n2, start1, start2)
+	p1 = p2 = 1
+	triangles = NTuple{3,Int}[]
+	while true
+		(p1 == n1) && (p2 == n2) && break
+		# put up to scale (n1-1)*(n2-1):
+		# front = (i,j) corresponds to ((n2-1)*i, (n1-1)*j)
+		c1 = (p1)*(n2-1)
+		c2 = (p2)*(n1-1)
+		if c1 < c2 || ((c1 == c2) && (n1 <= n2))
+			push!(triangles, (p1+start1-1, p2+start2-1, p1+start1))
+			p1+= 1
+		else
+			push!(triangles, (p1+start1-1, p2+start2-1, p2+start2))
+			p2+= 1
+		end
+	end
+	return triangles
 end
-@inline (h::Polyhedra.HRepElement)(p) = h.a ⋅ coordinates(p) - h.β
-@inline ∈(p, h::Polyhedra.HyperPlane) = iszero(h(p))
-@inline Base.convert(T::Type{<:Polyhedra.HRepElement},
-		h::Polyhedra.HRepElement) = T(h.a, h.β)
 
 #————————————————————— Objects and meshing —————————————————————————————— ««1
 
@@ -702,8 +716,7 @@ end
 
 @inline mesh(m::SetParameters, parameters) =
 	mesh(m.child, merge(parameters, m.parameters))
-# Extrusions etc.««2
-# Extrusions««3
+# Linear extrusion««2
 struct LinearExtrude{T} <: AbstractTransform{3}
 	height::T
 	child::AbstractGeometry{2}
@@ -728,19 +741,89 @@ function mesh(s::LinearExtrude, parameters)
   #  - sides:
   faces = [ tri;
     [ reverse(f) .+ n for f in tri ];
-    vcat([[SA[i,j,i+n] for (i,j) in consecutives(p) ] for p in peri]...);
-    vcat([[SA[j,j+n,i+n] for (i,j) in consecutives(p) ] for p in peri]...);
+    vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
+    vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
   ]
   return corner_table(pts3, faces, parameters.color)
 end
 
+# Cone««2
+struct Cone{T} <: AbstractTransform{3}
+	apex::SVector{3,T}
+	child::AbstractGeometry{2}
+end
 
+function mesh(s::Cone, parameters)
+  m = mesh(s.child, parameters)
+  @assert m isa PolygonXor
+  pts2 = Shapes.vertices(m)
+  tri = Shapes.triangulate(m)
+  peri = Shapes.perimeters(m)
+	n = length(pts2)
+	pts3 = [SA[p..., 0] for p in pts2]
+	push!(pts3, SVector{3,parameters.type}(s.apex))
+	faces = [ tri;
+		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
+	return corner_table(pts3, faces, parameters.color)
+end
+# Rotate extrusion««2
 struct RotateExtrude{T} <: AbstractTransform{3}
 	angle::T
 	child::AbstractGeometry{2}
 end
 
-# Offset««3
+function mesh(s::RotateExtrude, parameters)
+	# right half of child:
+	m = intersect(Shapes.HalfPlane(SA[1,0],0), mesh(s.child, parameters))
+	pts2 = Shapes.vertices(m)
+	tri = Shapes.triangulate(m)
+	peri = Shapes.perimeters(m) # oriented ↺
+	n = length(pts2)
+	
+	pts3 = _rotate_extrude(pts2[1], s.angle, parameters)
+	firstindex = [1]
+	arclength = [length(pts3)]
+	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
+	for p in pts2[2:end]
+		push!(firstindex, length(pts3)+1)
+		newpoints = _rotate_extrude(p, s.angle, parameters)
+		@debug "newpoints[$p] = $(length(newpoints))"
+		push!(arclength, length(newpoints))
+		pts3 = vcat(pts3, newpoints)
+	end
+	@debug "pts3: $pts3"
+	@debug "firstindex: $firstindex"
+	@debug "arclength: $arclength"
+	# point i ∈ polygonxor: firstindex[i]:(firstindex[i]-1+arclength[i])
+	triangles = vcat(
+		[ firstindex[t] for t in tri ],
+		[ firstindex[t] .+ arclength[t] .- 1 for t in reverse.(tri) ]
+	)
+	@debug "triangles: $(Vector.(triangles))"
+	for l in peri
+		@debug "triangulating perimeter l=$l««"
+		for (i1, p1) in pairs(l)
+			i2 = mod1(i1+1, length(l)); p2 = l[i2]
+			# point p1: firstindex[p1] .. firstindex[p1]-1+arclength[p1]
+			# point p2: etc.
+			@debug "triangulating between points $p1 and $p2:"
+			@debug "   $(firstindex[p1])..$(firstindex[p1]-1+arclength[p1])"
+			@debug "   $(firstindex[p2])..$(firstindex[p2]-1+arclength[p2])"
+			nt = SVector.(ladder_triangles(
+				arclength[p2], arclength[p1],
+				firstindex[p2], firstindex[p1],
+				))
+			push!(triangles, nt...)
+			@debug "new triangles: $(Vector.(nt))"
+		end
+		@debug "(end perimeter)»»"
+	end
+	@debug "triangles = $triangles"
+	return corner_table(pts3, triangles, parameters.color)
+end
+
+
+# Offset««2
 
 struct Offset <: AbstractTransform{2}
 	radius::Float64
@@ -763,6 +846,12 @@ end
 # Constructors««1
 # Squares and cubes««2
 # TODO: add syntactic sugar (origin, center, etc.) here:
+"""
+    square(size; origin, center=false)
+
+An axis-parallel square or rectangle  with given `size`
+(scalar or vector of length 2).
+"""
 @inline square(a::Real) = Square(a,a)
 @inline square(a::AbstractVector) = Square(a...)
 
@@ -770,9 +859,34 @@ end
 @inline cube(a::AbstractVector) = Cube(a...)
 
 # Circles and spheres««2
-#
-# TODO: cylinders««2
+@inline circle(a::Real) = Circle(a)
+@inline sphere(a::Real) = Sphere(a)
 
+# TODO: cylinders and cones««2
+"""
+    cylinder(h, r1, r2 [, center=false])
+    cylinder(h, (r1, r2) [, center=false])
+    cylinder(h, r [, center=false])
+
+**Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
+not `(h,r,0)` as in OpenSCAD.
+"""
+@inline cylinder(h::Real, r::Real) = linear_extrude(h)*circle(r)
+
+"""
+    cone(h, r)
+    cone(apex, r)
+
+Circular cone.
+"""
+@inline cone(v::AbstractVector, r::Real) = Cone(v, circle(r))
+@inline cone(h::Real, r::Real) = cone(SA[0,0,v], r)
+
+# Polygon««2
+"""
+    polygon(path)
+"""
+@inline polygon(path) = Polygon(path)
 # Draw««2
 """
     draw(path, width; kwargs)
@@ -846,12 +960,16 @@ Linear extrusion to height `h`.
 	center ? translate([0,0,-one_half(height)], m) : m
 end
 
-# @inline linear_extrude(h, scale::AbstractVector, s...; center=false)=
-# 	LinearExtrude((height=h, scale=scale, center=center,), s...)
-# @inline linear_extrude(h, scale::Real, s...; kwargs...) =
-# 	linear_extrude(h, SA[scale, scale], s...; kwargs...)
-# @inline linear_extrude(h, s...; kwargs...) =
-# 	linear_extrude(h, 1, s...; kwargs...)
+"""
+    cone(h, shape)
+    cone(h)*shape
+    cone(apex, shape)
+    cone(apex)*shape
+
+Cone with arbitrary base.
+"""
+@inline cone(v::AbstractVector, s...) = operator(Cone, (v,), s...)
+@inline cone(h::Real, s...) = cone(SA[0,0,h], s...)
 
 """
     rotate_extrude([angle = 360°], solid...)
@@ -859,9 +977,10 @@ end
 
 Similar to OpenSCAD's `rotate_extrude` primitive.
 """
-@inline rotate_extrude(s...) = rotate_extrude(360, s...)
 @inline rotate_extrude(angle::Real, s...) =
-	RotateExtrude((angle=angle,), s...)
+	operator(RotateExtrude, (angle,), s...)
+@inline rotate_extrude(s...) = rotate_extrude(360, s...)
+
 # Offset««2
 """
     offset(r, solid...; kwargs...)
@@ -884,6 +1003,7 @@ child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
 """
 @inline set_parameters(s...; parameters...) =
 	operator(SetParameters, (parameters.data,), s...)
+
 """
     color(c::Colorant, s...)
     color(c::AbstractString, s...)
@@ -896,6 +1016,7 @@ Colors objects `s...` in the given color.
 @inline color(c::AbstractString, s...) = color(parse(Colorant, c), s...)
 @inline color(c::AbstractString, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
+
 # Affine transformations««1
 # mult_matrix««2
 """
@@ -1080,126 +1201,6 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 #————————————————————— Meshing (2d) —————————————————————————————— ««1
 
 #»»1
-# Intersections (2d)««1
-
-"""
-    inter(path, hyperplane::Polyhedra.HyperPlane)
-
-intersection of simplex and hyperplane
-"""
-function inter(simplex, hyperplane::Polyhedra.HyperPlane)
-	n = length(simplex)
-	s = [hyperplane(p) for p in simplex]
-	newpath = similar(simplex, n); c = 0
-	for i in 1:n
-		if s[i] == 0
-			newpath[c+= 1] = simplex[i]
-		end
-		for j in 1:i-1
-			# separating these two cases avoids some painful `-0.` expressions:
-			if s[i] < 0 < s[j]
-				newpath[c+= 1] = (s[j]*simplex[i]-s[i]*simplex[j])/(s[j]-s[i])
-			elseif s[j] < 0 < s[i]
-				newpath[c+= 1] = (s[i]*simplex[j]-s[j]*simplex[i])/(s[i]-s[j])
-			end
-		end
-	end
-	return newpath[1:c]
-end
-"""
-    inter(path, halfplane)
-
-Computes intersection of a (planar) convex closed loop and the half-plane [h≥0].
-The intersection is returned as a vector of points.
-"""
-function inter(path::Path{2}, halfplane::Polyhedra.HalfSpace)
-	s = [halfplane(p) for p in path]
-	boundary = convert(Polyhedra.HyperPlane, halfplane)
-	n = length(path)
-	# we know that we add at most 1 new point (cutting a corner).
-	newpath = similar(path, 0); sizehint!(newpath, n+1)
-	for i in eachindex(path)
-		j = mod1(i+1, n)
-		(si, sj) = (s[i], s[j])
-		(si >= 0) &&  push!(newpath, path[i])
-		if si*sj < 0
-		# whiskers would generate two new points; we remove the second one
-			newpoint = inter(path[[i,j]], boundary)[1]
-			(c==0|| newpath[c] != newpoint) && push!(newpath, newpoint)
-		end
-	end
-	return newpath
-end
-# @inline inter(path::AnyPath, h::Polyhedra.HRepElement,
-# 		t::Polyhedra.HRepElement...) =
-# 	inter(inter(path, h), t...)
-
-"""
-    line(p1=>p2)
-"""
-# XXX
-function line(p12::Pair{<:StaticVector{2}})
-	(x1, y1) = coordinates(p12[1])
-	(x2, y2) = coordinates(p12[2])
-	a = SA[y1-y2, x2-x1]
-	b = y1*x2 - x1*y2
-	return Polyhedra.HyperPlane(a, b)
-end
-"""
-    halfplane(p1=>p2, p3)
-
-Returns the half-plane through (p1, p2) such that h(p3) > 0.
-"""
-function halfplane(p12::Pair{<:StaticVector{2}}, p3::StaticVector{2})
-	l = line(p12)
-# 	(x1, y1) = p12[1]
-# 	(x2, y2) = p12[2]
-# 	a = SA[y1-y2, x2-x1]
-# 	b = y1*x2 - x1*y2
-	s = sign(l.a ⋅ coordinates(p3) - l.β)
-	return Polyhedra.HalfSpace(s*l.a, s*l.β)
-end
-
-#Convex hull (3d)««1
-"""
-    convex_hull(x::Geometry{3}...)
-
-Returns the convex hull of the union of all the given solids, as a
-pair `(points, faces)`. `faces` is a list of triangles.
-"""
-@inline convex_hull(x::AbstractGeometry{3}) =
-	convex_hull(vcat([vertices(y) for y in x]...))
-
-"""
-    convex_hull(vector of 3d points)
-
-Returns the convex hull of these points, as a pair `(points, faces)`.
-All the faces are triangles.
-"""
-function convex_hull(p::AbstractVector{<:StaticVector{3,T}}) where{T}
-	M = hcat(Vector.(coordinates.(p))...)
-	PH = Polyhedra
-	poly = PH.polyhedron(PH.vrep(transpose(M)), polyhedra_lib(T))
-	R = PH.removevredundancy!(poly)
-	V = SVector{3,T}.(collect(PH.points(poly)))
-
-	triangles = SVector{3,Int}[]
-	for i in PH.eachindex(PH.halfspaces(poly)) # index of halfspace
-		h = PH.get(poly, i)
-		pts = PH.incidentpointindices(poly, i) # vector of indices of points
-		for t in triangulate_face(
-				[SVector{3}(PH.get(poly, j)) for j in pts];
-				direction = h.a,
-				map = [j.value for j in pts],
-				convex = Val(true))
-			(a,b,c) = (V[j] for j in t)
-			k = det([b-a c-a h.a])
-			push!(triangles, (k > 0) ? t : SA[t[1], t[3], t[2]])
-		end
-	end
-	return (points=V, faces=triangles)
-end
-
 # # 2d Minkowski sum««1
 # # Convolution of polygons««2
 # # http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf

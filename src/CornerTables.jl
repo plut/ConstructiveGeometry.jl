@@ -408,7 +408,7 @@ end
 global COUNT=0
 @inline Base.iterate(it::MeshIterator) = (global COUNT=0; (it.start, it.start))
 @inline function Base.iterate(it::MeshIterator, s)
-	global COUNT+=1; @assert COUNT <= 20
+	global COUNT+=1; @assert COUNT <= 1000
 	s = next(it, it.mesh, s)
 	stop(it, it.mesh, s) && return nothing
 	return (s, s)

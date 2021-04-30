@@ -13,7 +13,7 @@
  - **Definitions of geometric objects**
   - [x] _2d primitives_: circle, square, polygon
   - _3d primitives_: sphere, cube, cylinder, surface (?)
-  - [ ] Some 3d primitives are accessible via extrusion:
+  - [x] Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
    - simplicity vs. efficiency?
   - [ ]_Geometry transforms_: invertible affine transform, projection,
