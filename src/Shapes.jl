@@ -396,6 +396,86 @@ function triangulate(m::PolygonXor)
 	# remove triangle made entirely of hole vertices
 	return tri[[!all(is_hole[t]) for t in tri]]
 end
+# # Intersections (2d)««1
+# 
+# """
+#     inter(path, hyperplane::Polyhedra.HyperPlane)
+# 
+# intersection of simplex and hyperplane
+# """
+# function inter(simplex, hyperplane::Polyhedra.HyperPlane)
+# 	n = length(simplex)
+# 	s = [hyperplane(p) for p in simplex]
+# 	newpath = similar(simplex, n); c = 0
+# 	for i in 1:n
+# 		if s[i] == 0
+# 			newpath[c+= 1] = simplex[i]
+# 		end
+# 		for j in 1:i-1
+# 			# separating these two cases avoids some painful `-0.` expressions:
+# 			if s[i] < 0 < s[j]
+# 				newpath[c+= 1] = (s[j]*simplex[i]-s[i]*simplex[j])/(s[j]-s[i])
+# 			elseif s[j] < 0 < s[i]
+# 				newpath[c+= 1] = (s[i]*simplex[j]-s[j]*simplex[i])/(s[i]-s[j])
+# 			end
+# 		end
+# 	end
+# 	return newpath[1:c]
+# end
+# """
+#     inter(path, halfplane)
+# 
+# Computes intersection of a (planar) convex closed loop and the half-plane [h≥0].
+# The intersection is returned as a vector of points.
+# """
+# function inter(path::Path{2}, halfplane::Polyhedra.HalfSpace)
+# 	s = [halfplane(p) for p in path]
+# 	boundary = convert(Polyhedra.HyperPlane, halfplane)
+# 	n = length(path)
+# 	# we know that we add at most 1 new point (cutting a corner).
+# 	newpath = similar(path, 0); sizehint!(newpath, n+1)
+# 	for i in eachindex(path)
+# 		j = mod1(i+1, n)
+# 		(si, sj) = (s[i], s[j])
+# 		(si >= 0) &&  push!(newpath, path[i])
+# 		if si*sj < 0
+# 		# whiskers would generate two new points; we remove the second one
+# 			newpoint = inter(path[[i,j]], boundary)[1]
+# 			(c==0|| newpath[c] != newpoint) && push!(newpath, newpoint)
+# 		end
+# 	end
+# 	return newpath
+# end
+# # @inline inter(path::AnyPath, h::Polyhedra.HRepElement,
+# # 		t::Polyhedra.HRepElement...) =
+# # 	inter(inter(path, h), t...)
+# 
+# """
+#     line(p1=>p2)
+# """
+# # XXX
+# function line(p12::Pair{<:StaticVector{2}})
+# 	(x1, y1) = coordinates(p12[1])
+# 	(x2, y2) = coordinates(p12[2])
+# 	a = SA[y1-y2, x2-x1]
+# 	b = y1*x2 - x1*y2
+# 	return Polyhedra.HyperPlane(a, b)
+# end
+# """
+#     halfplane(p1=>p2, p3)
+# 
+# Returns the half-plane through (p1, p2) such that h(p3) > 0.
+# """
+# function halfplane(p12::Pair{<:StaticVector{2}}, p3::StaticVector{2})
+# 	l = line(p12)
+# # 	(x1, y1) = p12[1]
+# # 	(x2, y2) = p12[2]
+# # 	a = SA[y1-y2, x2-x1]
+# # 	b = y1*x2 - x1*y2
+# 	s = sign(l.a ⋅ coordinates(p3) - l.β)
+# 	return Polyhedra.HalfSpace(s*l.a, s*l.β)
+# end
+# 
 # Exports««1
 
 export Path

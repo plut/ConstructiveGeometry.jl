@@ -595,6 +595,9 @@ CSGDiff = constructed_solid_type(:difference,
 @inline mesh(s::CSGDiff{2}, parameters) =
 	Shapes.clip(:difference, mesh(s.children[1], parameters),
 		mesh(s.children[2], parameters))
+@inline mesh(s::CSGDiff{3}, parameters) =
+	CornerTables.combine([mesh(s.children[1], parameters),
+		reverse(mesh(s.children[2], parameters))], 2)
 
 # Complement««2
 # TODO

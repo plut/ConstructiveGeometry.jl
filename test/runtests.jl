@@ -68,6 +68,24 @@ end
 
 #»»
 end#»»
+@testset "Cubes" begin#««
+volume(x) = ConstructiveGeometry.CornerTables.volume(x)
+@test volume(mesh(cube(1))) ≈ 1
+@test volume(mesh(union(cube([5,1,1]),cube([1,5,1])))) ≈ 9
+@test volume(mesh(setdiff(cube(2),cube(1)))) ≈ 7
+end#»»
+@testset "Extrusion" begin #««1
+# using ConstructiveGeometry: nvertices, nfaces
+# C = vertices(circle(3.),(precision=.01,accuracy=1,symmetry=1))
+# c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
+# @test (path_extrude(c, C)) != 0
+# 
+d=setdiff(square(15.), translate([1,1])*square(8.))
+# e=linear_extrude(10.)*d
+# m=mesh(e)
+# @test nvertices(m) == 16
+# @test nfaces(m) == 32
+end
 # @testset "Types" begin #««1
 # @testset "Basic types" begin #««2
 # V = Point(1,2)
@@ -103,18 +121,6 @@ end#»»
 # @testset "Clipper" begin #««1
 # s = square(1)
 # # FIXME
-# end
-# @testset "Extrusion" begin #««1
-# using ConstructiveGeometry: nvertices, nfaces
-# C = vertices(circle(3.),(precision=.01,accuracy=1,symmetry=1))
-# c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
-# @test (path_extrude(c, C)) != 0
-# 
-# d=difference(square(15.), translate([1,1])*square(8.))
-# e=linear_extrude(10.)*d
-# m=mesh(e)
-# @test nvertices(m) == 16
-# @test nfaces(m) == 32
 # end
 # @testset "Convex hull" begin #««1
 # using ConstructiveGeometry: convex_hull, convex_hull_list
