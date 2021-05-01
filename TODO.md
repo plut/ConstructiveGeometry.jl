@@ -1,31 +1,37 @@
-# Split of module
- - *new file:* convex hulls
+# Split/rewrite of module
  - **2d subsystem**
   - [x] interface via simple `Vector{SVector{2}}` objects and short list of
     functions
   - [ ] maybe even better, interface as parametric types
-   rename `PolygonXor`? `PolygonalShape`?
-  - *TODO*: add half-plane intersections in this module
-  - *TODO*: reconstruct polygonal shape by list of segments (for project)
+  - [ ] rename `PolygonXor`? `PolygonalShape`?
+  - [x] add half-plane intersections in this module
+  - [ ] reconstruct polygonal shape by list of segments (for projections)
  - **3d subsystem**
   - [x] interface via `CornerTables` and short list of functions
    - [x] document this list of functions
  - **Definitions of geometric objects**
   - [x] _2d primitives_: circle, square, polygon
-  - _3d primitives_: sphere, cube, cylinder, surface (?)
+  - [x] _3d primitives_: sphere, cube, cylinder, surface (?)
   - [x] Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
    - simplicity vs. efficiency?
-  - [ ]_Geometry transforms_: invertible affine transform, projection,
-   linear extrusion, rotational extrusion
-  - [ ] _Non-geometry transforms_: `set_parameters`, color
-  - [ ] _CG operations_: union, inter, diff, hull, offset, minkowski+, minkowski-
+  - [ ]_Geometry transforms_:
+   - [x] invertible affine transform
+   - [ ] projection,
+   - [ ] plane intersection,
+   - [x] linear extrusion, rotational extrusion
+  - [x] _Non-geometry transforms_: `set_parameters`, color
+  - [ ] _CG operations_:
+   - [x] union, inter, diff
+   - [ ] hull
+   - [ ] offset
+   - [ ] minkowski+, minkowski-
  - **Syntactic sugar**
  - **Import/export**
   - SCAD
   - STL
  - **Visualization** (TODO)
- - **Convex hull** (in its own file)
+ - [ ] **Convex hull** (in its own file)
 # For version 0.2 (performance update)
  # corner table http://graphics.stanford.edu/courses/cs468-12-spring/LectureSlides/02_Mesh_Data_Structures.pdf
  - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document

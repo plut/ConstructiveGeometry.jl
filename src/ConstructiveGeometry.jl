@@ -516,14 +516,12 @@ struct Surface{T} <: AbstractGeometryCoord{3,T}
 end
 @inline Surface(points, faces) = Surface{eltype(eltype(points))}(points, faces)
 @inline Surface(points, faces::AbstractVector{<:AbstractVector}) =
-# FIXME: in this case, triangulate!
 	Surface(points, [(f...,) for f in faces])
 
 @inline scad_info(s::Surface) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
 @inline mesh(s::Surface, parameters) =
 	corner_table(s.points, s.faces, parameters.color)
-
 
 # Constructive geometry operations««1
 # https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
@@ -545,36 +543,6 @@ end
 
 constructed_solid_type(s::Symbol, T = Vector{<:AbstractGeometry}) =
 	ConstructedSolid{s,T}
-
-# Generic code for associativity etc.««2
-# make operators associative; see definition of + in operators.jl
-for op in (:union, :intersect, :minkowski, :hull)
-	Q=QuoteNode(op)
-	# union, intersection, minkowski are trivial on single objects:
-	op != :hull &&  @eval ($op)(a::AbstractGeometry) = a
-	@eval begin
-	# all of these are associative:
-	# we leave out the binary case, which will be defined on a case-by-case
-	# basis depending on the operators (see below).
-#		($op)(a::Geometry, b::Geometry) =
-#			ConstructedSolid{$Q}([unroll(a, Val($Q)); unroll(b, Val($Q))])
-	($op)(a::AbstractGeometry, b::AbstractGeometry, c::AbstractGeometry, x...) =
-		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
-	end
-end
-
-"""
-		unroll(x::AbstractGeometry, Val(sym1), Val(sym2)...)
-
-Returns either `[x]` or, if `x` is a `ConstructedSolid` matching one of the
-symbols `sym1`, `sym2`..., `children(x)`. (This helps reduce nesting).
-"""
-@inline unroll(s::AbstractGeometry, ::Val, tail...) = unroll(s, tail...)
-@inline unroll(s::AbstractGeometry) = s
-@inline unroll(s::ConstructedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
-	children(s)
-@inline unroll2(s::AbstractGeometry, t::AbstractGeometry, tail...) =
-	[unroll(s, tail...); unroll(t, tail...)]
 
 # Union««2
 CSGUnion = constructed_solid_type(:union)
@@ -647,30 +615,39 @@ function hull end
 @define_neutral hull EmptyUnion neutral
 @define_neutral hull EmptyIntersect  absorb
 
-# Convex hull««2
-# TODO
+# Convex hull (TODO)««2
 CSGHull = constructed_solid_type(:hull)
-"""
-    hull(s::AbstractGeometry...)
 
-Represents the convex hull of given solids.
-"""
-@inline hull(s::AbstractGeometry...) =
-	CSGHull{maximum(embeddim.(s))}(
-		[unroll(t, Val.((:hull, :union))...) for t in s])
+@inline function mesh(s::CSGHull{2}, parameters)
+	v = reduce(vcat, Shapes.vertices(mesh(x, parameters)) for x in children(s))
+	return PolygonXor{get_parameter(parameters, :type)}(convex_hull(v))
+end
 
+@inline vertices3(m::CornerTable) = CornerTables.points(m)
+@inline vertices3(m::PolygonXor) =
+	(SA[p[1], p[2], 0] for p in Shapes.vertices(m))
+function mesh(s::CSGHull{3}, parameters)
+	v = SVector{3,get_parameter(parameters, :type)}[]
+	for x in children(s); push!(v, vertices3(mesh(x, parameters))...); end
+	(p, f) = convex_hull(v)
+	return corner_table(p, f, get_parameter(parameters, :color))
+end
+# # # Convex hull««2
+# # # """
+# # # 		convex_hull(x::Geometry{2}...)
+# # # 
+# # # Returns the convex hull of the union of all the given solids, as a
+# # # `PolyUnion` structure.
+# # # """
+# # @inline convex_hull(x::Geometry{2}...) =
+# # 	convex_hull(PolyUnion(union(x...)))
+# # 
+# # @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(vertices(u)))
+# # 
+# 
 
-# Minkowski sum and difference««2
-# TODO
+# Minkowski sum and difference (TODO)««2
 CSGMinkowski = constructed_solid_type(:minkowski)
-"""
-    minkowski(s::AbstractGeometry...)
-
-Represents the Minkowski sum of given solids.
-"""
-@inline minkowski(a1::AbstractGeometry, a2::AbstractGeometry) =
-	CSGMinkowski{maximum(embeddim.((a1,a2)))}(unroll2(a1, a2, Val(:minkowski)))
-
 # Transformations««1
 abstract type AbstractTransform{D} <: AbstractGeometry{D} end
 # AffineTransform««2
@@ -739,6 +716,8 @@ function mesh(s::LinearExtrude, parameters)
 end
 
 # Cone««2
+# Note: this is *not* a convex hull - a generic cone is not convex
+# (the base shape may be nonconvex, or even have holes).
 struct Cone{T} <: AbstractTransform{3}
 	apex::SVector{3,T}
 	child::AbstractGeometry{2}
@@ -890,7 +869,44 @@ Draws a path of given width.
 draw(path, width; kwargs...) = Draw(path, width; kwargs...)
 
 
+# Surface««2
+function surface(points, faces)
+	# FIXME: triangulate!
+	return Surface(points, faces)
+end
+
 # CSG operations««1
+# Generic code for associativity etc.««2
+# make operators associative; see definition of + in operators.jl
+for op in (:union, :intersect, :minkowski, :hull)
+	Q=QuoteNode(op)
+	# union, intersection, minkowski are trivial on single objects:
+	op != :hull &&  @eval ($op)(a::AbstractGeometry) = a
+	@eval begin
+	# all of these are associative:
+	# we leave out the binary case, which will be defined on a case-by-case
+	# basis depending on the operators (see below).
+#		($op)(a::Geometry, b::Geometry) =
+#			ConstructedSolid{$Q}([unroll(a, Val($Q)); unroll(b, Val($Q))])
+	($op)(a::AbstractGeometry, b::AbstractGeometry, c::AbstractGeometry, x...) =
+		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
+	end
+end
+
+# Unrolling: prevent nesting of similar constructions
+"""
+		unroll(x::AbstractGeometry, Val(sym1), Val(sym2)...)
+
+Returns either `[x]` or, if `x` is a `ConstructedSolid` matching one of the
+symbols `sym1`, `sym2`..., `children(x)`.
+"""
+@inline unroll(s::AbstractGeometry, ::Val, tail...) = unroll(s, tail...)
+@inline unroll(s::AbstractGeometry) = s
+@inline unroll(s::ConstructedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
+	children(s)
+@inline unroll2(s::AbstractGeometry, t::AbstractGeometry, tail...) =
+	[unroll(s, tail...); unroll(t, tail...)]
+
 # Booleans««2
 @inline union(a1::AbstractGeometry{D}, a2::AbstractGeometry{D}) where{D} =
 	CSGUnion{D}(unroll2(a1, a2, Val(:union)))
@@ -904,6 +920,50 @@ draw(path, width; kwargs...) = Draw(path, width; kwargs...)
 @inline setdiff(x::AbstractVector{<:AbstractGeometry},
                 y::AbstractVector{<:AbstractGeometry}) =
 	difference(union(x...), union(y...))
+# Convex hull««2
+"""
+    hull(s::AbstractGeometry...)
+		hull(s::AbstractGeometry{2} | StaticVector{2}...)
+
+Represents the convex hull of given solids (and, possibly, points).
+"""
+@inline hull(s::AbstractGeometry{2}...) =
+	CSGHull{2}([unroll(t, Val.((:hull, :union))...) for t in s])
+
+function hull(s::Union{AbstractGeometry{2},StaticVector{2,<:Real}}...)
+	l = AbstractGeometry{2}[unroll(t, Val.((:hull, :union))...)
+		for t in s if t isa AbstractGeometry]
+	v = filter(x->x isa AbstractVector, s)
+	push!(l, polygon([v...]))
+	return CSGHull{2}(l)
+end
+
+function hull(s::Union{AbstractGeometry,AbstractVector}...)
+	l = AbstractGeometry[]
+	T = Bool; v = SVector{3,T}[]
+	for x in s
+		if x isa AbstractVector
+			y = (length(x) == 3) ? SVector{3}(x) :
+			    (length(x) == 2) ? SVector{3}(x[1], x[2], 0) :
+					error("bad point dimension: $(length(x))")
+			T = promote_type(T, eltype(y))
+			v = push!(SVector{3,T}.(v), y)
+		else
+			push!(l, x)
+		end
+	end
+	!isempty(v) && push!(l, surface(v, [(i,i,i) for i in 1:length(v)]))
+	return CSGHull{3}(l)
+end
+# Minkowski««2
+"""
+    minkowski(s::AbstractGeometry...)
+
+Represents the Minkowski sum of given solids.
+"""
+@inline minkowski(a1::AbstractGeometry, a2::AbstractGeometry) =
+	CSGMinkowski{maximum(embeddim.((a1,a2)))}(unroll2(a1, a2, Val(:minkowski)))
+
 
 # Transformations««1
 # Transform type««2
@@ -937,7 +997,7 @@ end
 @inline assoc(::Transform, ::Transform) = :right
 @inline Base.:*(u::Transform, v::Transform) = compose(u, v)
 @inline compose(u::Transform, v::Transform) = Transform{typeof(∘)}(u.f∘v.f)
-# Extrusions««2
+# extrusions««2
 """
     linear_extrude(h, s...)
     linear_extrude(h) * s...
@@ -972,7 +1032,7 @@ Similar to OpenSCAD's `rotate_extrude` primitive.
 	operator(RotateExtrude, (angle,), s...)
 @inline rotate_extrude(s...) = rotate_extrude(360, s...)
 
-# Offset««2
+# offset««2
 """
     offset(r, solid...; kwargs...)
     offset(r; kwargs...) * solid
@@ -1097,7 +1157,7 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 
 # TODO: project««2
 
-# Operators««1
+# overloading Julia operators««1
 @inline Base.:\(x::AbstractGeometry, y::AbstractGeometry) = setdiff(x, y)
 @inline Base.:-(x::AbstractGeometry, y::AbstractGeometry,
 	tail::AbstractGeometry...) = setdiff(x, union(y, tail...))
@@ -1116,6 +1176,8 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 
 ⋃ = Base.union
 ⋂ = Base.intersect
+#————————————————————— I/O —————————————————————————————— ««1
+
 # File inclusion««1
 
 # FIXME: replace Main by caller module?
@@ -1181,8 +1243,6 @@ expr_filter(f::Function, ::Val{:(=)}, e::Expr) = e
 # if several expressions are semicolon-chained, we pass this down
 expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 	Expr(:toplevel, expr_filter.(f, x.args)...)
-
-#————————————————————— I/O —————————————————————————————— ««1
 
 # STL ««1
 #
@@ -1279,19 +1339,6 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 # # 	return PolyUnion(ret)
 # # end
 # # 
-# # # Convex hull««2
-# # # """
-# # # 		convex_hull(x::Geometry{2}...)
-# # # 
-# # # Returns the convex hull of the union of all the given solids, as a
-# # # `PolyUnion` structure.
-# # # """
-# # @inline convex_hull(x::Geometry{2}...) =
-# # 	convex_hull(PolyUnion(union(x...)))
-# # 
-# # @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(vertices(u)))
-# # 
-# 
 #————————————————————— Meshing (3d) —————————————————————————————— ««1
 #=
 mesh(geom, parameters = _DEFAULT_PARAMETERS) returns a Surface
