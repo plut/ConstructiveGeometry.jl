@@ -113,11 +113,7 @@ struct TranslationMap{B} <: AbstractAffineMap
 end
 @inline AffineMap(a; center=nothing) = _affine_map_center(a, center)
 @inline _affine_map_center(a, ::Nothing) = LinearMap(a)
-@inline _affine_map_center(a, c) =
-  begin
-	println((typeof(a), typeof(c)))
-	AffineMap(a, a*c-c)
-end
+@inline _affine_map_center(a, c) = AffineMap(a, a*c-c)
 @inline linear(f::AbstractAffineMap, x) = f.a*x
 @inline linear(f::TranslationMap, x) = x
 @inline translate(f::AbstractAffineMap, x) = x+f.b
@@ -218,7 +214,7 @@ The base value `n` is given by the minimum of:
  or n = π /√(2*precision).
 """
 function sides(r::Real, parameters)
-  ε = max(get_parameter(parameters,:precision),
+	ε = max(get_parameter(parameters,:precision),
 		get_parameter(parameters,:accuracy)/r)
 	base = ceil(Int, π/√(2*ε))
 	# a circle always has at least 4 sides
@@ -277,8 +273,9 @@ s/r = 1-√{1-d²/4r²}
 Hence n ≈ 2 + (π/√3)/(precision).
 
 """
-function sphere_nvertices(r::Real, parameters::NamedTuple = _DEFAULT_PARAMETERS)
-  ε = max(get_parameter(parameters,:precision), get_parameter(parameters,:accuracy)/r)
+function sphere_nvertices(r::Real, parameters)
+	ε = max(get_parameter(parameters,:precision),
+		get_parameter(parameters,:accuracy)/r)
 	base = 2 + ceil(Int, (π/√3)/ε)
 	# a sphere always has at least 6 vertices
 	return max(6, base)
@@ -308,8 +305,8 @@ function fibonacci_sphere_points(T::Type{<:Real}, n::Int)
 	end
 	return v
 end
-@inline fibonacci_sphere_points(r::Real, parameters...) =
-	r*fibonacci_sphere_points(real_type(r), sphere_nvertices(r, parameters...))
+@inline fibonacci_sphere_points(r::Real, parameters) =
+	r*fibonacci_sphere_points(parameters.type, sphere_nvertices(r, parameters))
 # tools for rotate extrusion««2
 """
     _rotate_extrude(point, data, parameters)
@@ -434,14 +431,6 @@ Circle = Ball{2}
 @inline mesh(s::Circle, parameters) =
 	PolygonXor{get_parameter(parameters, :type)}(unit_n_gon(s.radius, parameters))
 
-# Sphere = Ball{3}
-# @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
-# function mesh(s::Sphere, parameters)
-# 	plist = fibonacci_sphere_points(s.radius, parameters)
-# 	(pts, faces) = convex_hull(plist)
-# 	return corner_table(pts, faces, parameters.color)
-# end
-# 
 # Polygon««2
 """
     Polygon{T}
@@ -463,7 +452,7 @@ end
 struct Draw{T} <: AbstractGeometryCoord{2,T}
 	path::Vector{SVector{2,T}}
 	width::Float64
-  ends::Symbol
+	ends::Symbol
 	join::Symbol
 	miter_limit::Float64
 end
@@ -506,7 +495,12 @@ end
 
 Sphere = Ball{3}
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
-# FIXME: mesh = convex hull
+function mesh(s::Sphere, parameters)
+	plist = fibonacci_sphere_points(s.radius, parameters)
+	(pts, faces) = convex_hull(plist)
+	return corner_table(pts, faces, parameters.color)
+end
+
 
 # Cylinder is an extrusion
 
@@ -720,28 +714,28 @@ struct LinearExtrude{T} <: AbstractTransform{3}
 end
 
 function mesh(s::LinearExtrude, parameters)
-  m = mesh(s.child, parameters)
-  @assert m isa PolygonXor
-  pts2 = Shapes.vertices(m)
-  tri = Shapes.triangulate(m)
-  peri = Shapes.perimeters(m)
-  # perimeters are oriented ↺, holes ↻
+	m = mesh(s.child, parameters)
+	@assert m isa PolygonXor
+	pts2 = Shapes.vertices(m)
+	tri = Shapes.triangulate(m)
+	peri = Shapes.perimeters(m)
+	# perimeters are oriented ↺, holes ↻
 
-  n = length(pts2)
-  pts3 = vcat([[SA[p..., z] for p in pts2] for z in [0, s.height]]...)
+	n = length(pts2)
+	pts3 = vcat([[SA[p..., z] for p in pts2] for z in [0, s.height]]...)
 	println("pts3=$pts3")
-  # for a perimeter p=p1, p2, p3... outward: ↺
-  # with top vertices q1, q2, q3...
-  # faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
-  #  - bottom: identical to tri
-  #  - top: reverse of tri + n
-  #  - sides:
-  faces = [ tri;
-    [ reverse(f) .+ n for f in tri ];
-    vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
-    vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
-  ]
-  return corner_table(pts3, faces, parameters.color)
+	# for a perimeter p=p1, p2, p3... outward: ↺
+	# with top vertices q1, q2, q3...
+	# faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
+	#  - bottom: identical to tri
+	#  - top: reverse of tri + n
+	#  - sides:
+	faces = [ tri;
+	  [ reverse(f) .+ n for f in tri ];
+	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
+	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
+	]
+	return corner_table(pts3, faces, parameters.color)
 end
 
 # Cone««2
@@ -751,11 +745,11 @@ struct Cone{T} <: AbstractTransform{3}
 end
 
 function mesh(s::Cone, parameters)
-  m = mesh(s.child, parameters)
-  @assert m isa PolygonXor
-  pts2 = Shapes.vertices(m)
-  tri = Shapes.triangulate(m)
-  peri = Shapes.perimeters(m)
+	m = mesh(s.child, parameters)
+	@assert m isa PolygonXor
+	pts2 = Shapes.vertices(m)
+	tri = Shapes.triangulate(m)
+	peri = Shapes.perimeters(m)
 	n = length(pts2)
 	pts3 = [SA[p..., 0] for p in pts2]
 	push!(pts3, SVector{3,parameters.type}(s.apex))
@@ -888,7 +882,7 @@ Circular cone.
 """
     draw(path, width; kwargs)
     ends = :loop|:butt|:square|:round
-		join = :square|:round|:miter
+    join = :square|:round|:miter
     miter_limit = 2.0
 
 Draws a path of given width.
