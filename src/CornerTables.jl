@@ -33,6 +33,8 @@ using DataStructures
 module LibTriangle
 	using Triangle
 end
+include("Projectors.jl")
+using .Projectors
 include("TriangleIntersections.jl")
 include("SpatialSorting.jl")
 include("EquivalenceStructures.jl")
@@ -113,35 +115,6 @@ lazymap(f,v) = LazyMap{Base.return_types(f,Tuple{eltype(v)})[1]}(f, v)
 
 # Geometry««2
 @inline norm²(v) = dot(v,v)
-function main_axis(direction)#««
-	@inbounds (a1, a2, a3) = abs.(direction)
-	if a2 < a1
-		a1 < a3 && @goto max3
-		return direction[1] > 0 ? 1 : -1
-	elseif a2 > a3
-		return direction[2] > 0 ? 2 : -2
-	end; @label max3
-		return direction[3] > 0 ? 3 : -3
-end#»»
-function project2d(axis, vec)#««
-	# orientation-preserving projection:
-	axis == 1 && return (vec[2], vec[3])
-	axis == 2 && return (vec[3], vec[1])
-	axis == 3 && return (vec[1], vec[2])
-	axis ==-1 && return (vec[3], vec[2])
-	axis ==-2 && return (vec[1], vec[3])
-	@assert axis == -3
-	             return (vec[2], vec[1])
-end#»»
-function project1d(axis, vec)#««
-	axis == 1 && return vec[1]
-	axis == 2 && return vec[2]
-	axis == 3 && return vec[3]
-	axis ==-1 && return -vec[1]
-	axis ==-2 && return -vec[2]
-	@assert axis == -3
-	             return -vec[3]
-end#»»
 # half-edge mesh««1
 # half-edge data structure ««2
 """
@@ -338,7 +311,7 @@ end
 	t = triangle(m, f)
 	return cross(t[2]-t[1], t[3]-t[2])
 end
-@inline main_axis(m::CornerTable, f::Face) = main_axis(normal(m, f))
+@inline Projectors.main_axis(m::CornerTable, f::Face) = main_axis(normal(m, f))
 function normalized_plane(m::CornerTable, f::Face; absolute=false)
 	t = triangle(m, f)
 	d = cross(t[2]-t[1], t[3]-t[2])

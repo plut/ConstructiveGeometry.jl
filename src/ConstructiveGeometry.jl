@@ -13,7 +13,6 @@ using FastClosures
 
 import Rotations
 import Colors: Colors, Colorant
-import Clipper
 
 import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
@@ -198,8 +197,6 @@ StaticArrays.similar_type(::Vector, T::Type) = Vector{T} # piracy!
 @inline det(r::Reflection) = -one(eltype(r))
 @inline tr(r::Reflection) = size(r,1)-2*one(eltype(r))
 
-# @inline getindex(r::Reflection, i::Int) =
-# 	getindex(R, fld1(i,D), mod1(i,D))
 @inline Base.getindex(r::Reflection, i::Int, j::Int) =
 	(i == j) - 2*r.axis[i]*r.proj[j]
 # we need two methods here for disambiguation:
@@ -437,14 +434,14 @@ Circle = Ball{2}
 @inline mesh(s::Circle, parameters) =
 	PolygonXor{get_parameter(parameters, :type)}(unit_n_gon(s.radius, parameters))
 
-Sphere = Ball{3}
-@inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
-function mesh(s::Sphere, parameters)
-	plist = fibonacci_sphere_points(s.radius, parameters)
-	(pts, faces) = convex_hull(plist)
-	return corner_table(pts, faces, parameters.color)
-end
-
+# Sphere = Ball{3}
+# @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
+# function mesh(s::Sphere, parameters)
+# 	plist = fibonacci_sphere_points(s.radius, parameters)
+# 	(pts, faces) = convex_hull(plist)
+# 	return corner_table(pts, faces, parameters.color)
+# end
+# 
 # Polygon««2
 """
     Polygon{T}

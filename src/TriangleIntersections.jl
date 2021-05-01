@@ -9,6 +9,8 @@ module TriangleIntersections
 using LinearAlgebra
 using StaticArrays
 using FastClosures
+include("Projectors.jl")
+using .Projectors
 
 """
     TriangleIntersections.Constants
@@ -326,140 +328,11 @@ function inter_triangle2((p1,q1,r1),(p2,q2,r2); ε=0)
 end
 
 # 3d intersections««1
-# basic geometry stuff««2
+# Projectors interaction««2
 
-
-# Projector ««2
-"""
-    Projector
-
-A structure containing information about a 3d -> 2d projection
-defined via selecting coordinates (so not orthogonal),
-and optionally about the lift back to a certain plaine in 3d.
-
-Can be applied to any type by defining methods for `lift` and `project`.
-"""
-struct Projector{T}
-	dir::Int8
-	lift::NTuple{3,T}
-end
-struct FormalInv{X}
-	x::X
-end
-"""
-    Projector(direction)
-
-Computes a linear projector,
-i.e. just a pair of coordinates to extract for
-orientation-preserving, faithful 3d→2d projection.
-"""
-@inline function Projector(direction::AbstractVector) # no lift
-	@inbounds u1 = direction[1]
-	@inbounds u2 = direction[2]
-	@inbounds u3 = direction[3]
-  @inbounds a1 = abs(u1)
-	@inbounds a2 = abs(u2)
-	@inbounds a3 = abs(u3)
-	P = Projector{eltype(direction)}
-	if a1 < a2
-		if a2 < a3 @goto max3; end
-		u2 > 0 && return P( 2, (0,0,0))
-		          return P(-2, (0,0,0))
-	elseif a1 < a3
-		@label max3
-		# (x,y) lifts to (y,x,z) st ay+bx+cz=d i.e. z=(d-bx-ay)/c
-		u3 > 0 && return P( 3, (0,0,0))
-		          return P(-3, (0,0,0))
-	else # max1
-		# (x,y) lifts to (z,x,y) st az+bx+cy=d i.e. z=(d-bx-cy)/a
-		u1 > 0 && return P( 1, (0,0,0))
-		          return P(-1, (0,0,0))
-	end
-end
-
-"""
-    Projector(direction, point)
-
-Computes an affine projector, i.e. defines the affine lift
-as well as the projection.
-"""
-@inline function Projector(direction::AbstractVector, point)
-	@inbounds u1 = direction[1]
-	@inbounds u2 = direction[2]
-	@inbounds u3 = direction[3]
-  @inbounds a1 = abs(u1)
-	@inbounds a2 = abs(u2)
-	@inbounds a3 = abs(u3)
-	d = dot(direction, point)
-	P = Projector{eltype(direction)}
-	if a1 < a2
-		if a2 < a3 @goto max3; end
-		# (x,y) lifts to (y,z,x) st ay+bz+cx=d, ie z=(d-cx-ay)/b
-		u2 > 0 && return P( 2, (-u3/u2, -u1/u2, d/u2))
-		# (x,y) lifts to (x,z,y) st ax+bz+cy=d, ie z=(d-ax-cy)/b
-		          return P(-2, (-u1/u2, -u3/u2, d/u2))
-	elseif a1 < a3
-		@label max3
-		# (x,y) lifts to (y,x,z) st ay+bx+cz=d i.e. z=(d-bx-ay)/c
-		u3 > 0 && return P( 3, (-u1/u3, -u2/u3, d/u3))
-		          return P(-3, (-u2/u3, -u1/u3, d/u3))
-	else # max1
-		# (x,y) lifts to (z,x,y) st az+bx+cy=d i.e. z=(d-bx-cy)/a
-		u1 > 0 && return P( 1, (-u2/u1, -u3/u1, d/u1))
-		          return P(-1, (-u3/u1, -u2/u1, d/u1))
-	end
-end
-"""
-    project(p::Projector, u)
-
-Computes the projection for a given vector.
-This has, by default, methods for `Tuple`, `AbstractVector`,
-and `StaticVector{3}`. To make this module work with other types,
-these methods should be extended (cf. the `StaticVector{3}` method definition).
-"""
-@inline function project(p::Projector, u)
-	p.dir == 1 && return (u[2], u[3])
-	p.dir == 2 && return (u[3], u[1])
-	p.dir == 3 && return (u[1], u[2])
-	p.dir ==-1 && return (u[3], u[2])
-	p.dir ==-2 && return (u[1], u[3])
-	@assert p.dir ==-3
-	              return (u[2], u[1])
-	@assert false
-end
-"""
-    lift(p::Projector, u)
-
-Computes the affine lift for a vector.
-This has, by default, methods for `Tuple`, `AbstractVector`,
-and `StaticVector{2}`. To make this module work with other types,
-these methods should be extended (cf. the `StaticVector{2}` method definition).
-"""
-@inline function lift(p::Projector, u)
-	z = p.lift[1]*u[1]+p.lift[2]*u[2]+p.lift[3]
-	p.dir == 1 && return (z, u[1], u[2])
-	p.dir == 2 && return (u[2], z, u[1])
-	p.dir == 3 && return (u[1], u[2], z)
-	p.dir ==-1 && return (z, u[2], u[1])
-	p.dir ==-2 && return (u[1], z, u[2])
-	# for type-stability, no `if` here:
-	@assert p.dir ==-3 
-	              return (u[2], u[1], z)
-end
-# syntactic sugar: p(u) and inv(p)(u)
-@inline (p::Projector)(u) = project(p,u)
-Base.inv(p::Projector) = FormalInv{typeof(p)}(p)
-@inline (l::FormalInv{<:Projector})(u) = lift(l.x, u)
-
-@inline lift(p::Projector, u::AbstractVector) = [lift(p,(u...,))...]
-@inline project(p::Projector, u::AbstractVector) = [project(p,(u...,))...]
-@inline lift(p::Projector, u::StaticVector{2}) =
-	SVector{3,eltype(u)}(lift(p,u.data))
-@inline project(p::Projector, u::StaticVector{3}) =
-	SVector{2,eltype(u)}(project(p,(u.data)))
 
 # lifting intersection data
-@inline function lift(p::Projector, it::IntersectionData)
+@inline function Projectors.lift(p::Projector, it::IntersectionData)
 	newpoints = inv(p).(first.(it))
 	return IntersectionData{allocsize(it),eltype(newpoints)}(length(it),
 		last.(it), newpoints)

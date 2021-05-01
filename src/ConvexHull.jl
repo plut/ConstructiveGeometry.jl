@@ -1,10 +1,73 @@
 module ConvexHull
+using LinearAlgebra
 using StaticArrays
 
 import Polyhedra # for convex hull
 import GLPK
+
+module LibTriangle
+	using Triangle
+end
+include("Projectors.jl")
+using .Projectors
 # using MiniQhull
 
+# tools««1
+# findextrema««2
+"""
+    findextrema(itr; lt=isless)
+
+Like `findmin`, except that
+ - it returns both extrema, as a `NamedTuple`;
+ - it accepts an `lt` parameter, like `sort`.
+"""
+function findextrema(itr; lt=isless)
+  p = pairs(itr); y = iterate(p)
+  if y == nothing
+    throw(ArgumentError("collection must be non-empty"))
+  end
+  (mi, m), s = y; (Mi, M) = (mi, m); i = mi
+  while true
+    y = iterate(p, s)
+    y == nothing && break
+    (ai, a), s = y
+    if lt(a, m) m = a; mi = ai; end
+    if lt(M, a) M = a; Mi = ai; end
+  end
+  return (min=(m, mi), max=(M, Mi))
+end
+# determinants««2
+@inline det2(x,y) = x[1]*y[2]-x[2]*y[1]
+@inline det2(x,y,z) = det2(y-x, z-x)
+# triangulations««2
+"""
+    triangulate_face(points; direction, map)
+
+Returns a triangulation of the face (assumed convex; points in any order)
+Optional keyword arguments:
+ - `direction` is a normal vector (used for projecting to 2d).
+ - `map` is a labeling of points (default is identity map).
+ - `convex` is a Val(true) or Val(false).
+
+The triangulation is returned as a vector of StaticVector{3,Int},
+containing the labels of three points of each triangle.
+"""
+function triangulate_face(points::AbstractVector{<:StaticVector{3}};
+		direction::AbstractVector = face_normal(points),
+		map::AbstractVector{<:Integer} = [1:length(points)...],
+		)
+	axis = main_axis(direction)
+	N = length(points)
+	# this common case deserves a shortcut:
+	N == 3 && return [(map[1], map[2], map[3])]
+
+	points2d = Matrix{Float64}(undef, N, 2)
+	for (i, p) in pairs(points)
+		points2d[i,:] .= project2d(axis, p)
+	end
+	tri = LibTriangle.basic_triangulation(points2d, map)
+	return [(t[1], t[2], t[3]) for t in tri]
+end
 # Polyhedra interface««1
 @inline polyhedra_lib(T::Type{<:Real}) =
 	Polyhedra.DefaultLibrary{T}(GLPK.Optimizer)
@@ -40,7 +103,7 @@ end
 	n = norm(direction(h))
 	(n ≠ 0) ? (h / n) : h
 end
-@inline (h::Polyhedra.HRepElement)(p) = h.a ⋅ coordinates(p) - h.β
+@inline (h::Polyhedra.HRepElement)(p) = dot(h.a, p) - h.β
 @inline ∈(p, h::Polyhedra.HyperPlane) = iszero(h(p))
 @inline Base.convert(T::Type{<:Polyhedra.HRepElement},
 		h::Polyhedra.HRepElement) = T(h.a, h.β)
@@ -68,7 +131,7 @@ function convex_hull_list(points)
     v1 = points[j]-points[i]
     v2 = points[k]-points[j]
     d = det2(v1, v2)
-    c = v1 ⋅ v2
+    c = dot(v1, v2)
     return abs(d) < abs(c)/1024
   end
   scan = sort(filter(!isequal(i0), eachindex(points)),
@@ -80,7 +143,7 @@ function convex_hull_list(points)
     v1 = points[stack[end]] - points[stack[end-1]]
     v2 = points[h] - points[stack[end]]
     s = det2(v1, v2)
-    c = v1 ⋅ v2
+    c = dot(v1, v2)
     if abs(s) < abs(c)/1024 && c < 0 # points are aligned and backwards
 			# here we know that we can insert at (end)
 			# look for an insertion point i:
@@ -90,7 +153,7 @@ function convex_hull_list(points)
 				v1 = points[stack[i]] - points[stack[i-1]]
 				v2 = points[h] - points[stack[i]]
 				s = det2(v1, v2)
-				c = v1 ⋅ v2
+				c = dot(v1, v2)
 				if s < -1e-3*abs(c)
 # 					println(" break at $i")
 					break
@@ -116,7 +179,7 @@ end
 Returns the convex hull (as a vector of 2d points, ordered in direct
 order).
 """
-@inline convex_hull(points::AbstractVector{<:AbstractVector}) =
+@inline convex_hull(points::AbstractVector{<:StaticVector{2}}) =
 	points[convex_hull_list(points)]
 
 # """
@@ -181,7 +244,7 @@ Returns the convex hull of these points, as a pair `(points, faces)`.
 All the faces are triangles.
 """
 function convex_hull(p::AbstractVector{<:StaticVector{3,T}}) where{T}
-	M = hcat(Vector.(coordinates.(p))...)
+	M = hcat(Vector.(p)...)
 	PH = Polyhedra
 	poly = PH.polyhedron(PH.vrep(transpose(M)), polyhedra_lib(T))
 	R = PH.removevredundancy!(poly)
@@ -194,8 +257,7 @@ function convex_hull(p::AbstractVector{<:StaticVector{3,T}}) where{T}
 		for t in triangulate_face(
 				[SVector{3}(PH.get(poly, j)) for j in pts];
 				direction = h.a,
-				map = [j.value for j in pts],
-				convex = Val(true))
+				map = [j.value for j in pts])
 			(a,b,c) = (V[j] for j in t)
 			k = det([b-a c-a h.a])
 			push!(triangles, (k > 0) ? t : SA[t[1], t[3], t[2]])
