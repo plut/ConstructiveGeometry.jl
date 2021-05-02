@@ -312,11 +312,10 @@ end
 Extrudes a single point, returning a vector of 3d points
 (x,y) ↦ (x cosθ, x sinθ, y).
 """
-function _rotate_extrude(p::StaticVector{2}, angle, parameters)
+function _rotate_extrude(p::StaticVector{2,T}, angle, parameters) where{T}
 	@assert p[1] ≥ 0
 	# special case: point is on the y-axis; returns a single point:
-	T = parameters.type
-	iszero(p[1]) && return [SVector{3,T}(p[1], p[1], p[2])]
+	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
 	n = cld(sides(p[1], parameters) * angle, 360)
 
 	ω = Complex{T}(cosd(angle/n), sind(angle/n))
@@ -327,7 +326,7 @@ function _rotate_extrude(p::StaticVector{2}, angle, parameters)
 	end
 	# close the loop:
 	z[n+1] = Complex{T}(cosd(angle), sind(angle))
-	return [SVector{3,T}(p[1]*real(u), p[1]*imag(u), p[2]) for u in z]
+	return [SA[p[1]*real(u), p[1]*imag(u), p[2]] for u in z]
 end
 """
     ladder_triangles(n1, n2, start1, start2)
@@ -519,8 +518,7 @@ end
 
 @inline scad_info(s::Surface) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
-@inline mesh(s::Surface, parameters) =
-	corner_table(s.points, s.faces, parameters.color)
+@inline (m::Mesh)(s::Surface) = corner_table(m, s.points, s.faces)
 
 # Constructive geometry operations««1
 # https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
@@ -544,32 +542,31 @@ constructed_solid_type(s::Symbol, T = Vector{<:AbstractGeometry}) =
 	ConstructedSolid{s,T}
 
 # Union««2
-CSGUnion = constructed_solid_type(:union)
-# this calls union of CornerTable or PolygonXor as needed:
-@inline mesh(s::CSGUnion{2}, parameters) =
-	Shapes.clip(:union, (mesh(x, parameters) for x in children(s))...,)
-@inline mesh(s::CSGUnion{3}, parameters) =
-	CornerTables.combine([mesh(x, parameters) for x in children(s)], 1,
-		parameters.ε)
+struct CSGUnion{D} <: AbstractGeometry{D}
+	children::Vector{<:AbstractGeometry{D}}
+end
+@inline (m::Mesh)(s::CSGUnion{2}) = Shapes.clip(:union, m.(s.children)...)
+@inline (m::Mesh)(s::CSGUnion{3}) =
+	CornerTables.combine(m.(s.children), 1, m.parameters.ε)
+
 # Intersection««2
-CSGInter = constructed_solid_type(:intersection)
-@inline mesh(s::CSGInter{2}, parameters) =
-	Shapes.clip(:intersection, (mesh(x,parameters) for x in children(s))...,)
-@inline mesh(s::CSGInter{3}, parameters) =
-	CornerTables.combine([mesh(x,parameters) for x in children(s)],
-		length(children(s)), parameters.ε)
+struct CSGInter{D} <: AbstractGeometry{D}
+	children::Vector{<:AbstractGeometry{D}}
+end
+@inline (m::Mesh)(s::CSGInter{2}) =
+	Shapes.clip(:intersection, m.(s.children)...)
+@inline (m::Mesh)(s::CSGInter{3}) =
+	CornerTables.combine(m.(s.children), length(s.children), m.parameters.ε)
+
 # Difference««2
-# this is a binary operator:
-CSGDiff = constructed_solid_type(:difference,
-	Tuple{<:AbstractGeometry,<:AbstractGeometry})
-# @inline mesh(s::CSGDiff, parameters) =
-# 	setdiff(mesh(s.children[1], parameters), mesh(s.children[2], parameters))
-@inline mesh(s::CSGDiff{2}, parameters) =
-	Shapes.clip(:difference, mesh(s.children[1], parameters),
-		mesh(s.children[2], parameters))
-@inline mesh(s::CSGDiff{3}, parameters) =
-	CornerTables.combine([mesh(s.children[1], parameters),
-		reverse(mesh(s.children[2], parameters))], 2)
+struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
+	children::Tuple{<:AbstractGeometry{D},<:AbstractGeometry{D}}
+end
+@inline (m::Mesh)(s::CSGDiff{2}) =
+	Shapes.clip(:difference, m(s.children[1]), m(s.children[2]))
+@inline (m::Mesh)(s::CSGDiff{3}) =
+	CornerTables.combine([m(s.children[1]), reverse(m(s.children[2]))],
+		2, m.parameters.ε)
 
 # Complement««2
 # TODO
@@ -656,22 +653,22 @@ struct AffineTransform{D,A<:AbstractAffineMap} <: AbstractTransform{D}
 end
 # AffineTransform(f, child) constructor is defined
 
-function mesh(s::AffineTransform{3}, parameters)
+function (m::Mesh)(s::AffineTransform{3})
 	# FIXME what to do if signdet(s.f) == 0 ?
-	m = mesh(s.child, parameters)
-	m.points .= s.f.(m.points)
-	return signdet(s.f) > 0 ? m : reverse(m)
+	q = m(s.child)
+	q.points .= s.f.(q.points)
+	return signdet(s.f) > 0 ? q : reverse(q)
 end
 
-function mesh(s::AffineTransform{2}, parameters)
-	m = mesh(s.child, parameters)
+function (m::Mesh)(s::AffineTransform{2})
+	q = m(s.child)
 	d = signdet(s.f)
 	d ≠ 0 || error("Only invertible linear transforms are supported (for now)")
-	for p in m.paths
+	for p in q.paths
 		p .= s.f.(p)
 		d < 0 && reverse!(p)
 	end
-	return m
+	return q
 end
 
 # Project and cut (TODO)««2
@@ -747,21 +744,22 @@ struct RotateExtrude{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
-function mesh(s::RotateExtrude, parameters)
+function (m::Mesh{T})(s::RotateExtrude) where{T}
 	# right half of child:
-	m = intersect(Shapes.HalfPlane(SA[1,0],0), mesh(s.child, parameters))
-	pts2 = Shapes.vertices(m)::Vector{SVector{2,parameters.type}}
-	tri = Shapes.triangulate(m)
-	peri = Shapes.perimeters(m) # oriented ↺
+	q0 = m(s.child)::PolygonXor{T}
+	q = intersect(Shapes.HalfPlane(SA[1,0],0), q0)
+	pts2 = Shapes.vertices(q)
+	tri = Shapes.triangulate(q)
+	peri = Shapes.perimeters(q) # oriented ↺
 	n = length(pts2)
 	
-	pts3 = _rotate_extrude(pts2[1], s.angle, parameters)
+	pts3 = _rotate_extrude(pts2[1], s.angle, m.parameters)
 	firstindex = [1]
-	arclength = [length(pts3)]
+	arclength = Int[length(pts3)]
 	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
 	for p in pts2[2:end]
 		push!(firstindex, length(pts3)+1)
-		newpoints = _rotate_extrude(p, s.angle, parameters)
+		newpoints = _rotate_extrude(p, s.angle, m.parameters)
 		@debug "newpoints[$p] = $(length(newpoints))"
 		push!(arclength, length(newpoints))
 		pts3 = vcat(pts3, newpoints)
@@ -794,7 +792,7 @@ function mesh(s::RotateExtrude, parameters)
 		@debug "(end perimeter)»»"
 	end
 	@debug "triangles = $triangles"
-	return corner_table(pts3, triangles, parameters.color)
+	return corner_table(m, pts3, triangles)
 end
 
 
