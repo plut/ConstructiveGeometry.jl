@@ -692,8 +692,8 @@ struct LinearExtrude{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
-function mesh(s::LinearExtrude, parameters)
-	m = mesh(s.child, parameters)
+function (q::Mesh)(s::LinearExtrude)
+	m = q(s.child)
 	@assert m isa PolygonXor
 	pts2 = Shapes.vertices(m)
 	tri = Shapes.triangulate(m)
@@ -744,22 +744,22 @@ struct RotateExtrude{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
-function (m::Mesh{T})(s::RotateExtrude) where{T}
+function (q::Mesh{T})(s::RotateExtrude) where{T}
 	# right half of child:
-	q0 = m(s.child)::PolygonXor{T}
-	q = intersect(Shapes.HalfPlane(SA[1,0],0), q0)
-	pts2 = Shapes.vertices(q)
-	tri = Shapes.triangulate(q)
-	peri = Shapes.perimeters(q) # oriented ↺
+	m0 = q(s.child)::PolygonXor{T}
+	m = intersect(Shapes.HalfPlane(SA[1,0],0), m0)
+	pts2 = Shapes.vertices(m)
+	tri = Shapes.triangulate(m)
+	peri = Shapes.perimeters(m) # oriented ↺
 	n = length(pts2)
 	
-	pts3 = _rotate_extrude(pts2[1], s.angle, m.parameters)
+	pts3 = _rotate_extrude(pts2[1], s.angle, q.parameters)
 	firstindex = [1]
 	arclength = Int[length(pts3)]
 	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
 	for p in pts2[2:end]
 		push!(firstindex, length(pts3)+1)
-		newpoints = _rotate_extrude(p, s.angle, m.parameters)
+		newpoints = _rotate_extrude(p, s.angle, q.parameters)
 		@debug "newpoints[$p] = $(length(newpoints))"
 		push!(arclength, length(newpoints))
 		pts3 = vcat(pts3, newpoints)
@@ -792,7 +792,7 @@ function (m::Mesh{T})(s::RotateExtrude) where{T}
 		@debug "(end perimeter)»»"
 	end
 	@debug "triangles = $triangles"
-	return corner_table(m, pts3, triangles)
+	return corner_table(q, pts3, triangles)
 end
 
 
