@@ -244,7 +244,7 @@ Returns the convex hull of these points, as a pair `(points, faces)`.
 All the faces are triangles.
 """
 function convex_hull(p::AbstractVector{<:StaticVector{3,T}}) where{T}
-	M = hcat(Vector.(p)...)
+	M = reduce(hcat, p)
 	PH = Polyhedra
 	poly = PH.polyhedron(PH.vrep(transpose(M)), polyhedra_lib(T))
 	R = PH.removevredundancy!(poly)
@@ -254,13 +254,13 @@ function convex_hull(p::AbstractVector{<:StaticVector{3,T}}) where{T}
 	for i in PH.eachindex(PH.halfspaces(poly)) # index of halfspace
 		h = PH.get(poly, i)
 		pts = PH.incidentpointindices(poly, i) # vector of indices of points
-		for t in triangulate_face(
-				[SVector{3}(PH.get(poly, j)) for j in pts];
+		vlist = [SVector{3,T}(PH.get(poly, j)) for j in pts]
+		for t in triangulate_face( vlist;
 				direction = h.a,
 				map = [j.value for j in pts])
 			(a,b,c) = (V[j] for j in t)
 			k = det([b-a c-a h.a])
-			push!(triangles, (k > 0) ? t : SA[t[1], t[3], t[2]])
+			push!(triangles, (k > 0) ? t : (t[1], t[3], t[2]))
 		end
 	end
 	return (points=V, faces=triangles)

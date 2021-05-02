@@ -277,6 +277,33 @@ p⋆q = convolution(p, q)
 # 	r = convolution(p, q)
 # 	return simplify_paths([r]; fill)
 # end
+# # Convolution of polygons««2
+# # http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
+# """
+#     circularcmp(v1, v2, v3, [Val(:offset)])
+# 
+# Circular comparison predicate; returns true iff directions of vectors
+# `v1`, `v2`, `v3` are arranged in a trigonometric ordering along the unit
+# circle.
+# 
+# If `Val(:offset)` is passed then `v1`, `v3` are infinitesimally rotated
+# in the positive direction compared to `v2`.
+# """
+# function circularcmp(v1, v2, v3)
+# 	d1 = v2[1]*v3[2] ≥ v2[2]*v3[1]
+# 	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
+# 	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
+# 	return (d1+d2+d3) ≥ 2
+# end
+# function circularcmp(v1, v2, v3, ::Val{:offset})
+# 	d1 = v2[1]*v3[2] > v2[2]*v3[1]
+# 	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
+# 	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
+# 	return (d1+d2+d3) ≥ 2
+# end
+# 
+# # TODO: 3d Minkowski««2
+# 
 # 
 
 # PolygonXor««1
@@ -391,7 +418,6 @@ function triangulate(m::PolygonXor)
 		end
 		c+= n
 	end
-	println("edges=$edges")
 	tri = LibTriangle.constrained_triangulation(
 		Matrix{Float64}([transpose.(v)...;]),
 		collect(1:length(v)), edges)

@@ -115,8 +115,8 @@ lazymap(f,v) = LazyMap{Base.return_types(f,Tuple{eltype(v)})[1]}(f, v)
 
 # Geometry««2
 @inline norm²(v) = dot(v,v)
-# half-edge mesh««1
-# half-edge data structure ««2
+# corner table mesh ««1
+# data structure ««2
 """
     CornerTable{I,P,A}
 
@@ -859,14 +859,23 @@ function replace_face!(m::CornerTable, f::Face, vlist, a = nothing)
 	set_face!(m, f, vlist, a)
 end
 # Constructor««2
-function CornerTable(points, faces, attributes = Iterators.repeated(nothing))#««
-	m = CornerTable{Int64,eltype(points),eltype(attributes)}(points)
+function CornerTable{I,P,A}(points, faces,
+	attributes = Iterators.repeated(nothing)) where{I,P,A}#««
+	m = CornerTable{I,P,A}(points)
 	for ((v1,v2,v3), a) in zip(faces, attributes)
 # 		verbose(m)
 		append_face!(m, (Vertex(v1), Vertex(v2), Vertex(v3)), a)
 	end
 	return m
 end#»»
+@inline CornerTable{I,P}(points, faces, attributes) where{I,P} =
+	CornerTable{I,P,eltype(attributes)}(points, faces, attributes)
+
+@inline CornerTable{I}(points, faces, attributes) where{I} =
+	CornerTable{I,eltype(points)}(points, faces, attributes)
+
+@inline CornerTable(points, faces, attributes) =
+	CornerTable{Int}(points, faces, attributes)
 # coplanar and opposite faces««2
 # returns the equivalence relation, as pairs of indices in `flist`:
 function coplanar_faces(m::CornerTable, flist, ε = 0)

@@ -1,3 +1,5 @@
+# MAKE mesh() TYPE-STABLE
+  - by defining a Mesh{T} pseudo-type (only a constructor)
 # Split/rewrite of module
  - **2d subsystem**
   - [x] interface via simple `Vector{SVector{2}}` objects and short list of

@@ -230,7 +230,7 @@ Returns the vertices of a regular n-gon inscribed in the unit circle
 as points with coordinates of type `T`, while avoiding using too many
 trigonometric computations.
 """
-function unit_n_gon(T::Type{<:Real}, n::Int)
+function unit_n_gon(r::T, n::Int) where{T<:Real}
 	ω = cis(2π/n) # exp(2iπ/n)
 	z = Vector{Complex{T}}(undef, n)
 	z[1] = one(T)
@@ -248,10 +248,9 @@ function unit_n_gon(T::Type{<:Real}, n::Int)
 	if iseven(n)
 		@inbounds z[n>>1+1] = -1
 	end
-	reinterpret(SVector{2,T}, z)
+	reinterpret(SVector{2,T}, r*z)
 end
-@inline unit_n_gon(r, parameters::NamedTuple) =
-	r*unit_n_gon(get_parameter(parameters, :type), sides(r, parameters))
+@inline unit_n_gon(r, parameters::NamedTuple)= unit_n_gon(r,sides(r,parameters))
 
 # Spheres««2
 """
@@ -293,8 +292,7 @@ http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
 
 to optimize for volume of convex hull.
 """
-function fibonacci_sphere_points(T::Type{<:Real}, n::Int)
-
+function fibonacci_sphere_points(r::T, n::Int) where{T<:Real}
 	v = Vector{SVector{3,T}}(undef, n)
 	for i in eachindex(v)
 		θ = i*T(golden_angle)
@@ -305,8 +303,8 @@ function fibonacci_sphere_points(T::Type{<:Real}, n::Int)
 	end
 	return v
 end
-@inline fibonacci_sphere_points(r::Real, parameters) =
-	r*fibonacci_sphere_points(parameters.type, sphere_nvertices(r, parameters))
+@inline fibonacci_sphere_points(r::Real, parameters::NamedTuple) =
+	fibonacci_sphere_points(r, sphere_nvertices(r, parameters))
 # tools for rotate extrusion««2
 """
     _rotate_extrude(point, data, parameters)
@@ -383,7 +381,26 @@ abstract type AbstractGeometry{D} end
 abstract type AbstractGeometryCoord{D,T} <: AbstractGeometry{D} end
 @inline coordtype(::AbstractGeometryCoord{D,T}) where{D,T} = T
 
+"""
+    Mesh{T}
+
+A structure storing the parameters for the (abstract object)->(mesh) conversion.
+The coordinate type determines the Julia type of the returned object;
+therefore, it is stored as a type parameter of `Mesh`.
+"""
+struct Mesh{T<:Real,C}
+	parameters::NamedTuple
+	color::C
+	@inline Mesh(parameters::NamedTuple) =
+		new{parameters.type,typeof(parameters.color)}(parameters, parameters.color)
+end
+@inline coordtype(::Mesh{T}) where{T} = T
 @inline mesh(s::AbstractGeometry) = mesh(s, _DEFAULT_PARAMETERS)
+@inline mesh(s::AbstractGeometry, parameters::NamedTuple) = Mesh(parameters)(s)
+@inline corner_table(m::Mesh{T}, points, faces) where{T} =
+	CornerTable{Int,SVector{3,T},typeof(m.color)}(
+		points, faces, Iterators.repeated(m.color))
+@inline polygon_xor(::Mesh{T}, args...) where{T} = PolygonXor{T}(args...)
 # 2d primitives««1
 # Ortho: square or cube (orthotope) with a corner at zero««2
 """
@@ -403,17 +420,10 @@ Square = Ortho{2}
 
 @inline scad_info(s::Square) = (:square, (size=s.size,))
 
-function vertices(s::Square)
-	# in trigonometric order:
-	z = zero(coordtype(s)); v = s.size
-	return [
-		SA[z   ,z   ],
-		SA[v[1],z   ],
-		SA[v[1],v[2]],
-		SA[z   ,v[2]]]
-end
-mesh(s::Square, parameters) =
-	PolygonXor{get_parameter(parameters, :type)}(vertices(s))
+@inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
+
+@inline (m::Mesh{T})(s::Square) where{T} =
+	PolygonXor{T}(square_vertices(T(s.size[1]), T(s.size[2])))
 
 # Ball: circle or sphere, centered at zero««2
 """
@@ -428,8 +438,8 @@ end
 
 Circle = Ball{2}
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
-@inline mesh(s::Circle, parameters) =
-	PolygonXor{get_parameter(parameters, :type)}(unit_n_gon(s.radius, parameters))
+@inline (m::Mesh{T})(s::Circle) where{T} =
+	PolygonXor{T}(unit_n_gon(T(s.radius), m.parameters))
 
 # Polygon««2
 """
@@ -445,8 +455,7 @@ end
 	Polygon{eltype(eltype(points))}(points)
 
 @inline scad_info(s::Polygon) = (:polygon, (points=s.points,))
-@inline mesh(s::Polygon, parameters) =
-	PolygonXor{get_parameter(parameters, :type)}(s.points)
+@inline (m::Mesh{T})(s::Polygon) where{T} = PolygonXor{T}(s.points)
 
 # Draw ««2
 struct Draw{T} <: AbstractGeometryCoord{2,T}
@@ -459,46 +468,36 @@ end
 Draw(path, width; ends=:round, join=:round, miter_limit=2.) =
 	Draw{coordtype(path)}(path, width, ends, join, miter_limit)
 
-function mesh(s::Draw, parameters)
-	r = one_half(s.width)
-	ε = max(get_parameter(parameters,:accuracy),
-		get_parameter(parameters,:precision) * r)
-	return PolygonXor(offset([s.path], r;
+function (m::Mesh{T})(s::Draw) where{T}
+	r = one_half(T(s.width))
+	ε = max(get_parameter(m.parameters,:accuracy),
+		get_parameter(m.parameters,:precision) * r)
+	return PolygonXor{T}(offset([s.path], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
 
 # 3d primitives««1
 Cube = Ortho{3}
 @inline scad_info(s::Cube) = (:cube, (size=s.size,))
-function vertices(s::Cube, parameters)
-	v = s.size
-	T = parameters.type
-	return [
-		SA{T}[0   ,0   ,0   ],
-		SA{T}[0   ,0   ,v[3]],
-		SA{T}[0   ,v[2],0   ],
-		SA{T}[0   ,v[2],v[3]],
-		SA{T}[v[1],0   ,0   ],
-		SA{T}[v[1],0   ,v[3]],
-		SA{T}[v[1],v[2],0   ],
-		SA{T}[v[1],v[2],v[3]],
-	]
-end
-function mesh(s::Cube, parameters)
-	pts = vertices(s, parameters)
-	return corner_table(pts, [ # 12 triangular faces:
+
+@inline cube_vertices(u, v, w) = [
+		SA[0,0,0], SA[0,0,w], SA[0,v,0], SA[0,v,w],
+		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
+
+(m::Mesh{T})(s::Cube) where{T} =
+	corner_table(m, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
+	[ # 12 triangular faces:
 	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
 	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
 	 (2, 1, 5), (5, 6, 2), (3, 1, 2), (2, 4, 3),
-	], parameters.color)
-end
+	])
 
 Sphere = Ball{3}
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
-function mesh(s::Sphere, parameters)
-	plist = fibonacci_sphere_points(s.radius, parameters)
+function (m::Mesh{T})(s::Sphere) where{T}
+	plist = fibonacci_sphere_points(T(s.radius), m.parameters)
 	(pts, faces) = convex_hull(plist)
-	return corner_table(pts, faces, parameters.color)
+	return corner_table(m, pts, faces)
 end
 
 
@@ -675,6 +674,12 @@ function mesh(s::AffineTransform{2}, parameters)
 	return m
 end
 
+# Project and cut (TODO)««2
+struct Project <: AbstractTransform{2}
+end
+
+struct Cut <: AbstractTransform{2}
+end
 # SetParameters««2
 # (including colors)
 struct SetParameters{D} <: AbstractTransform{D}
@@ -745,7 +750,7 @@ end
 function mesh(s::RotateExtrude, parameters)
 	# right half of child:
 	m = intersect(Shapes.HalfPlane(SA[1,0],0), mesh(s.child, parameters))
-	pts2 = Shapes.vertices(m)
+	pts2 = Shapes.vertices(m)::Vector{SVector{2,parameters.type}}
 	tri = Shapes.triangulate(m)
 	peri = Shapes.perimeters(m) # oriented ↺
 	n = length(pts2)
@@ -1252,72 +1257,7 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 #————————————————————— Meshing (2d) —————————————————————————————— ««1
 
 #»»1
-# # 2d Minkowski sum««1
-# # Convolution of polygons««2
-# # http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
-# """
-#     circularcmp(v1, v2, v3, [Val(:offset)])
-# 
-# Circular comparison predicate; returns true iff directions of vectors
-# `v1`, `v2`, `v3` are arranged in a trigonometric ordering along the unit
-# circle.
-# 
-# If `Val(:offset)` is passed then `v1`, `v3` are infinitesimally rotated
-# in the positive direction compared to `v2`.
-# """
-# function circularcmp(v1, v2, v3)
-# 	d1 = v2[1]*v3[2] ≥ v2[2]*v3[1]
-# 	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
-# 	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
-# 	return (d1+d2+d3) ≥ 2
-# end
-# function circularcmp(v1, v2, v3, ::Val{:offset})
-# 	d1 = v2[1]*v3[2] > v2[2]*v3[1]
-# 	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
-# 	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
-# 	return (d1+d2+d3) ≥ 2
-# end
-# 
-# # TODO: 3d Minkowski««2
-# 
 # # 2d meshing««1
-# # Primitive objects««2
-# @inline vertices(c::Circle, parameters) = unit_n_gon(c.radius, parameters)
-# 
-# mesh(s::PolygonXor, parameters) = s
-# mesh(s::Circle, parameters) = PolygonXor{get_parameter(parameters, :type)}(vertices(s, parameters))
-# 
-# # Transforms««2
-# # Reduction of CSG operations««2
-# function mesh(s::CSGHull{2}, parameters)
-# 	l = [mesh(x, parameters) for x in children(s)]
-# 	return PolygonXor(convex_hull([vertices.(l)...;]))
-# end
-# 
-# function mesh(s::CSGMinkowski{2}, parameters)
-# 	l = [mesh(x, parameters) for x in children(s)]
-# 	global G = minkowski(l[1], l[2])
-# # 	return PolygonXor(reduce((p,q)->minkowski(p,q), l)...)
-# end
-# 
-# function mesh(s::AffineTransform{2}, parameters)
-# 	g = mesh(s.child, parameters)
-# 	f = s.data
-# 	b = sign(f)
-# 	@assert b ≠ 0 "Only invertible linear transforms are supported (for now)"
-# 	return f(g) # reversal (if b < 0) is done polygon-by-polygon there
-# end
-# # Set-wise operations:
-# # # Minkowski sum:
-# # function (U::Type{<:PolyUnion})(s::ConstructedSolid{2,:minkowski},
-# # 	parameters)::U
-# # 	reduce((a,b)->U(minkowski(a.poly, b.poly)),
-# # 		_convert(U, s.children, parameters))
-# # end
-# # function _combine2(::Val{:minkowski}, a::PolyUnion{T}, b::PolyUnion{T}) where{T}
-# # 	# not implemented in Clipper.jl...
-# # end
-# 
 # # Offset and draw««2
 # # """
 # #     draw(path, width; kwargs...)
@@ -1339,21 +1279,6 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 # # 	return PolyUnion(ret)
 # # end
 # # 
-#————————————————————— Meshing (3d) —————————————————————————————— ««1
-#=
-mesh(geom, parameters = _DEFAULT_PARAMETERS) returns a Surface
-mesh(x::Surface, parameters...) = x
-=#
-# function mesh(s::AffineTransform{3}, parameters)
-# 	g = mesh(s.child, parameters)
-# 	b = sign(s.data)
-# 	if b > 0
-# 		return (typeof(g))(s.data.(vertices(g)), faces(g))
-# 	else
-# 		return (typeof(g))(s.data.(vertices(g)), reverse.(faces(g)))
-# 	end
-# end
-#»»1
 #————————————————————— Extra tools —————————————————————————————— ««1
 #»»1
 # OpenSCAD output
