@@ -78,9 +78,9 @@ for an user to recover these metadata while meshing an object).
 
 ## Operations
 ```@docs
-union(::Geometry,::Geometry)
-intersect(::Geometry,::Geometry)
-setdiff(::Geometry,::Geometry)
+union(::AbstractGeometry,::AbstractGeometry)
+intersect(::AbstractGeometry,::AbstractGeometry)
+setdiff(::AbstractGeometry,::AbstractGeometry)
 ConstructiveGeometry.hull
 ConstructiveGeometry.minkowski
 ```
