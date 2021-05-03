@@ -685,10 +685,19 @@ function (g::Mesh)(s::AffineTransform{2})
 end
 
 # Project and cut (TODO)««2
-struct Project <: AbstractTransform{2}
+struct Project <: AbstractGeometry{2}
+	child::AbstractGeometry{3}
 end
 
-struct Cut <: AbstractTransform{2}
+function (g::Mesh)(s::Project)
+	m = g(s.child)
+	p = CornerTables.points(m)
+	f = CornerTables.faces(m)
+	return PolygonXor([SA[x[1], x[2]] for x in p], f)
+end
+
+struct Cut <: AbstractGeometry{2}
+	child::AbstractGeometry{3}
 end
 # SetParameters««2
 # (including colors)
@@ -729,7 +738,7 @@ function (g::Mesh)(s::LinearExtrude)
 	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	]
-	return corner_table(pts3, faces, parameters.color)
+	return corner_table(g, pts3, faces)
 end
 
 # Cone««2
@@ -1176,6 +1185,7 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 # TODO: project««2
 
 # overloading Julia operators««1
+# backslash replaces U+2216 ∖ SET MINUS, which is not an allowed Julia operator
 @inline Base.:\(x::AbstractGeometry, y::AbstractGeometry) = setdiff(x, y)
 @inline Base.:-(x::AbstractGeometry, y::AbstractGeometry,
 	tail::AbstractGeometry...) = setdiff(x, union(y, tail...))

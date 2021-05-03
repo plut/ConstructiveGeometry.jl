@@ -377,7 +377,7 @@ function identify_polygons(s::PolygonXor)
 end
 
 @inline clip(op, s::PolygonXor{T}...) where{T} =
-	PolygonXor{T}(reduce((p,q)->clip(op, paths(p), paths(q), fill=:evenodd), s))
+	reduce((p,q)->PolygonXor{T}(clip(op, paths(p), paths(q), fill=:evenodd)), s)
 
 # @inline Base.union(s::PolygonXor...) = clip(:union, s...)
 # @inline Base.intersect(s::PolygonXor...) = clip(:intersection, s...)
@@ -402,8 +402,8 @@ end
 # 	return PolygonXor(minkowski(cp, cq, fill=:evenodd)...)
 # end
 
-# Triangulation««1
-function triangulate(m::PolygonXor)
+# Triangulation and reconstruction from triangle««1
+function triangulate(m::PolygonXor)#««
 	v = vertices(m)
 	id = identify_polygons(m)
 	peri = perimeters(m)
@@ -423,8 +423,16 @@ function triangulate(m::PolygonXor)
 		collect(1:length(v)), edges)
 	# remove triangle made entirely of hole vertices
 	return tri[[!all(is_hole[t]) for t in tri]]
+end#»»
+# reconstruction from triangles
+# this is used by 3d->2d projection:
+function PolygonXor(points::AbstractVector{SVector{2,T}},
+	faces::AbstractVector) where{T}
+	v=[PolygonXor{T}([points[f[1]], points[f[2]], points[f[3]]]) for f in faces ]
+	return clip(:union, v...)
 end
-# # Intersections (2d)««1
+
+# Intersections (2d)««1
 
 struct HalfPlane{T<:Real}
 	# equation a*x+b = 0
