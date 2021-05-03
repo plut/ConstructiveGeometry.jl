@@ -2,7 +2,7 @@
 
 ## Interface
 
-`mesh(objects...)`
+`mesh(object, parameters...)`
 
 The meshing of objects is governed by a few parameters:
  - `accuracy` and `precision` determine the number of faces inserted in the
@@ -80,3 +80,29 @@ In addition to `accuracy` and `precision`,
 the `symmetry` parameter allows forcing the number of vertices
 of a circle to be a multiple of a defined value
 (by rounding up, if needed, to a multiple of `symmetry`).
+
+# Mesh type for 2d objects
+
+2d objects are represented as the exclusive union (XOR)
+of simple-loop polygons.
+
+# Mesh type for 3d objects
+
+3d objects are represented as a triangulated mesh
+stored in a [corner table](https://www.cc.gatech.edu/~jarek/papers/CornerTableSMI.pdf).
+Since the mesh becomes (temporarily) non-manifold during
+computation of CSG operations,
+the structure actually implemented in this module
+is an extension of the basic corner table mesh,
+allowing representation of arbitrary non-manifold meshes.
+The details are inspired by [Shin et al
+2004](https://www.researchgate.net/profile/Hayong_Shin/publication/4070748_Efficient_topology_construction_from_triangle_soup/links/55efd5b408ae199d47c02cd2.pdf).
+
+The information stored in this structure is accessible via the following
+functions:
+
+ - `points(m)`: returns a vector of points. The type used for points is
+   a parameter of the `CornerTable` type. For objects built by
+   `ConstructiveGeometry.jl`, this will be a `SVector{3,<:Real}`.
+ - `faces(m)`: returns a vector of faces,
+   represented as `NTUple{3,Int}` of indices of points.

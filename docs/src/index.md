@@ -34,14 +34,14 @@ The package is made of two parts:
  - a system for describing geometric objects;
  - back-ends for converting these objects to useful formats.
 
-As of 2021-01, the only useable output format is an OpenSCAD file.
+As of 2021-01, most object may either be:
+ - converted to OpenSCAD format, or
+ - explicited as (2d or 3d) meshes.
 
-Other planned output formats include:
- - (**TODO**) represented graphically using one of the Julia plotting packages;
- - (**PARTLY DONE**) converted to a mesh;
- - (**TODO**) directly exported as a 2d (`.svg`)
- or 3d file (`.stl` or `.ply`).
-
+Near-future plans include:
+ - graphical representation of objects using one of the Julia plotting
+   packages;
+ - direct export as a 2d (`.svg`) or 3d file (`.stl` or `.ply`).
 
 # Quick-start
 

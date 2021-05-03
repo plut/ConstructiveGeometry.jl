@@ -299,7 +299,7 @@ function fibonacci_sphere_points(r::T, n::Int) where{T<:Real}
 		z = (n+1-2i)/T(n)
 		ρ = √(1-z^2)
 		(s,c) = sincos(θ)
-		@inbounds v[i] = SA[c*ρ, s*ρ, z]
+		@inbounds v[i] = SA[r*c*ρ, r*s*ρ, r*z]
 	end
 	return v
 end
@@ -390,8 +390,11 @@ therefore, it is stored as a type parameter of `Mesh`.
 struct Mesh{T<:Real,C}
 	parameters::NamedTuple
 	color::C
-	@inline Mesh(parameters::NamedTuple) =
-		new{parameters.type,typeof(parameters.color)}(parameters, parameters.color)
+	@inline Mesh{T,C}(parameters) where{T,C} =
+		new{T,C}(parameters, parameters.color)
+	@inline Mesh{T}(parameters) where{T} =
+		Mesh{T,typeof(parameters.color)}(parameters)
+	@inline Mesh(parameters::NamedTuple) = Mesh{parameters.type}(parameters)
 end
 @inline coordtype(::Mesh{T}) where{T} = T
 @inline mesh(s::AbstractGeometry; kwargs...) =

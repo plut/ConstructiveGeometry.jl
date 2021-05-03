@@ -1082,8 +1082,11 @@ function project_and_triangulate(m::CornerTable, direction, vlist,elist=nothing)
 	else @assert direction ==-3; d = [2,1]
 	end
 	vmat = Matrix{Float64}(undef, length(vlist), 2)
-	vmat[:,1] .= (point(m, v)[d[1]] for v in vlist)
-	vmat[:,2] .= (point(m, v)[d[2]] for v in vlist)
+	for (i, v) in pairs(vlist)
+		p = point(m, v)
+		vmat[i, 1] = p[d[1]]
+		vmat[i, 2] = p[d[2]]
+	end
 
 	vref = Int.(vlist)
 

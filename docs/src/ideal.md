@@ -9,6 +9,7 @@ CurrentModule = ConstructiveGeometry
 ConstructiveGeometry.square
 ConstructiveGeometry.circle
 ConstructiveGeometry.cube
+ConstructiveGeometry.cone
 ConstructiveGeometry.cylinder
 ConstructiveGeometry.sphere
 ConstructiveGeometry.polygon
@@ -69,13 +70,17 @@ ConstructiveGeometry.color
 ConstructiveGeometry.set_parameters
 ```
 
+The `set_parameters` transformation allows attaching arbitrary metadata.
+This is on purpose (although there currently exists no easy way
+for an user to recover these metadata while meshing an object).
+
 ### Defining a custom transformation
 
 ## Operations
 ```@docs
 union(::Geometry,::Geometry)
 intersect(::Geometry,::Geometry)
-ConstructiveGeometry.difference
+setdiff(::Geometry,::Geometry)
 ConstructiveGeometry.hull
 ConstructiveGeometry.minkowski
 ```

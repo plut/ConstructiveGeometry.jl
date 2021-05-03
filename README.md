@@ -14,8 +14,7 @@ The following work at least in some cases:
  - meshing of most 2d and 3d operations;
  - output as an OpenSCAD file.
 
-This means that it should already be possible to use this module to
-define basic 3d models:
+It is possible to use this module to define basic 3d models:
 ```julia
 s1 = sphere(20)
 s2 = cube(20)
@@ -27,15 +26,14 @@ mesh(hull(s1, s2))
 gives the following output:
 ![CSG operations on two tetrahedra](examples/sphere_cube.png)
 
-OpenSCAD was used for rendering the image,
-although not for computing the CSG operations.
+*(although the meshes were computed by the Julia module,
+OpenSCAD was used for rendering the image.
+This will change in a future release.)*
 
 The roadmap now includes at least the following:
  - built-in visualization of models;
  - direct mesh I/O from and to relevant file formats;
  - add more convenience constructors (e.g. for transforms);
- - improve speed of some algorithms by tweaking the associated data
-	 structures;
  - implement missing operators: 3d Minkowski sum; 2d/3d Minkowski
 	 difference; projection; some extrusions;
  - add a `text()` constructor;
