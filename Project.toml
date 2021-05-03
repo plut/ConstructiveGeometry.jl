@@ -1,7 +1,7 @@
 name = "ConstructiveGeometry"
 uuid = "d7b4f48a-cc68-4606-be83-5982dfebca4b"
 authors = ["Jerome Plut <jerome@fugue.cf> and contributors"]
-version = "0.1.0"
+version = "0.2.0"
 
 [deps]
 Clipper = "c8f6d549-b3ab-5508-a0d1-48fe138e8cc1"

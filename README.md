@@ -3,8 +3,7 @@
 
 [![Documentation|Dev](https://img.shields.io/badge/docs-latest-blue.svg)](https://plut.github.io/ConstructiveGeometry.jl/dev/)
 
-A module providing a syntax and tools
-to define CSG objects in Julia.
+Algorithms and syntax to define CSG objects in Julia.
 
 This module is currently a work in progress,
 roughly at the “proof of concept” stage.
