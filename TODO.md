@@ -1,19 +1,10 @@
-# MAKE mesh() TYPE-STABLE
-  - by defining a Mesh{T} pseudo-type (only a constructor)
 # Split/rewrite of module
  - **2d subsystem**
-  - [x] interface via simple `Vector{SVector{2}}` objects and short list of
-    functions
-  - [ ] maybe even better, interface as parametric types
   - [ ] rename `PolygonXor`? `PolygonalShape`?
-  - [x] add half-plane intersections in this module
   - [ ] reconstruct polygonal shape by list of segments (for projections)
  - **3d subsystem**
-  - [x] interface via `CornerTables` and short list of functions
-   - [x] document this list of functions
+  - [ ] add half-space and plane intersections
  - **Definitions of geometric objects**
-  - [x] _2d primitives_: circle, square, polygon
-  - [x] _3d primitives_: sphere, cube, cylinder, surface (?)
   - [x] Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
    - simplicity vs. efficiency?
@@ -25,7 +16,7 @@
   - [x] _Non-geometry transforms_: `set_parameters`, color
   - [ ] _CG operations_:
    - [x] union, inter, diff
-   - [ ] hull
+   - [x] hull
    - [ ] offset
    - [ ] minkowski+, minkowski-
  - **Syntactic sugar**
@@ -35,47 +26,15 @@
  - **Visualization** (TODO)
  - [ ] **Convex hull** (in its own file)
 # For version 0.2 (performance update)
- # corner table http://graphics.stanford.edu/courses/cs468-12-spring/LectureSlides/02_Mesh_Data_Structures.pdf
- - [Aleardi, Devillers] https://hal.inria.fr/inria-00623762/document
- operators: LeftBack, LeftFront, RightBack, RightFront, Source, Target,
- Left, Right; Point, Edge
- - [+] write generic functions for face deletion/insertion in
-   HalfEdgeMesh, and use that for (a) mesh construction, (b)
-   subtriangulation, (c) simplification (retriangulate faces, removing
-   vertices).
- - [+] use a singular half-edge data structure such as:
- https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.11.4605&rep=rep1&type=pdf
- - [x] write set of tests for 2d subsystem: number of vertices and paths
-   for known shapes, etc.
- - [x] group together what belongs to `Square`, etc. (in particular,
-   include "scad.jl" at the top instead of bottom)
- - [x] use some form of explicit representation for edges
-   - [x] may as well use half-edge structure while we're at it
- - [x] document the changes
- - [x] convert Polygon{Int} to Polygon{Float}
- - [?] clean the type system once and for all:
-  - [x] suggestion: let `AbstractGeometry` objects have a mess of types
-    if they so want,
-  - [x] and only decide on a coord. type at meshing type (as a parameter).
-  - [ ] take advantage to allow exact (rational) arithmetic
+ - [ ] allow exact (rational) arithmetic
  - [?] split in several packages:
   - [ ] `AbstractGeometry`: remove stale `Meshes` dependency
   - [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
   - [x] `AABBTree` -> `SpatialSorting` + `TriangleIntersections`
   - [x] `Meshing` -> `CornerTables`
- - [x] implement ZGZJ's cluster triangulation to prevent crossing faces
-  - [x] “thicken” faces (and edges) wrt intersection (i.e. add small,
-    well-defined tolerance). As a parameter in `set_parameters`?
- - [x] fix difference of two touching solids (e.g. noodle extrusion):
- inclusion (as defined on connected components) does not work in this
- case
-   - [x] solution could be in correctly counting opposite faces...
- - [x] linear extrusion of PolygonXor
- - [x] rotate extrusion
  - [ ] intersection with half-plane and half-space
  - [ ] Minkowski sum in 2d
    - [ ] and Minkowski difference
- - [x] clear meshing parameter propagation
  - [x] what to do for polygons with holes? find a representation that
    must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
    possibilities include:
@@ -109,15 +68,6 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
    - in `BasicGeometry`: a list of polygons + list of holes
    - this is simplest (it works as a xor polygon, whereas converting any
      xor to this is harder)
- - [x] reorganize inside the file
- - [ ] 3d => 2d projection
- - [ ] 3d => 2d intersection with plane
- - [x] a common name for meshing objects => **mesh**
- - [x] check using vs. import
- - [x] write a few examples
- - [x] fix `Offset` for polygon xor
- - [x] choose a correct value for `Clipper` precision
- - [x] check that `convex_hull` works
 # For version 0.3 (visualization update)
  - [ ] add some per-face visualization data (colors?).
 # Performance
@@ -126,24 +76,11 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
    or passing the return type of points as a parameter?).
  - [ ] try to use SIMD (e.g. bbox computation)
  - [?] `@inbounds` wherever possible
- - [x] use `sizehint!` for arrays
- - [x] use an AABB tree (bounding box tree) for intersection detection
 # Dependencies
  - [ ] `CircularArrays.jl` ?
  - [ ] `Dictionaries.jl` ?
  - [ ] `KeywordDispatch.jl` ?
  - [ ] `Reexport.jl` ?
-decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
- - [x] `Meshes.jl`:
-   - [ ] which basic useful algorithms are in this package? not many...
-   - [x] seems to work with `Makie`
-   - [x] simple base types (`Point` is good; has basic operations + rand)
- - [ ] `GeometryBasics.jl`:
-   - [ ] a bit more basic algorithms (meshing of spheres, cylinders?)
-     - only very basic stuff
-   - [ ] `MeshIO.jl` works with `GeometryBasics`
-   - [ ] `Point` is bad
-   - [ ] mesh types are awfully long and depend on bad `Point` type
 # Basic types
  - [ ] use abstract types wherever possible
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
@@ -182,15 +119,15 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
    - [?] `hull`: use embedding to push all objects to same space if possible
    - [?] `minkowski`: ditto
 # Primitives
- - [ ] decide whether primitives always have origin=0
-   - this is probably simpler for generating points (translating later)
-   - and transparent for the user: the constructor can do the translation
+ - [x] decide whether primitives always have origin=0
+   - [x] this is probably simpler for generating points (translating later)
+   - [x] and transparent for the user: the constructor can do the translation
  - [x] add trivial types for EmptyUnion and EmptyIntersect
- - [?] decide whether to use Square or square as a name
+ - [x] decide whether to use Square or square as a name
  suggestion: `Square` is the raw constructor;
  `square` is the convenience user function
-  - [ ] (which might return e.g. a rounded square)
-  - [ ] also do cylinder, sphere, cube
+  - [x] (which might return e.g. a rounded square)
+  - [x] also do cylinder, sphere, cube
  - [ ] add convenience constructors for rounded square, cone, …
  - [ ] simple syntax for making conditionals (⇒ use those empty objects)
    - [ ] or also allow `Nothing` in vectors of objects
@@ -219,6 +156,7 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] `×` extrusion (scalar => linear_extrude; interval =>
    rotate_extrude; path => path_extrude)
  - [x] `*` multmatrix; scaling
+ - [ ] Complex * 2d object
  - [ ] make kwargs open for user extension (e.g. rounded squares)
 # Transformations
  - [ ] make transformations even lazier, so that they are evaluated only once
@@ -233,10 +171,6 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] convex hull in mixed dimensions makes sense
     (also: image of 2d object in another plane?).
  - [ ] : overload extrude() (for paths, angles, numbers)
- - [ ] minkowski has a convexity parameter
-  - [ ] `convexity`'s place is in `SetParameters`
-   - we don't need convexity
- - [ ] Complex * 2d object
  - [?] a move system (= a representation of abstract affine rotations)
    - [ ] allow `NamedTuple` for this
  - [ ] possible via `move(origin, s...; direction, spin)`
@@ -261,11 +195,9 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [?] write a full doc about how to define a new transform
  - [x] complete the list of exports
  - [x] write a minimal regression test
- - [?] make this a proper package
+ - [x] make this a proper package
  - [ ] distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
- - [ ] create incidence structure on triangulated surface creation?
-   use [directed edges structure](https://core.ac.uk/download/pdf/190807228.pdf)
  - [?] [https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
  - [ ] add some visualization (`Makie`?)
  - [ ] export to SVG/STL/PLY
@@ -281,14 +213,11 @@ decide `Meshes.jl`, `GeometryBasics.jl`, or nothing:
  - [ ] sphere made from extruding a half-circle
  - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
  - [ ] improve `unit_n_gon` to take advantage of symmetries
- - [x] investigate Fibonacci spheres
- - [x] Color
  - [ ] Annotations in 2d
  - [ ] Annotations in 3d (this might depend on the visualizer though)
  - [?] rewrite Annotations in terms of `Transform`
  - [x] (more generally, metadata)
  - [ ] add an Annotation type, which passes through all transformations
- - [ ] *(Obsolete)*: Offset using OpenSCAD `offset()`
  - [?] things from BOSL2 to look at:
  - [ ] transforms, distributors, mutators,
  - [x] attachments,
