@@ -394,11 +394,12 @@ struct Mesh{T<:Real,C}
 		new{parameters.type,typeof(parameters.color)}(parameters, parameters.color)
 end
 @inline coordtype(::Mesh{T}) where{T} = T
-@inline mesh(s::AbstractGeometry) = mesh(s, _DEFAULT_PARAMETERS)
-@inline mesh(s::AbstractGeometry, parameters::NamedTuple) = Mesh(parameters)(s)
-@inline corner_table(m::Mesh{T}, points, faces) where{T} =
-	CornerTable{Int,SVector{3,T},typeof(m.color)}(
-		points, faces, Iterators.repeated(m.color))
+@inline mesh(s::AbstractGeometry; kwargs...) =
+	Mesh(merge(_DEFAULT_PARAMETERS, kwargs.data))(s)
+
+@inline corner_table(g::Mesh{T}, points, faces) where{T} =
+	CornerTable{Int,SVector{3,T},typeof(g.color)}(
+		points, faces, Iterators.repeated(g.color))
 @inline polygon_xor(::Mesh{T}, args...) where{T} = PolygonXor{T}(args...)
 # 2d primitives««1
 # Ortho: square or cube (orthotope) with a corner at zero««2
@@ -421,7 +422,7 @@ Square = Ortho{2}
 
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
-@inline (m::Mesh{T})(s::Square) where{T} =
+@inline (::Mesh{T})(s::Square) where{T} =
 	PolygonXor{T}(square_vertices(T(s.size[1]), T(s.size[2])))
 
 # Ball: circle or sphere, centered at zero««2
@@ -437,8 +438,8 @@ end
 
 Circle = Ball{2}
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
-@inline (m::Mesh{T})(s::Circle) where{T} =
-	PolygonXor{T}(unit_n_gon(T(s.radius), m.parameters))
+@inline (g::Mesh{T})(s::Circle) where{T} =
+	PolygonXor{T}(unit_n_gon(T(s.radius), g.parameters))
 
 # Polygon««2
 """
@@ -454,7 +455,7 @@ end
 	Polygon{eltype(eltype(points))}(points)
 
 @inline scad_info(s::Polygon) = (:polygon, (points=s.points,))
-@inline (m::Mesh{T})(s::Polygon) where{T} = PolygonXor{T}(s.points)
+@inline (::Mesh{T})(s::Polygon) where{T} = PolygonXor{T}(s.points)
 
 # Draw ««2
 struct Draw{T} <: AbstractGeometryCoord{2,T}
@@ -467,10 +468,10 @@ end
 Draw(path, width; ends=:round, join=:round, miter_limit=2.) =
 	Draw{coordtype(path)}(path, width, ends, join, miter_limit)
 
-function (m::Mesh{T})(s::Draw) where{T}
+function (g::Mesh{T})(s::Draw) where{T}
 	r = one_half(T(s.width))
-	ε = max(get_parameter(m.parameters,:accuracy),
-		get_parameter(m.parameters,:precision) * r)
+	ε = max(get_parameter(g.parameters,:accuracy),
+		get_parameter(g.parameters,:precision) * r)
 	return PolygonXor{T}(offset([s.path], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
@@ -483,8 +484,8 @@ Cube = Ortho{3}
 		SA[0,0,0], SA[0,0,w], SA[0,v,0], SA[0,v,w],
 		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
 
-(m::Mesh{T})(s::Cube) where{T} =
-	corner_table(m, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
+(g::Mesh{T})(s::Cube) where{T} =
+	corner_table(g, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
 	[ # 12 triangular faces:
 	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
 	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
@@ -493,10 +494,11 @@ Cube = Ortho{3}
 
 Sphere = Ball{3}
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
-function (m::Mesh{T})(s::Sphere) where{T}
-	plist = fibonacci_sphere_points(T(s.radius), m.parameters)
+
+function (g::Mesh{T})(s::Sphere) where{T}
+	plist = fibonacci_sphere_points(T(s.radius), g.parameters)
 	(pts, faces) = convex_hull(plist)
-	return corner_table(m, pts, faces)
+	return corner_table(g, pts, faces)
 end
 
 
@@ -518,7 +520,7 @@ end
 
 @inline scad_info(s::Surface) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
-@inline (m::Mesh)(s::Surface) = corner_table(m, s.points, s.faces)
+@inline (g::Mesh)(s::Surface) = corner_table(g, s.points, s.faces)
 
 # Constructive geometry operations««1
 # https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
@@ -545,28 +547,28 @@ constructed_solid_type(s::Symbol, T = Vector{<:AbstractGeometry}) =
 struct CSGUnion{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
-@inline (m::Mesh)(s::CSGUnion{2}) = Shapes.clip(:union, m.(s.children)...)
-@inline (m::Mesh)(s::CSGUnion{3}) =
-	CornerTables.combine(m.(s.children), 1, m.parameters.ε)
+@inline (g::Mesh)(s::CSGUnion{2}) = Shapes.clip(:union, g.(s.children)...)
+@inline (g::Mesh)(s::CSGUnion{3}) =
+	CornerTables.combine(g.(s.children), 1, g.parameters.ε)
 
 # Intersection««2
 struct CSGInter{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
-@inline (m::Mesh)(s::CSGInter{2}) =
-	Shapes.clip(:intersection, m.(s.children)...)
-@inline (m::Mesh)(s::CSGInter{3}) =
-	CornerTables.combine(m.(s.children), length(s.children), m.parameters.ε)
+@inline (g::Mesh)(s::CSGInter{2}) =
+	Shapes.clip(:intersection, g.(s.children)...)
+@inline (g::Mesh)(s::CSGInter{3}) =
+	CornerTables.combine(g.(s.children), length(s.children), g.parameters.ε)
 
 # Difference««2
 struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
 	children::Tuple{<:AbstractGeometry{D},<:AbstractGeometry{D}}
 end
-@inline (m::Mesh)(s::CSGDiff{2}) =
-	Shapes.clip(:difference, m(s.children[1]), m(s.children[2]))
-@inline (m::Mesh)(s::CSGDiff{3}) =
-	CornerTables.combine([m(s.children[1]), reverse(m(s.children[2]))],
-		2, m.parameters.ε)
+@inline (g::Mesh)(s::CSGDiff{2}) =
+	Shapes.clip(:difference, g(s.children[1]), g(s.children[2]))
+@inline (g::Mesh)(s::CSGDiff{3}) =
+	CornerTables.combine([g(s.children[1]), reverse(g(s.children[2]))],
+		2, g.parameters.ε)
 
 # Complement««2
 # TODO
@@ -612,21 +614,29 @@ function hull end
 @define_neutral hull EmptyIntersect  absorb
 
 # Convex hull (TODO)««2
+struct CSGHull2
+	children::Vector{AbstractGeometry{2}}
+end
+
+struct CSGHull3
+	children::Vector{AbstractGeometry}
+end
+
 CSGHull = constructed_solid_type(:hull)
 
-@inline function mesh(s::CSGHull{2}, parameters)
-	v = reduce(vcat, Shapes.vertices(mesh(x, parameters)) for x in children(s))
-	return PolygonXor{get_parameter(parameters, :type)}(convex_hull(v))
+function (g::Mesh{T})(s::CSGHull2) where{T}
+	v = reduce(vcat, Shapes.vertices(g(x)) for x in children(s))
+	return PolygonXor{T}(convex_hull(v))
 end
 
 @inline vertices3(m::CornerTable) = CornerTables.points(m)
 @inline vertices3(m::PolygonXor) =
 	(SA[p[1], p[2], 0] for p in Shapes.vertices(m))
-function mesh(s::CSGHull{3}, parameters)
-	v = SVector{3,get_parameter(parameters, :type)}[]
-	for x in children(s); push!(v, vertices3(mesh(x, parameters))...); end
+function (g::Mesh{T})(s::CSGHull{3}) where{T}
+	v = SVector{3,T}[]
+	for x in children(s); push!(v, vertices3(g(x))...); end
 	(p, f) = convex_hull(v)
-	return corner_table(p, f, get_parameter(parameters, :color))
+	return corner_table(g, p, f)
 end
 # # # Convex hull««2
 # # # """
@@ -653,22 +663,22 @@ struct AffineTransform{D,A<:AbstractAffineMap} <: AbstractTransform{D}
 end
 # AffineTransform(f, child) constructor is defined
 
-function (m::Mesh)(s::AffineTransform{3})
+function (g::Mesh)(s::AffineTransform{3})
 	# FIXME what to do if signdet(s.f) == 0 ?
-	q = m(s.child)
-	q.points .= s.f.(q.points)
-	return signdet(s.f) > 0 ? q : reverse(q)
+	m = g(s.child)
+	m.points .= s.f.(m.points)
+	return signdet(s.f) > 0 ? m : reverse(m)
 end
 
-function (m::Mesh)(s::AffineTransform{2})
-	q = m(s.child)
+function (g::Mesh)(s::AffineTransform{2})
+	m = g(s.child)
 	d = signdet(s.f)
 	d ≠ 0 || error("Only invertible linear transforms are supported (for now)")
-	for p in q.paths
+	for p in m.paths
 		p .= s.f.(p)
 		d < 0 && reverse!(p)
 	end
-	return q
+	return m
 end
 
 # Project and cut (TODO)««2
@@ -684,16 +694,16 @@ struct SetParameters{D} <: AbstractTransform{D}
 	child::AbstractGeometry{D}
 end
 
-@inline mesh(m::SetParameters, parameters) =
-	mesh(m.child, merge(parameters, m.parameters))
+@inline (g::Mesh)(s::SetParameters) =
+	(typeof(g))(merge(g.parameters, s.parameters))(s.child)
 # Linear extrusion««2
 struct LinearExtrude{T} <: AbstractTransform{3}
 	height::T
 	child::AbstractGeometry{2}
 end
 
-function (q::Mesh)(s::LinearExtrude)
-	m = q(s.child)
+function (g::Mesh)(s::LinearExtrude)
+	m = g(s.child)
 	@assert m isa PolygonXor
 	pts2 = Shapes.vertices(m)
 	tri = Shapes.triangulate(m)
@@ -725,18 +735,18 @@ struct Cone{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
-function mesh(s::Cone, parameters)
-	m = mesh(s.child, parameters)
+function (g::Mesh{T})(s::Cone) where{T}
+	m = g(s.child)
 	@assert m isa PolygonXor
 	pts2 = Shapes.vertices(m)
 	tri = Shapes.triangulate(m)
 	peri = Shapes.perimeters(m)
 	n = length(pts2)
-	pts3 = [SA[p..., 0] for p in pts2]
-	push!(pts3, SVector{3,parameters.type}(s.apex))
+	pts3 = [SVector{3,T}[p[1],p[2], 0] for p in pts2]
+	push!(pts3, SVector{3,T}(s.apex))
 	faces = [ tri;
 		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
-	return corner_table(pts3, faces, parameters.color)
+	return corner_table(g, pts3, faces)
 end
 # Rotate extrusion««2
 struct RotateExtrude{T} <: AbstractTransform{3}
@@ -744,22 +754,22 @@ struct RotateExtrude{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
-function (q::Mesh{T})(s::RotateExtrude) where{T}
+function (g::Mesh{T})(s::RotateExtrude) where{T}
 	# right half of child:
-	m0 = q(s.child)::PolygonXor{T}
+	m0 = g(s.child)::PolygonXor{T}
 	m = intersect(Shapes.HalfPlane(SA[1,0],0), m0)
 	pts2 = Shapes.vertices(m)
 	tri = Shapes.triangulate(m)
 	peri = Shapes.perimeters(m) # oriented ↺
 	n = length(pts2)
 	
-	pts3 = _rotate_extrude(pts2[1], s.angle, q.parameters)
+	pts3 = _rotate_extrude(pts2[1], s.angle, g.parameters)
 	firstindex = [1]
 	arclength = Int[length(pts3)]
 	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
 	for p in pts2[2:end]
 		push!(firstindex, length(pts3)+1)
-		newpoints = _rotate_extrude(p, s.angle, q.parameters)
+		newpoints = _rotate_extrude(p, s.angle, g.parameters)
 		@debug "newpoints[$p] = $(length(newpoints))"
 		push!(arclength, length(newpoints))
 		pts3 = vcat(pts3, newpoints)
@@ -792,7 +802,7 @@ function (q::Mesh{T})(s::RotateExtrude) where{T}
 		@debug "(end perimeter)»»"
 	end
 	@debug "triangles = $triangles"
-	return corner_table(q, pts3, triangles)
+	return corner_table(g, pts3, triangles)
 end
 
 
@@ -806,10 +816,10 @@ struct Offset <: AbstractTransform{2}
 	child::AbstractGeometry{2}
 end
 
-function mesh(s::Offset, parameters)
-	m = mesh(s.child, parameters)
-	ε = max(get_parameter(parameters,:accuracy),
-		get_parameter(parameters,:precision) * s.radius)
+function (g::Mesh)(s::Offset)
+	m = g(s.child)
+	ε = max(get_parameter(g.parameters,:accuracy),
+		get_parameter(g.parameters,:precision) * s.radius)
 	return PolygonXor(offset(vertices.(paths(m)), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε)...)
 end

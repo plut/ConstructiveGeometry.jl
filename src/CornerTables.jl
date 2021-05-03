@@ -54,6 +54,8 @@ const _DEFAULT_EPSILON=1/65536
 # Most algorithms here are output-aware
 
 # tools ««1
+# uniquesort!««2
+@inline uniquesort!(a) = Base._groupedunique!(sort!(a))
 # BBox««2
 struct BBox{P}
 	min::P
@@ -378,10 +380,10 @@ struct MeshIterator{S,I,T}
 	@inline MeshIterator{S}(m::CornerTable{I}, s::T) where{S,I,T} =
 		new{S,I,T}(m, s)
 end
-global COUNT=0
+# global COUNT=0
 @inline Base.iterate(it::MeshIterator) = (global COUNT=0; (it.start, it.start))
 @inline function Base.iterate(it::MeshIterator, s)
-	global COUNT+=1; @assert COUNT <= 1000
+# 	global COUNT+=1; @assert COUNT <= 1000
 	s = next(it, it.mesh, s)
 	stop(it, it.mesh, s) && return nothing
 	return (s, s)
@@ -415,19 +417,23 @@ end
 	end
 end
 
-"finds in which fan a corner lies"
-function fan(m::CornerTable, c0::Corner)
-	for (k, c) in vertexcorners(m, vertex(m, c0))
-		c == c0 && return k
-	end
-	return implicitfan
-end
 "iterator on (fans, corners) around a given vertex"
-function vertexcorners(m::CornerTable, u::Vertex)
-	c0 = corner(m, u)
+@inline function vertexcorners(m::CornerTable, v::Vertex)
+	c0 = corner(m, v)
 	isregular(c0) && return ((implicitfan, c) for c in star(m, c0))
 	isisolated(c0) && return ((implicitfan, c0) for _ in 1:0)
 	return ((k,c) for k in fans(m, Fan(c0)) for c in fancorners(m, k))
+end
+
+"finds in which fan a corner lies"
+function fan(m::CornerTable, c0::Corner)
+	v = vertex(m, c0)
+	c1 = corner(m, v)
+	issingular(c1) || return implicitfan
+	for k in fans(m, Fan(c1)), c in fancorners(m, k)
+		c == c0 && return k
+	end
+	return implicitfan
 end
 
 function fan_lastcorner(m::CornerTable, k::Fan)
@@ -638,8 +644,12 @@ function findedge(m::CornerTable, u, v, w, clist, klist, i)#««
 # 	clist[i] = clist[i+3] = clist[i+6] = clist[i+9] = Corner(0)
 	klist[i] = klist[i+6] = implicitfan
 	clist[i] = clist[i+3] = Corner(0)
+	c0 = corner(m, u)
+	isisolated(c0) && return
+	# we can safely assume that vertex `u` has an explicit fan:
+	@assert issingular(c0) "vertex $u has corner $c0"
 # 	println("rotating around $u, looking for ($v, $w) (i=$i)")
-	for (k, c) in vertexcorners(m, u)
+	for k in fans(m, Fan(c0)), c in fancorners(m, k)
 		n = next(c); r = vertex(m, n)
 		p = prev(c); l = vertex(m, p)
 # 		println("  at ($k, $c): $(vertex(m,c)) $(base(m,c)) r=$r, l=$l")
@@ -967,7 +977,7 @@ function select_faces(m::CornerTable{I}, fkept) where{I}
 		push!(vkept, vertices(m, f)...)
 	end
 
-	unique!(sort!(vkept))
+	uniquesort!(vkept)
 
 	# FIXME do something about fans!
 	r = (typeof(m))(m.points[Int.(vkept)])
@@ -1057,7 +1067,7 @@ function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
 # 			vindex[i] = idx
 		end
 	end
-	unique!(sort!(si.faces))
+	uniquesort!(si.faces)
 	return si
 end#»»
 # subtriangulation««1
@@ -1143,12 +1153,12 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 	# first renumber points, removing duplicates, including in self-intersect:
 	append_points!(m, si.points)
 	vmap = simplify_points!(m, ε)
-	explain(m, "/tmp/x.scad", scale=30)
+# 	explain(m, "/tmp/x.scad", scale=30)
 
 	for i in eachindex(si.in_edge)
 		si.in_edge[i] = map(x->get(vmap, x, x) , si.in_edge[i])
 	end
-	unique!(sort!(si.in_edge))
+	uniquesort!(si.in_edge)
 	for i in eachindex(si.in_face)
 		si.in_face[i] = map(x->get(vmap, x, x), si.in_face[i])
 	end
@@ -1184,7 +1194,7 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 			end
 			v = u
 		end
-		unique!(sort!(vlist))
+		uniquesort!(vlist)
 	end
 	faces_tri = [ NTuple{3,Vertex{I}}[] for _ in si.faces ]
 		
@@ -1193,8 +1203,8 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 		direction = main_axis(m, si.faces[first(icluster)])
 
 		# type-stable versions of vcat:
-		allvertices = unique!(sort!(reduce(vcat, view(in_face_v, icluster))))
-		alledges = unique!(sort!(reduce(vcat, view(in_face_e, icluster))))
+		allvertices = uniquesort!(reduce(vcat, view(in_face_v, icluster)))
+		alledges = uniquesort!(reduce(vcat, view(in_face_e, icluster)))
 
 		alltriangles = project_and_triangulate(m, abs(direction),
 			allvertices, alledges)
