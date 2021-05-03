@@ -695,6 +695,8 @@ end
 struct SetParameters{D} <: AbstractTransform{D}
 	parameters
 	child::AbstractGeometry{D}
+	@inline SetParameters(parameters, child::AbstractGeometry{D}) where{D} =
+		new{D}(parameters, child)
 end
 
 @inline (g::Mesh)(s::SetParameters) =

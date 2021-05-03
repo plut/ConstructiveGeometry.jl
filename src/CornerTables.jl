@@ -1399,11 +1399,11 @@ Returns `(face, flag)`, where `flag` is zero if p lies outside this face, and on
 """
 function locate_point(m::CornerTable, cc_label, c, p)
 	# find closest vertex to p
-	closest = 0; b = false; z = zero(p[1])
+	closest = 0; z = zero(p[1])
 	for (i, q) in pairs(points(m))
 		cc_label[i] == c || continue
 		z1 = norm²(q-p)
-		(b && z1 ≥ z) && continue
+		(closest > 0 && z1 ≥ z) && continue
 		closest = i; z = z1
 	end
 	# find a good edge from closest vertex
@@ -1493,7 +1493,7 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 	cc_nest = zeros(Int, length(cc_list))
 	for i1 in 1:length(cc_list), i2 in 1:length(cc_list)
 		i1 == i2 && continue
-		(f, b) = locate_point(m, face_cc, i2, point(m, vmax[i1]))
+		(f, b) = locate_point(m, vertex_cc, i2, point(m, vmax[i1]))
 		k = b + levels.level[rp.label[Int(f)]]
 		# if k > 0 then i1 inside i2
 		cc_nest[i1]+= k
@@ -1520,7 +1520,7 @@ function simplify!(m::CornerTable, ε = _DEFAULT_EPSILON)
 		for f in cluster; push!(vlist, vertices(m, f)...); end
 		tri = collect(project_and_triangulate(m, abs(direction),  vlist))
 # 		length(tri) == length(cluster) && continue
-		println("$cluster: $(length(cluster)) => $(length(tri))\n  $cluster\n  $([vertices(m,f) for f in cluster])\n  $tri")
+# 		println("$cluster: $(length(cluster)) => $(length(tri))\n  $cluster\n  $([vertices(m,f) for f in cluster])\n  $tri")
 	end
 end
 # operations««1
