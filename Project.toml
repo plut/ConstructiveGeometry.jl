@@ -22,6 +22,7 @@ Triangle = "56f361f5-126b-55db-87fb-1c71988fcde4"
 [compat]
 Clipper = "0.6"
 Colors = "0.12"
+DataStructures = "0.18"
 FastClosures = "0.3"
 FixedPointNumbers = "0.8"
 GLPK = "0.14"
