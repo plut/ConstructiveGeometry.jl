@@ -13,10 +13,10 @@ using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers # for Clipper
 using FastClosures
-module LibTriangle
-	using Triangle
-end
+using Triangle
+using DataStructures
 import Clipper
+
 
 Path{D,T} = Vector{SVector{D,T}}
 # @inline det(u::StaticVector{2}, v::StaticVector{2}) =
@@ -418,7 +418,7 @@ function triangulate(m::PolygonXor)#««
 		end
 		c+= n
 	end
-	tri = LibTriangle.constrained_triangulation(
+	tri = constrained_triangulation(
 		Matrix{Float64}([transpose.(v)...;]),
 		collect(1:length(v)), edges)
 	# remove triangle made entirely of hole vertices
@@ -427,10 +427,39 @@ end#»»
 # reconstruction from triangles
 # this is used by 3d->2d projection:
 function PolygonXor(points::AbstractVector{SVector{2,T}},
-	faces::AbstractVector) where{T}
+	faces::AbstractVector{<:Tuple{<:Integer,<:Integer,<:Integer}}) where{T}
 	v=[PolygonXor{T}([points[f[1]], points[f[2]], points[f[3]]]) for f in faces ]
 	return clip(:union, v...)
 end
+
+# this is used by 3d->2d slicing:
+function glue_segments(points::AbstractVector, segments)
+	n = maximum(x[2] for x in segments)
+	# compute the set of all edges
+	edges = [ SortedSet{eltype(eltype(segments))}() for _ in 1:n ]
+	for (a, b) in segments
+		push!(edges[a], b)
+		push!(edges[b], a)
+	end
+	# decomposes the graph as a set of loops
+	loops = Vector{eltype(points)}[]
+	for (a0, e) in pairs(edges)
+		isempty(e) && continue
+		a = a0; l = [a]
+		while !isempty(e)
+			b = first(e)
+			delete!(edges[a], b)
+			delete!(edges[b], a)
+			(b == a0) && (length(l) > 1) && break
+			push!(l, b)
+			e = edges[b]
+			a = b
+		end
+		push!(loops, points[l])
+	end
+	return PolygonXor{eltype(eltype(points))}(loops)
+end
+
 
 # Intersections (2d)««1
 

@@ -77,7 +77,7 @@ Base.getindex(r::RowsView, i::Integer) = view(r.source, i, :)
 
 const _DEFAULT_PARAMETERS = (
 	accuracy = 0.1, precision = .005, symmetry = 1,
-	type = Float64, ε = 1e-8,
+	type = Float64, ε = 1/65536,
 	color = Colors.RGBA{N0f8}(.5,.5,.5,1.), # gray
 )
 
@@ -399,6 +399,7 @@ end
 @inline coordtype(::Mesh{T}) where{T} = T
 @inline mesh(s::AbstractGeometry; kwargs...) =
 	Mesh(merge(_DEFAULT_PARAMETERS, kwargs.data))(s)
+@inline get_parameter(g::Mesh, name) = get_parameter(g.parameters, name)
 
 @inline corner_table(g::Mesh{T}, points, faces) where{T} =
 	CornerTable{Int,SVector{3,T},typeof(g.color)}(
@@ -473,8 +474,7 @@ Draw(path, width; ends=:round, join=:round, miter_limit=2.) =
 
 function (g::Mesh{T})(s::Draw) where{T}
 	r = one_half(T(s.width))
-	ε = max(get_parameter(g.parameters,:accuracy),
-		get_parameter(g.parameters,:precision) * r)
+	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * r)
 	return PolygonXor{T}(offset([s.path], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
@@ -699,6 +699,11 @@ end
 struct Cut <: AbstractGeometry{2}
 	child::AbstractGeometry{3}
 end
+
+function (g::Mesh)(s::Cut)
+	(pts, seg) = CornerTables.plane_cut(g(s.child), get_parameter(g, :ε))
+	return Shapes.glue_segments(pts, seg)
+end
 # SetParameters««2
 # (including colors)
 struct SetParameters{D} <: AbstractTransform{D}
@@ -726,7 +731,6 @@ function (g::Mesh)(s::LinearExtrude)
 
 	n = length(pts2)
 	pts3 = vcat([[SA[p..., z] for p in pts2] for z in [0, s.height]]...)
-	println("pts3=$pts3")
 	# for a perimeter p=p1, p2, p3... outward: ↺
 	# with top vertices q1, q2, q3...
 	# faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
@@ -832,8 +836,7 @@ end
 
 function (g::Mesh)(s::Offset)
 	m = g(s.child)
-	ε = max(get_parameter(g.parameters,:accuracy),
-		get_parameter(g.parameters,:precision) * s.radius)
+	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * s.radius)
 	return PolygonXor(offset(vertices.(paths(m)), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε)...)
 end
@@ -1020,7 +1023,7 @@ end
 @inline (u::Transform)(s) = u*s
 @inline Base.:*(u::Transform, v::Transform, s...)= _comp(Val(assoc(u,v)),u,v,s...)
 @inline _comp(::Val{:left}, u, v, s...) = *(compose(u,v), s...)
-@inline _comp(::Val{:right}, u, v, s...) = *(u, *(g, s...))
+@inline _comp(::Val{:right}, u, v, s...) = *(u, *(v, s...))
 @inline assoc(::Transform, ::Transform) = :right
 @inline Base.:*(u::Transform, v::Transform) = compose(u, v)
 @inline compose(u::Transform, v::Transform) = Transform{typeof(∘)}(u.f∘v.f)
@@ -1180,9 +1183,11 @@ counter-clockwise).
 Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 """
 @inline rotate(angles, s...; kwargs...) =
-	mult_matrix(Rotations.RotZYX(radians.(angles)), s...; kwargs...)
+	mult_matrix(Rotations.RotZYX(radians.(angles)...), s...; kwargs...)
 
-# TODO: project««2
+# project and cut««2
+@inline project(s...) = operator(Project, (), s...)
+@inline cut(s...) = operator(Cut, (), s...)
 
 # overloading Julia operators««1
 # backslash replaces U+2216 ∖ SET MINUS, which is not an allowed Julia operator

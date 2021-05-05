@@ -79,6 +79,12 @@ SpatialSorting.position(b::BBox) = b.min + b.max
 SpatialSorting.merge(b1::BBox, b2::BBox) =
 	BBox{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
 
+function equivalent_points(points, ε=0)
+	boxes = [ BBox(p, p .+ ε) for p in points ]
+	# `extrema` guarantees that all pairs (i,j) are sorted i < j
+	samepoints = extrema.(SpatialSorting.intersections(boxes))
+	return equivalence_structure(length(points), samepoints)
+end
 """
     simplify_points(points, ε)
 
@@ -86,13 +92,8 @@ Removes duplicates from the set of points, returning the set of
 substitutions (as an (oldindex => newindex) iterator).
 """
 function simplify_points(points, ε=0)
-	n = length(points)
-	boxes = [ BBox(p, p .+ ε) for p in points ]
-	# `extrema` guarantees that all pairs (i,j) are sorted i < j
-	samepoints = extrema.(SpatialSorting.intersections(boxes))
-	eqv = equivalence_structure(n, samepoints)
-	return (Vertex(i) => Vertex(j)
-		for (i, j) in pairs(representatives(eqv)) if i ≠ j)
+	eqv = equivalent_points(points, ε)
+	return (i => j for (i, j) in pairs(representatives(eqv)) if i ≠ j)
 end
 
 # initialize one entry in a dictionary (e.g. of vectors) #««2
@@ -117,6 +118,25 @@ lazymap(f,v) = LazyMap{Base.return_types(f,Tuple{eltype(v)})[1]}(f, v)
 
 # Geometry««2
 @inline norm²(v) = dot(v,v)
+# NamedIndex««2
+struct NamedIndex{S,T<:Signed} i::T; end
+@inline Int(i::NamedIndex) = i.i
+@inline Base.show(io::IO, i::NamedIndex{S}) where{S} = print(io, S, Int(i))
+@inline NamedIndex{S}(x) where{S} = NamedIndex{S,typeof(x)}(x)
+@inline Base.isless(x::NamedIndex{S}, y::NamedIndex{S}) where{S} = Int(x)<Int(y)
+macro NamedIndex(name,S)
+	quote
+	const $(esc(name)) = NamedIndex{$(QuoteNode(S))}
+	Base.show(io::IO, ::Type{<:$(esc(name))}) = print(io, $(string(name)))
+end end
+@NamedIndex Vertex v
+@NamedIndex Corner c
+@NamedIndex Face f
+@NamedIndex Fan fan
+@NamedIndex Side s
+@inline Base.iterate(::Type{Side}, s...) =
+	Base.iterate((Side(1),Side(2),Side(3)), s...)
+
 # corner table mesh ««1
 # data structure ««2
 """
@@ -167,24 +187,6 @@ struct CornerTable{I<:Signed,P,A} # I is index type (integer), P is point type
 	#   (we don't keep it: for a manifold mesh, it's a big table of zeros)
 	# - fan_prev[fan]: to make the list doubly-chained
 end
-
-struct NamedIndex{S,T<:Signed} i::T; end
-@inline Int(i::NamedIndex) = i.i
-@inline Base.show(io::IO, i::NamedIndex{S}) where{S} = print(io, S, Int(i))
-@inline NamedIndex{S}(x) where{S} = NamedIndex{S,typeof(x)}(x)
-@inline Base.isless(x::NamedIndex{S}, y::NamedIndex{S}) where{S} = Int(x)<Int(y)
-macro NamedIndex(name,S)
-	quote
-	const $(esc(name)) = NamedIndex{$(QuoteNode(S))}
-	Base.show(io::IO, ::Type{<:$(esc(name))}) = print(io, $(string(name)))
-end end
-@NamedIndex Vertex v
-@NamedIndex Corner c
-@NamedIndex Face f
-@NamedIndex Fan fan
-@NamedIndex Side s
-@inline Base.iterate(::Type{Side}, s...) =
-	Base.iterate((Side(1),Side(2),Side(3)), s...)
 
 @inline index_type(::Type{<:CornerTable{I}}) where{I} = I
 @inline index_type(m::CornerTable{I}) where{I} = I
@@ -497,6 +499,7 @@ function simplify_points!(m::CornerTable{I}, ε = 0) where{I}
 	repl = simplify_points(points(m), ε)
 	r = Renaming{Vertex{I}}()
 	for (a, b) in repl
+		a = Vertex(a); b = Vertex(b)
 		a1 = newname(r, a)
 		b1 = newname(r, b)
 		l = lastvertex(m) # call this before merge_point!
@@ -1235,6 +1238,34 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 	end
 	return m
 end
+# intersect with plane ««2
+function plane_cut(m::CornerTable, ε = 0)
+	# returns a pair (points, segments)
+	# with points de-duplicated
+	r = maximum(max(abs(p[1]), abs(p[2])) for p in points(m))
+	# slice ⊂ [-r,r]×[-r,r] ⊊ triangle [3r,0], [0,±2r]
+	bigtriangle = (SA[4r,0,0], SA[-2r,4r,0], SA[-2r,-4r,0])
+
+	pts = SVector{2,eltype(point_type(m))}[]
+	seg = Tuple{Int,Int}[]
+
+	for t in triangles(m)
+		it = TriangleIntersections.inter(t, bigtriangle)
+		n = length(it)
+		n ≠ 2 && continue
+		push!(pts, SA[it[1][1][1], it[1][1][2]], SA[it[2][1][1], it[2][1][2]])
+		push!(seg, (length(pts)-1, length(pts)))
+	end
+	eqv = equivalent_points(pts, ε)
+	global E = eqv
+	for i in 1:length(seg)
+		seg[i] = (EquivalenceStructures.class_idx(eqv, seg[i][1]),
+		          EquivalenceStructures.class_idx(eqv, seg[i][2]))
+	end
+	pts2 = [ pts[first(c)] for c in classes(eqv) ]
+	return (pts2, uniquesort!(seg))
+end
+
 # multiplicity««1
 # regular_patches««2
 """
