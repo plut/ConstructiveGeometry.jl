@@ -937,9 +937,21 @@ symbols `sym1`, `sym2`..., `children(x)`.
 	[unroll(s, tail...); unroll(t, tail...)]
 
 # Booleans««2
+"""
+    union(a::AbstractGeometry{D}...)
+
+Computes the union of several solids. The dimensions must match.
+"""
 @inline union(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGUnion{D}(unroll2(a, b, Val(:union)))
 
+"""
+    intersect(a::AbstractGeometry, b::AbstractGeometry...)
+
+Computes the intersection of several solids.
+Mismatched dimensions are allowed; 3d solids will be intersected
+with the (z=0) plane via the `cut()` operation.
+"""
 @inline intersect(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGInter{D}(unroll2(a, b, Val(:intersection)))
 @inline Base.intersect(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
@@ -947,6 +959,18 @@ symbols `sym1`, `sym2`..., `children(x)`.
 @inline Base.intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
 	intersect(a, cut(b))
 
+"""
+    setdiff(a::AbstractGeometry, b::AbstractGeometry)
+
+Computes the difference of two solids.
+The following dimensions are allowed: (2,2), (3,3), and (2,3)
+(in the last case, the 3d object will be intersected with the (z=0)
+plane via the `cut()` operation).
+
+    setdiff([a...], [b...])
+
+Shorthand for `setdiff(union(a...), union(b...))`.
+"""
 @inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGDiff{D}((a,b))
 @inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
@@ -1011,11 +1035,6 @@ Represents the Minkowski sum of given solids.
 
 This type defines functions allowing to chain transforms; these are used by
 `multmatrix`, `color` etc. operations (see below).
-
-The minimal job left to concrete types (see e.g. `AffineTransform` as an
-example) is to define a type and a constructor:
-    Frobnicate = Transform{:frobnicate}
-		frobnicate(x::real, s...) = Frobnicate((x=x,), s...)
 """
 struct Transform{S,F}
 	f::F
@@ -1192,7 +1211,17 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 	mult_matrix(Rotations.RotZYX(radians.(angles)...), s...; kwargs...)
 
 # project and cut««2
+"""
+    project(s...)
+
+Computes the (3d to 2d) projection of a shape on the (z=0) plane.
+"""
 @inline project(s...) = operator(Project, (), s...)
+"""
+    cut(s...)
+
+Computes the (3d to 2d) intersection of a shape and the (z=0) plane.
+"""
 @inline cut(s...) = operator(Cut, (), s...)
 
 # overloading Julia operators««1
@@ -1339,10 +1368,11 @@ end
 	svg(io, mesh(m; kwargs...))
 @inline svg(f::AbstractString, args...; kwargs...) =
 	open(f, "w") do io svg(io, args...; kwargs...) end
-#————————————————————— Code to rewrite: —————————————————————————————— ««1
 #————————————————————— Extra tools —————————————————————————————— ««1
+
 #»»1
-# OpenSCAD output
+# OpenSCAD output««1
+
 # # Attachments««1
 # # Anchor system««2
 # """

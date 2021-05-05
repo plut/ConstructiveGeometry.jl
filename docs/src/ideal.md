@@ -42,7 +42,10 @@ ConstructiveGeometry.rotate
 ConstructiveGeometry.mirror
 ```
 
-TODO: `ConstructiveGeometry.project`, `ConstructiveGeometry.cut`.
+```
+ConstructiveGeometry.cut
+ConstructiveGeometry.project
+```
 
 ### 2d drawing
 ```@docs
