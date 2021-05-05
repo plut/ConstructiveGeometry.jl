@@ -23,19 +23,22 @@ mesh(s1 \ s2)
 mesh(hull(s1, s2))
 ```
 gives the following output:
-![CSG operations on two tetrahedra](examples/sphere_cube.png)
+![CSG operations on a sphere and a cube](examples/sphere_cube.png)
 
 *(although the meshes were computed by the Julia module,
 OpenSCAD was used for rendering the image.
 This will change in a future release.)*
 
+It is also possible to export a model as a `.svg` (for 2d shapes)
+or `.stl` (for 3d volumes) file.
+
 The roadmap now includes at least the following:
  - built-in visualization of models;
- - direct mesh I/O from and to relevant file formats;
+ - `.stl` file import, and I/O to more formats;
  - add more convenience constructors (e.g. for transforms);
- - implement missing operators: 3d Minkowski sum; 2d/3d Minkowski
-	 difference; projection; some extrusions;
- - add a `text()` constructor;
- - add an annotation system to ease the design of complex models.
+ - implement missing operators: 3d Minkowski sum; 2d/3d Minkowski;
+   path extrusion; `text()`;
+ - add an annotation system to ease the design of complex models;
+ - add an anchor system.
 
 Any contributions are welcome!
