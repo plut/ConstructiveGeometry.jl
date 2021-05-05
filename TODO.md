@@ -1,17 +1,16 @@
 # Split/rewrite of module
  - **2d subsystem**
-  - [ ] rename `PolygonXor`? `PolygonalShape`?
-  - [ ] reconstruct polygonal shape by list of segments (for projections)
+  - [x] reconstruct polygonal shape by list of segments (for projections)
  - **3d subsystem**
-  - [ ] add half-space and plane intersections
+  - [ ] add half-space and [x] plane intersections
  - **Definitions of geometric objects**
   - [x] Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
    - simplicity vs. efficiency?
   - [ ]_Geometry transforms_:
    - [x] invertible affine transform
-   - [ ] projection,
-   - [ ] plane intersection,
+   - [x] projection,
+   - [x] plane intersection,
    - [x] linear extrusion, rotational extrusion
   - [x] _Non-geometry transforms_: `set_parameters`, color
   - [ ] _CG operations_:
@@ -24,7 +23,7 @@
   - SCAD
   - STL
  - **Visualization** (TODO)
- - [ ] **Convex hull** (in its own file)
+ - [x] **Convex hull** (in its own file)
 # For version 0.2 (performance update)
  - [ ] allow exact (rational) arithmetic
  - [?] split in several packages:

@@ -948,9 +948,9 @@ symbols `sym1`, `sym2`..., `children(x)`.
 @inline Base.intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
 	intersect(a, cut(b))
 
-@inline setdiff(x::AbstractGeometry{D}, y::AbstractGeometry{D}) where{D} =
-	CSGDiff{D}((x,y))
-@inline setdiff(a::AbstractGeometry{2}, a::AbstractGeometry{3}) =
+@inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	CSGDiff{D}((a,b))
+@inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
 	setdiff(a, cut(b))
 
 # added interface: setdiff([x...], [y...])
@@ -1285,9 +1285,61 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 	Expr(:toplevel, expr_filter.(f, x.args)...)
 
 # STL ««1
-#
+function stl(io::IO, m::CornerTable)
+	println(io, "solid Julia_ConstructiveGeometry_jl_model")
+	points = CornerTables.points(m)
+	faces = CornerTables.faces(m)
+	for f in faces
+		tri = (points[f[1]], points[f[2]], points[f[3]])
+		n = cross(tri[2]-tri[1], tri[3]-tri[1])
+		println(io, """
+  facet normal $(n[1]) $(n[2]) $(n[3])
+	outer loop""")
+	  for p in tri
+			println(io, "    vertex $(p[1]) $(p[2]) $(p[3])")
+		end
+		println(io, """
+   endloop
+	 endfacet""")
+	end
+	println(io, "endsolid")
+end
+@inline stl(io::IO, m::AbstractGeometry{3}; kwargs...) =
+	stl(io, mesh(m; kwargs...))
+@inline stl(f::AbstractString, args...; kwargs...) =
+	open(f, "w") do io stl(io, args...; kwargs...) end
 # SVG ««1
-
+function svg(io::IO, m::PolygonXor)
+	(x,y) = m.paths[1][1]; rect = MVector(x, x, y, y)
+	for (x,y) in Shapes.vertices(m)
+		x < rect[1] && (rect[1] = x)
+		x > rect[2] && (rect[2] = x)
+		y < rect[3] && (rect[3] = y)
+		y > rect[4] && (rect[4] = y)
+	end
+	# a point (x,y) is displayed as (x,-y)
+	dx = rect[2]-rect[1]; dy = rect[4]-rect[3]
+	λ = .05
+	viewbox = (rect[1]-λ*dx, -(rect[4]+λ*dy), (1+2λ)*dx, (1+2λ)*dy)
+	println(io, """
+<svg xmlns="http://www.w3.org/2000/svg"
+  viewBox="$(viewbox[1]) $(viewbox[2]) $(viewbox[3]) $(viewbox[4])">
+<!-- A shape with $(length(m.paths)) paths and $(length.(m.paths)) vertices -->
+<path fill-rule="evenodd" fill="#999" stroke-width="0"
+  d=" """)
+	for p in Shapes.paths(m)
+		print(io, "M ", p[1][1], ",", -p[1][2], " ")
+		for q in p[2:end]
+			print(io, "L ", q[1], ",", -q[2], " ")
+		end
+		println(io, "Z")
+	end
+	println(io, """ " /> </svg>""")
+end
+@inline svg(io::IO, m::AbstractGeometry{2}; kwargs...) =
+	svg(io, mesh(m; kwargs...))
+@inline svg(f::AbstractString, args...; kwargs...) =
+	open(f, "w") do io svg(io, args...; kwargs...) end
 #————————————————————— Code to rewrite: —————————————————————————————— ««1
 #————————————————————— Meshing (2d) —————————————————————————————— ««1
 
