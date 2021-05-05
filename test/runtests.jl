@@ -7,10 +7,10 @@ G = ConstructiveGeometry
 
 @testset "2d" begin#««
 nva(s::G.Shapes.PolygonXor) = (length.(s.paths), G.Shapes.area(s))
-r1 = G.Square(2.,1)
-r2 = G.Square(1.,2)
-r3 = G.Square(3.,3)
-r4 = G.AffineTransform(G.TranslationMap([4,4]), G.Square(1,1))
+r1 = G.square(2.,1)
+r2 = G.square(1.,2)
+r3 = G.square(3.,3)
+r4 = [4,4] + G.square(1,1)
 @test nva(mesh(union(r1,r2))) == ([6], 3)
 @test nva(mesh(union(r1,r3))) == ([4], 9)
 @test nva(mesh(union(r1,r4))) == ([4,4], 3)

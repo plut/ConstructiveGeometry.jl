@@ -7,7 +7,7 @@ module ConstructiveGeometry
 using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers
-using Logging
+# using Logging
 using FastClosures
 # using DataStructures
 
@@ -413,7 +413,7 @@ end
 @inline scad_info(s::Square) = (:square, (size=s.size,))
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
-@inline (g::Mesh)(s::Square) =
+@inline (g::Mesh{T})(s::Square) where{T} =
 	polygon_xor(g, square_vertices(T(s.size[1]), T(s.size[2])))
 
 # Circle««2
