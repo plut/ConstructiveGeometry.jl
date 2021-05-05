@@ -4,6 +4,7 @@
  - **3d subsystem**
   - [ ] add half-space and [x] plane intersections
  - **Definitions of geometric objects**
+  - [ ] ortho and ball are useless now
   - [x] Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
    - simplicity vs. efficiency?

@@ -406,41 +406,20 @@ end
 		points, faces, Iterators.repeated(g.color))
 @inline polygon_xor(::Mesh{T}, args...) where{T} = PolygonXor{T}(args...)
 # 2d primitives««1
-# Ortho: square or cube (orthotope) with a corner at zero««2
-"""
-    Ortho{D,T}
-
-An orthotope (Cartesian product of intervals), with lower corner at zero,
-dimension `D`, and coordinate type `T`.
-"""
-struct Ortho{D,T} <: AbstractGeometryCoord{D,T}
-	size::SVector{D,T}
+# Square««2
+struct Square{T} <: AbstractGeometryCoord{2,T}
+	size::SVector{2,T}
 end
-
-@inline Ortho{D}(a::AbstractVector) where{D} = Ortho{D,eltype(a)}(a)
-@inline Ortho{D}(a::Real...) where{D} = Ortho{D}(SVector(a))
-@inline Ortho(a::Real...) = Ortho(SVector{length(a)}(a...))
-Square = Ortho{2}
-
 @inline scad_info(s::Square) = (:square, (size=s.size,))
-
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
 @inline (g::Mesh)(s::Square) =
 	polygon_xor(g, square_vertices(T(s.size[1]), T(s.size[2])))
 
-# Ball: circle or sphere, centered at zero««2
-"""
-    Ball{D,T}
-
-A `D`-dimensional ball, with radius of type `T`, centered at the origin.
-"""
-struct Ball{D,T} <: AbstractGeometryCoord{D,T}
+# Circle««2
+struct Circle{T} <: AbstractGeometryCoord{2,T}
 	radius::T
 end
-@inline Ball{D}(a::Real) where{D} = Ball{D,typeof(a)}(a)
-
-Circle = Ball{2}
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
 @inline (g::Mesh)(s::Circle) =
 	polygon_xor(g, unit_n_gon(T(s.radius), g.parameters))
@@ -461,25 +440,28 @@ end
 @inline scad_info(s::Polygon) = (:polygon, (points=s.points,))
 @inline (g::Mesh)(s::Polygon) = polygon_xor(g, s.points)
 
-# Draw ««2
-struct Draw{T} <: AbstractGeometryCoord{2,T}
-	path::Vector{SVector{2,T}}
+# Path ««2
+struct Path{T} <: AbstractGeometryCoord{2,T}
+	points::Vector{SVector{2,T}}
 	width::Float64
 	ends::Symbol
 	join::Symbol
 	miter_limit::Float64
 end
-Draw(path, width; ends=:round, join=:round, miter_limit=2.) =
-	Draw{coordtype(path)}(path, width, ends, join, miter_limit)
+Path(points, width; ends=:round, join=:round, miter_limit=2.) =
+	Path{eltype(eltype(points))}(points, width, ends, join, miter_limit)
 
-function (g::Mesh{T})(s::Draw) where{T}
+function (g::Mesh{T})(s::Path) where{T}
 	r = one_half(T(s.width))
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * r)
 	return polygon_xor(g, offset([s.path], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
 # 3d primitives««1
-Cube = Ortho{3}
+# Cube««2
+struct Cube{T} <: AbstractGeometryCoord{3,T}
+	size::SVector{3,T}
+end
 @inline scad_info(s::Cube) = (:cube, (size=s.size,))
 
 @inline cube_vertices(u, v, w) = [
@@ -494,17 +476,19 @@ Cube = Ortho{3}
 	 (2, 1, 5), (5, 6, 2), (3, 1, 2), (2, 4, 3),
 	])
 
-Sphere = Ball{3}
+# Sphere««2
+struct Sphere{T} <: AbstractGeometryCoord{3,T}
+	radius::T
+end
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
 
-function (g::Mesh{T})(s::Sphere) where{T}
+function (g::Mesh)(s::Sphere)
 	plist = fibonacci_sphere_points(T(s.radius), g.parameters)
 	(pts, faces) = convex_hull(plist)
 	return corner_table(g, pts, faces)
 end
 
-
-# Cylinder is an extrusion
+# Cylinder is implemented as an extrusion
 
 # Surface««2
 """
@@ -856,7 +840,7 @@ An axis-parallel square or rectangle  with given `size`
 @inline square(a::Real; kwargs...) = square(a,a; kwargs...)
 @inline square(a::AbstractVector; kwargs...) = square(a...; kwargs...)
 
-@inline _square(a, b, ::Nothing, ::Nothing) = Square(a, b)
+@inline _square(a, b, ::Nothing, ::Nothing) = Square(SA[a, b])
 @inline _square(a, b, center::Bool, anchor) =
 	center ? _square(a,b,SA[0,0],anchor) : _square(a,b,nothing,anchor)
 @inline _square(a, b, center::AbstractVector, anchor) =
@@ -871,7 +855,7 @@ An axis-parallel cube (or sett) with given `size`
 @inline cube(a::Real, b::Real, c::Real; center=nothing, anchor=nothing) =
 	_cube(a, b, c, center, anchor)
 
-@inline _cube(a,b,c, ::Nothing, ::Nothing) = Cube(a,b,c)
+@inline _cube(a,b,c, ::Nothing, ::Nothing) = Cube(SA[a,b,c])
 @inline _cube(a,b,c, center::Bool, anchor) =
 	center ? _cube(a,b,c,SA[0,0,0],anchor) : _cube(a,b,c,nothing,anchor)
 @inline _cube(a,b,c, center::AbstractVector, anchor) =
@@ -910,16 +894,16 @@ Circular cone.
     polygon(path)
 """
 @inline polygon(path) = Polygon(path)
-# Draw««2
+# Path««2
 """
-    draw(path, width; kwargs)
+    path(points, width; kwargs)
     ends = :loop|:butt|:square|:round
     join = :square|:round|:miter
     miter_limit = 2.0
 
 Draws a path of given width.
 """
-draw(path, width; kwargs...) = Draw(path, width; kwargs...)
+path(points, width; kwargs...) = Path(points, width; kwargs...)
 
 
 # Surface««2
@@ -1701,8 +1685,9 @@ end
 # # 
 # #
 # Exports ««1
-export square, circle, cube, sphere, cylinder, polygon, surface
-export offset, draw, hull, minkowski
+export square, circle, path, polygon
+export cube, sphere, cylinder, surface
+export offset, hull, minkowski
 export mult_matrix, translate, scale, rotate, mirror, project, cut
 export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
