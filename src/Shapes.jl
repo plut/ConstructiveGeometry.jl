@@ -141,7 +141,7 @@ end
 		)::Vector{Path{2,T}} where{T}
 	c = ClipperOffset(T, miter_limit, precision)
 	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
-	execute(c, r)
+	return execute(c, r)
 end
 @inline function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
 		join = :round,
@@ -153,7 +153,7 @@ end
 	# Used by path_extrude().
 	c = ClipperOffset(T, miter_limit, precision)
 	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
-	[ execute(c, ρ) for ρ in r]
+	return [ execute(c, ρ) for ρ in r]
 end
 @inline simplify_paths(p::AbstractVector{Path{2,T}}; fill=:nonzero) where{T} =
 	from_clipper(T,
@@ -334,8 +334,11 @@ or a polygon with holes, etc.)
 """
 struct PolygonXor{T}
 	paths::Vector{Vector{SVector{2,T}}}
-	@inline PolygonXor{T}(paths::AbstractVector{<:AbstractVector{<:StaticVector{2,<:Real}}}) where{T<:Real} =
-		new{T}(Vector{SVector{2,T}}.(paths))
+# 	@inline PolygonXor{T}(paths::AbstractVector{<:AbstractVector{<:StaticVector{2,<:Real}}}) where{T<:Real} =
+# 		new{T}(Vector{SVector{2,T}}.(paths))
+	@inline PolygonXor{T}(paths::AbstractVector) where{T} = new{T}(paths)
+	@inline PolygonXor(paths::AbstractVector) =
+		PolygonXor{eltype(eltype(paths))}(paths)
 end
 @inline PolygonXor{T}(paths::AbstractVector{<:StaticVector{2,<:Real}}...
 	) where{T} = PolygonXor{T}([paths...])

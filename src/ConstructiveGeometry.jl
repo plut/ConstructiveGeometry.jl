@@ -426,8 +426,8 @@ Square = Ortho{2}
 
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
-@inline (::Mesh{T})(s::Square) where{T} =
-	PolygonXor{T}(square_vertices(T(s.size[1]), T(s.size[2])))
+@inline (g::Mesh)(s::Square) =
+	polygon_xor(g, square_vertices(T(s.size[1]), T(s.size[2])))
 
 # Ball: circle or sphere, centered at zero««2
 """
@@ -442,8 +442,8 @@ end
 
 Circle = Ball{2}
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
-@inline (g::Mesh{T})(s::Circle) where{T} =
-	PolygonXor{T}(unit_n_gon(T(s.radius), g.parameters))
+@inline (g::Mesh)(s::Circle) =
+	polygon_xor(g, unit_n_gon(T(s.radius), g.parameters))
 
 # Polygon««2
 """
@@ -459,7 +459,7 @@ end
 	Polygon{eltype(eltype(points))}(points)
 
 @inline scad_info(s::Polygon) = (:polygon, (points=s.points,))
-@inline (::Mesh{T})(s::Polygon) where{T} = PolygonXor{T}(s.points)
+@inline (g::Mesh)(s::Polygon) = polygon_xor(g, s.points)
 
 # Draw ««2
 struct Draw{T} <: AbstractGeometryCoord{2,T}
@@ -475,7 +475,7 @@ Draw(path, width; ends=:round, join=:round, miter_limit=2.) =
 function (g::Mesh{T})(s::Draw) where{T}
 	r = one_half(T(s.width))
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * r)
-	return PolygonXor{T}(offset([s.path], r;
+	return polygon_xor(g, offset([s.path], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
 # 3d primitives««1
@@ -626,9 +626,9 @@ end
 
 CSGHull = constructed_solid_type(:hull)
 
-function (g::Mesh{T})(s::CSGHull2) where{T}
+@inline function (g::Mesh)(s::CSGHull2)
 	v = reduce(vcat, Shapes.vertices(g(x)) for x in children(s))
-	return PolygonXor{T}(convex_hull(v))
+	return polygon_xor(g, convex_hull(v))
 end
 
 @inline vertices3(m::CornerTable) = CornerTables.points(m)
@@ -836,7 +836,7 @@ end
 function (g::Mesh)(s::Offset)
 	m = g(s.child)
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * s.radius)
-	return PolygonXor(offset(vertices.(paths(m)), s.radius;
+	return PolygonXor(Shapes.offset(Shapes.paths(m), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε)...)
 end
 
@@ -851,11 +851,35 @@ end
 An axis-parallel square or rectangle  with given `size`
 (scalar or vector of length 2).
 """
-@inline square(a::Real) = Square(a,a)
-@inline square(a::AbstractVector) = Square(a...)
+@inline square(a::Real, b::Real; center=nothing, anchor=nothing) =
+	_square(a, b, center, anchor)
+@inline square(a::Real; kwargs...) = square(a,a; kwargs...)
+@inline square(a::AbstractVector; kwargs...) = square(a...; kwargs...)
 
-@inline cube(a::Real) = Cube(a,a,a)
-@inline cube(a::AbstractVector) = Cube(a...)
+@inline _square(a, b, ::Nothing, ::Nothing) = Square(a, b)
+@inline _square(a, b, center::Bool, anchor) =
+	center ? _square(a,b,SA[0,0],anchor) : _square(a,b,nothing,anchor)
+@inline _square(a, b, center::AbstractVector, anchor) =
+	translate(center-SA[one_half(a),one_half(b)])*_square(a,b,nothing,anchor)
+
+"""
+    cube(size; origin, center=false)
+
+An axis-parallel cube (or sett) with given `size`
+(scalar or vector of length 3).
+"""
+@inline cube(a::Real, b::Real, c::Real; center=nothing, anchor=nothing) =
+	_cube(a, b, c, center, anchor)
+
+@inline _cube(a,b,c, ::Nothing, ::Nothing) = Cube(a,b,c)
+@inline _cube(a,b,c, center::Bool, anchor) =
+	center ? _cube(a,b,c,SA[0,0,0],anchor) : _cube(a,b,c,nothing,anchor)
+@inline _cube(a,b,c, center::AbstractVector, anchor) =
+	translate(center-SA[one_half(a),one_half(b),one_half(c)])*
+	_cube(a,b,c,nothing,anchor)
+
+@inline cube(a::Real; kwargs...) = cube(a,a,a; kwargs...)
+@inline cube(a::AbstractVector; kwargs...) = cube(a...; kwargs...)
 
 # Circles and spheres««2
 @inline circle(a::Real) = Circle(a)
@@ -1098,7 +1122,7 @@ Offsets by given radius.
     join=:round|:miter|:square
 """
 @inline offset(r::Real, s...; join=:round, miter_limit=2.) =
-	Transform(Offset,((r=r, join=join, miter_limit=miter_limit),), s...)
+	operator(Offset,(r,:loop,join,miter_limit),s...)
 
 # set_parameters««2
 """

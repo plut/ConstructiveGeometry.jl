@@ -12,6 +12,7 @@
    - [x] projection,
    - [x] plane intersection,
    - [x] linear extrusion, rotational extrusion
+   todo: enlarge parameters for rotate_Extrude
   - [x] _Non-geometry transforms_: `set_parameters`, color
   - [ ] _CG operations_:
    - [x] union, inter, diff
