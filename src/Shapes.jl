@@ -302,10 +302,27 @@ p⋆q = convolution(p, q)
 # 	return (d1+d2+d3) ≥ 2
 # end
 # 
-# # TODO: 3d Minkowski««2
-# 
-# 
-
+# Draw path««1
+# # """
+# #     draw(path, width; kwargs...)
+# # 
+# #     ends=:round|:square|:butt|:closed
+# #     join=:round|:miter|:square
+# # """
+# # function draw(path::Path{2,T}, width::Real;
+# # 		ends::Symbol = :round, join::Symbol = :round,
+# # 		miter_limit::Float64 = 2.0, precision::Real = 0.2) where{T}
+# # 	CT = clipper_type(T)
+# # 	RT = clipper_rettype(T)
+# # 	c = ClipperOffset(miter_limit, clipper_float(CT, precision))
+# # 	println("join=$join, round=$round")
+# # 	Clipper.add_path!(c, clipper_path(path),
+# # 		JoinType(Val(join)), EndType(Val(ends)))
+# # 	println("$(clipper_type(T)) $(CT(1.)); prec=$(Float64(CT(precision)))")
+# # 	ret = clipper_unpath.(RT, Clipper.execute(c, clipper_float(CT, width)/2))
+# # 	return PolyUnion(ret)
+# # end
+# # 
 # PolygonXor««1
 """
     PolygonXor{T}(polygon...)

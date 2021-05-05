@@ -478,7 +478,6 @@ function (g::Mesh{T})(s::Draw) where{T}
 	return PolygonXor{T}(offset([s.path], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
-
 # 3d primitives««1
 Cube = Ortho{3}
 @inline scad_info(s::Cube) = (:cube, (size=s.size,))
@@ -1341,31 +1340,6 @@ end
 @inline svg(f::AbstractString, args...; kwargs...) =
 	open(f, "w") do io svg(io, args...; kwargs...) end
 #————————————————————— Code to rewrite: —————————————————————————————— ««1
-#————————————————————— Meshing (2d) —————————————————————————————— ««1
-
-#»»1
-# # 2d meshing««1
-# # Offset and draw««2
-# # """
-# #     draw(path, width; kwargs...)
-# # 
-# #     ends=:round|:square|:butt|:closed
-# #     join=:round|:miter|:square
-# # """
-# # function draw(path::Path{2,T}, width::Real;
-# # 		ends::Symbol = :round, join::Symbol = :round,
-# # 		miter_limit::Float64 = 2.0, precision::Real = 0.2) where{T}
-# # 	CT = clipper_type(T)
-# # 	RT = clipper_rettype(T)
-# # 	c = ClipperOffset(miter_limit, clipper_float(CT, precision))
-# # 	println("join=$join, round=$round")
-# # 	Clipper.add_path!(c, clipper_path(path),
-# # 		JoinType(Val(join)), EndType(Val(ends)))
-# # 	println("$(clipper_type(T)) $(CT(1.)); prec=$(Float64(CT(precision)))")
-# # 	ret = clipper_unpath.(RT, Clipper.execute(c, clipper_float(CT, width)/2))
-# # 	return PolyUnion(ret)
-# # end
-# # 
 #————————————————————— Extra tools —————————————————————————————— ««1
 #»»1
 # OpenSCAD output
@@ -1674,13 +1648,13 @@ end
 # #
 # Exports ««1
 export square, circle, cube, sphere, cylinder, polygon, surface
-export offset, draw
-export mult_matrix, translate, scale, rotate, mirror
+export offset, draw, hull, minkowski
+export mult_matrix, translate, scale, rotate, mirror, project, cut
 export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
-export mesh
-export difference, ⋃, ⋂, offset, hull, minkowski
+export mesh, stl, svg
 # don't export include, of course
+
 # »»1
 # function explain(s::AbstractSurface, io::IO = stdout; scale=1,
 # 		offset=[0.,0.,0.], name=:m )
