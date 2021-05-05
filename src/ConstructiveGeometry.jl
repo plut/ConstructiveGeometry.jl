@@ -938,18 +938,25 @@ symbols `sym1`, `sym2`..., `children(x)`.
 	[unroll(s, tail...); unroll(t, tail...)]
 
 # Booleans««2
-@inline union(a1::AbstractGeometry{D}, a2::AbstractGeometry{D}) where{D} =
-	CSGUnion{D}(unroll2(a1, a2, Val(:union)))
-@inline intersect(a1::AbstractGeometry{D}, a2::AbstractGeometry{D}) where{D} =
-	CSGInter{D}(unroll2(a1, a2, Val(:intersection)))
-# FIXME allow intersection of 2d and 3d primitives (as 2d result)
-#  - first intersect with a plane (TODO)
+@inline union(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	CSGUnion{D}(unroll2(a, b, Val(:union)))
+
+@inline intersect(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	CSGInter{D}(unroll2(a, b, Val(:intersection)))
+@inline Base.intersect(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
+	intersect(cut(a), b)
+@inline Base.intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
+	intersect(a, cut(b))
+
 @inline setdiff(x::AbstractGeometry{D}, y::AbstractGeometry{D}) where{D} =
 	CSGDiff{D}((x,y))
+@inline setdiff(a::AbstractGeometry{2}, a::AbstractGeometry{3}) =
+	setdiff(a, cut(b))
+
 # added interface: setdiff([x...], [y...])
 @inline setdiff(x::AbstractVector{<:AbstractGeometry},
                 y::AbstractVector{<:AbstractGeometry}) =
-	difference(union(x...), union(y...))
+	setdiff(union(x...), union(y...))
 # Convex hull««2
 """
     hull(s::AbstractGeometry...)
