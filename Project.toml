@@ -20,6 +20,7 @@ StaticArrays = "90137ffa-7385-5640-81b9-e52037218182"
 Triangle = "56f361f5-126b-55db-87fb-1c71988fcde4"
 
 [compat]
+DataStructures = "0.18"
 Clipper = "0.6"
 Colors = "0.12"
 FastClosures = "0.3"
