@@ -325,8 +325,6 @@ function inter_triangle2((p1,q1,r1),(p2,q2,r2); ε=0)
 		end
 		n += (length(x)-j)
 	end
-	for x in (itpq, itqr, itrp)
-	end
 	!isempty(itpq) && !isempty(itqr) &&
 		pushit!(itpq, last(itpq)[2] == first(itqr)[2] ? 1 : 0)
 	!isempty(itqr) && !isempty(itrp) &&
