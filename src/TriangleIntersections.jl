@@ -87,6 +87,10 @@ import .Constants: isvertex, isedge, index, same_edge
 # @inline plus2mod3(i,j=0)=(i==1) ? 3+j : (i==2) ? 1+j : 2+j
 
 # struct IntersectionData««2
+struct SizedUndef{N} end
+@inline sizedundef(N::Integer) = SizedUndef{N}()
+@inline Base.convert(::Type{SizedVector{N,P}}, ::SizedUndef{N}) where{N,P} =
+	SizedVector{N}(Vector{P}(undef, N))
 """
     struct IntersectionData
 
@@ -98,14 +102,14 @@ struct IntersectionData{N,P} <:
 		AbstractVector{Tuple{P,NTuple{2,Constants.Position}}}
 # maximum of N points, constant-size
 	npoints::Int
-	pttype::MVector{N,NTuple{2,Constants.Position}}
-	points::MVector{N,P}
+	pttype::SizedVector{N,NTuple{2,Constants.Position}}
+	points::SizedVector{N,P}
 	@inline IntersectionData{N,P}(::UndefInitializer, npoints::Integer) where{N,P} =
-		new{N,P}(npoints, MVector{N,NTuple{2,Constants.Position}}(undef),
-			MVector{N,P}(undef))
+		new{N,P}(npoints, sizedundef(N), sizedundef(N))
+# 			SizedVector{N,NTuple{2,Constants.Position}}(undef),
+# 			MVector{N,P}(undef))
 	@inline IntersectionData{N,P}(npoints::Int, pttype::MVector{N,P},
-		points::MVector{N,P}) where{N,P} =
-		new{N,P}(npoints, pttype, points)
+		points::MVector{N,P}) where{N,P} = new{N,P}(npoints, pttype, points)
 	@inline function IntersectionData{N,P}(npoints::Int, pttype, points
 		) where{N,P}
 		it = IntersectionData{N,P}(undef, npoints)
@@ -314,16 +318,21 @@ function inter_triangle2((p1,q1,r1),(p2,q2,r2); ε=0)
 	pttype = similar(itqr.pttype, 6)
 	n = 0
 
-	pushit! = (x, j) -> begin
+	pushit! = @closure (x, j) -> begin
 		@inbounds for i in 1:length(x)-j
 			pttype[n+i] = x.pttype[i]
 			points[n+i] = x.points[i]
 		end
 		n += (length(x)-j)
 	end
-	!isempty(itpq) && pushit!(itpq, last(itpq)[2] == first(itqr)[2] ? 1 : 0)
-	!isempty(itqr) && pushit!(itqr, last(itqr)[2] == first(itrp)[2] ? 1 : 0)
-	!isempty(itrp) && pushit!(itrp, last(itrp)[2] == first(itpq)[2] ? 1 : 0)
+	for x in (itpq, itqr, itrp)
+	end
+	!isempty(itpq) && !isempty(itqr) &&
+		pushit!(itpq, last(itpq)[2] == first(itqr)[2] ? 1 : 0)
+	!isempty(itqr) && !isempty(itrp) &&
+		pushit!(itqr, last(itqr)[2] == first(itrp)[2] ? 1 : 0)
+	!isempty(itrp) && !isempty(itpq) &&
+		pushit!(itrp, last(itrp)[2] == first(itpq)[2] ? 1 : 0)
 	return IntersectionData{6,eltype(points)}(n, pttype, points)
 end
 

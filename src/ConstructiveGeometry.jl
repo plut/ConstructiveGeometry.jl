@@ -77,7 +77,7 @@ Base.getindex(r::RowsView, i::Integer) = view(r.source, i, :)
 
 const _DEFAULT_PARAMETERS = (
 	accuracy = 0.1, precision = .005, symmetry = 1,
-	type = Float64, ε = 1/65536,
+	type = Rational{BigInt}, ε = 0,
 	color = Colors.RGBA{N0f8}(.5,.5,.5,1.), # gray
 )
 
@@ -250,6 +250,8 @@ function unit_n_gon(r::T, n::Int) where{T<:Real}
 	end
 	reinterpret(SVector{2,T}, r*z)
 end
+@inline unit_n_gon(r::Rational{BigInt}, n::Int) =
+	SVector{2,Rational{BigInt}}.(unit_n_gon(Float32(r), n))
 @inline unit_n_gon(r, parameters::NamedTuple)= unit_n_gon(r,sides(r,parameters))
 
 # Spheres««2
@@ -297,12 +299,14 @@ function fibonacci_sphere_points(r::T, n::Int) where{T<:Real}
 	for i in eachindex(v)
 		θ = i*T(golden_angle)
 		z = (n+1-2i)/T(n)
-		ρ = √(1-z^2)
+		ρ = T(√(1-z^2))
 		(s,c) = sincos(θ)
-		@inbounds v[i] = SA[r*c*ρ, r*s*ρ, r*z]
+		@inbounds v[i] = SVector{3,T}(r*c*ρ, r*s*ρ, r*z)
 	end
 	return v
 end
+@inline fibonacci_sphere_points(r::Rational{BigInt}, n::Int) =
+	SVector{3,Rational{BigInt}}.(fibonacci_sphere_points(Float32(r), n))
 @inline fibonacci_sphere_points(r::Real, parameters::NamedTuple) =
 	fibonacci_sphere_points(r, sphere_nvertices(r, parameters))
 # tools for rotate extrusion««2
@@ -421,7 +425,7 @@ struct Circle{T} <: AbstractGeometryCoord{2,T}
 	radius::T
 end
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
-@inline (g::Mesh)(s::Circle) =
+@inline (g::Mesh{T})(s::Circle) where{T} =
 	polygon_xor(g, unit_n_gon(T(s.radius), g.parameters))
 
 # Polygon««2
@@ -482,7 +486,7 @@ struct Sphere{T} <: AbstractGeometryCoord{3,T}
 end
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
 
-function (g::Mesh)(s::Sphere)
+function (g::Mesh{T})(s::Sphere) where{T}
 	plist = fibonacci_sphere_points(T(s.radius), g.parameters)
 	(pts, faces) = convex_hull(plist)
 	return corner_table(g, pts, faces)

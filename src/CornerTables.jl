@@ -1159,7 +1159,7 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 	# first renumber points, removing duplicates, including in self-intersect:
 	append_points!(m, si.points)
 	vmap = simplify_points!(m, ε)
-# 	explain(m, "/tmp/x.scad", scale=30)
+	explain(m, "/tmp/x.scad", scale=30)
 
 	for i in eachindex(si.in_edge)
 		si.in_edge[i] = map(x->get(vmap, x, x) , si.in_edge[i])
@@ -1356,12 +1356,11 @@ function sort_radial_loop(m::CornerTable, c0, pt3 = nothing)#««
 	# 2d projection of face_vec3 (preserving orientation)
 	clist = collect(genradial(m, c0)) # corners around this multiple edge
 	# we could use this to determine edge orientation:
-# 	dv = [ destination(m, h) == v2 for h in hlist ]
 	p1 = point(m, v1)
 	fv = [ point(m, vertex(m, c)) - p1 for c in clist ]
 	# face vector, projected in 2d:
 	fv2= [ project2d(axis, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
-# 	println("\e[7msort_radial_edge $c0=$(base(m,c0)): $dir3 axis $axis\e[m")
+# 	println("\e[7msort_radial_loop $c0=$(base(m,c0)): $dir3 axis $axis\e[m")
 # 	for (c, y, z) in zip(clist, fv, fv2)
 # 		println("# $c = $(vertex(m,c)) $(base(m, c)): fv3=$y, fv2=$z")
 # 	end
@@ -1452,15 +1451,11 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 	levels = LevelStructure(ncomp)
 	# cells is kept implicit for now (this *might* be used later, for
 	# reconnecting edges when selecting faces)
-# 	cells = UnionFind(2*ncomp)
 	for i1 in 2:ncomp, i2 in 1:i1-1
 		c0 = rp.adjacency[i1, i2]
 		isboundary(c0) && continue
-# 		eindex = rp.adjacency[i1, i2]
-# 		iszero(eindex) && continue
 		# regular components i and j meet at edge eindex
 		clist = sort_radial_loop(m, c0)
-# 		hlist = sort_radial_loop(m, eindex)
 		n = length(clist)
 		# plist is the sorted list of regular patches at this edge
 		# dlist is the list of edge orientations
@@ -1478,15 +1473,10 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 			# if p1 is positively oriented (d1==v2) then cell between p1 and p2
 			# is 2p1 (otherwise 2p1-1);  if p2 is positively oriented (d2==v2),
 			# this same cell is 2p2-1 (else 2p2)
-# 			union!(cells, 2*p1-(d1≠v2), 2*p2-(d2==v2))
 			k = 1-o1-o2
 			connect!(levels, p1, p2, k)
 			p1 = p2; o1 = o2
 		end
-		# close the loop by identifying both sides of the last cell
-		# (the level is already computed by the level structure):
-# 		p2 = plist[1]; d2 = dlist[1]
-# 		union!(cells, 2*p1-(d1≠v2), 2*p2-(d2==v2))
 	end
 	# at this stage, `levels` contains full relative multiplicity info for
 	# each connected component of the surface. To complete the data, it
