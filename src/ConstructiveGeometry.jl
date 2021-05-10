@@ -77,7 +77,8 @@ Base.getindex(r::RowsView, i::Integer) = view(r.source, i, :)
 
 const _DEFAULT_PARAMETERS = (
 	accuracy = 0.1, precision = .005, symmetry = 1,
-	type = Rational{BigInt}, ε = 0,
+	type = Float64, ε=1/65536,
+# 	type = Rational{BigInt}, ε = 0,
 	color = Colors.RGBA{N0f8}(.5,.5,.5,1.), # gray
 )
 

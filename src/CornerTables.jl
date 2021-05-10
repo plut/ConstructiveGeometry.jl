@@ -1020,9 +1020,6 @@ function insert_point(m, si, p, idx, f, t, ε)#««
 		idx == nothing &&
 			(push!(si.points, p); idx = Vertex(length(si.points) + nvertices(m)))
 		k = Side(TI.index(t, TI.isedge))
-		# CornerTable has edges in order: edge31, edge12, edge23
-		# index(edge31<<2) = index(edge23) = 1 fixes this:
-# 		k = Side(TI.index(t<<2, TI.isedge))
 		push!(si.in_edge, (edge(m, f, k)..., idx))
 		return idx
 	end
@@ -1045,13 +1042,13 @@ Returns `(points, in_face, in_edge, faces)` describing the
 self-intersection graph of `s`.
 """
 function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
-	T = eltype(point_type(m))
-
 	boxes = [ boundingbox(t...) for t in triangles(m) ]
 	si = (points=similar(points(m), 0),
 		in_face = SortedDict{Face{I},Vector{Vertex{I}}}(),
 		in_edge=NTuple{3,Vertex{I}}[],
-		faces = Face{I}[])
+		faces = Face{I}[],
+		edges = NTuple{2,Vertex{I}}[],
+		)
 
 	for (f1, f2) in SpatialSorting.intersections(boxes)
 		f1 = Face(f1); f2 = Face(f2)
@@ -1061,14 +1058,12 @@ function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
 		
 		# create points as needed, and store their index:
 		push!(si.faces, f1, f2)
-# 		vindex = MVector{6,Vertex{I}}(undef)
+		idx = MVector{6,Vertex{I}}(undef)
 		for (i, (p, (t1, t2))) in pairs(it)
-			idx = nothing
-			idx = insert_point(m, si, p, idx, f1, t1, ε)
-			idx = insert_point(m, si, p, idx, f2, t2, ε)
-
-# 			vindex[i] = idx
+			idx[i] = insert_point(m, si, p, nothing, f1, t1, ε)
+			idx[i] = insert_point(m, si, p, idx[i],  f2, t2, ε)
 		end
+		length(it) == 2 && push!(si.edges, (idx[1], idx[2]))
 	end
 	uniquesort!(si.faces)
 	return si
@@ -1100,20 +1095,22 @@ function project_and_triangulate(m::CornerTable, direction, vlist,elist=nothing)
 		emat[:,1] .= collect(Int(e[1]) for e in elist)
 		emat[:,2] .= collect(Int(e[2]) for e in elist)
 # 		println("triangulate: $vmat $vlist $emat")
-		tri = LibTriangle.constrained_triangulation(vmat, vref, emat)
 #=
 plot '/tmp/a' index 0 u 1:2 w p pt 5, '' index 1 u 1:2:3:4:0 w vectors lc palette lw 3, '' index 0 u 1:2:3 w labels font "bold,14"
 =#
+# 	println("### call to constrained_triangulation:")
 # 	for (i, v) in pairs(vlist)
 # 		println("$(vmat[i,1])\t$(vmat[i,2])\t$v")
 # 	end
 # 	println("\n\n")
 # 	for i in 1:size(emat,1)
+# 		println("# edge $(emat[i,1])--$(emat[i,2])")
 # 		v1 = findfirst(==(Vertex(emat[i,1])), vlist)
 # 		v2 = findfirst(==(Vertex(emat[i,2])), vlist)
 # 		println("$(vmat[v1,1])\t$(vmat[v1,2])\t$(vmat[v2,1]-vmat[v1,1])\t$(vmat[v2,2]-vmat[v1,2])")
 # 	end
 # 	println("\n\n")
+		tri = LibTriangle.constrained_triangulation(vmat, vref, emat)
 	end
 
 	return ((Vertex(t[1]), Vertex(t[2]), Vertex(t[3])) for t in tri)
@@ -1162,14 +1159,20 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 	explain(m, "/tmp/x.scad", scale=30)
 
 	for i in eachindex(si.in_edge)
-		si.in_edge[i] = map(x->get(vmap, x, x) , si.in_edge[i])
+		(u, v, w) = map(x->get(vmap, x, x), si.in_edge[i])
+		(u, v) = minmax(u, v)
+		si.in_edge[i] = (u, v, w)
 	end
 	uniquesort!(si.in_edge)
 	for i in eachindex(si.in_face)
 		si.in_face[i] = map(x->get(vmap, x, x), si.in_face[i])
 	end
+	for i in eachindex(si.edges)
+		si.edges[i] = map(x->get(vmap, x, x), si.edges[i])
+	end
 	# insert points in edges
 	in_edge = edge_inserts(m, si.in_edge)
+	uniquesort!(si.edges)
 
 	# determine clusters of coplanar (broken) faces:
 	coplanar_rel = coplanar_faces(m, si.faces, ε)
@@ -1201,6 +1204,13 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 			v = u
 		end
 		uniquesort!(vlist)
+		for v in vlist
+			r = searchsorted(si.edges, (v,v); by=first)
+			for e in si.edges[r]
+				isempty(searchsorted(vlist, e[2])) && continue
+				push!(elist, e)
+			end
+		end
 	end
 	faces_tri = [ NTuple{3,Vertex{I}}[] for _ in si.faces ]
 		
@@ -1212,10 +1222,10 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 		allvertices = uniquesort!(reduce(vcat, view(in_face_v, icluster)))
 		alledges = uniquesort!(reduce(vcat, view(in_face_e, icluster)))
 
+# 		println("\e[1mcluster $icluster\e[m $direction $(in_face_v[icluster]) $(in_face_e[icluster])")
+# 		for i in icluster; f = si.faces[i]; println(" $f: $(vertices(m,f)) $(main_axis(m,f)>0) $(in_face_v[i]) $([(Int(x),Int(y)) for (x,y) in in_face_e[i]])"); end
 		alltriangles = project_and_triangulate(m, abs(direction),
 			allvertices, alledges)
-# 		println("\e[1mcluster $icluster\e[m $direction $(in_face_v[icluster]) => $(collect(alltriangles))")
-# 		for i in icluster; f = si.faces[i]; println(" $f: $(vertices(m,f)) $(main_axis(m,f)>0)"); end
 
 		# apply face refinement:
 		for i in icluster
@@ -1257,7 +1267,6 @@ function plane_cut(m::CornerTable, ε = 0)
 		push!(seg, (length(pts)-1, length(pts)))
 	end
 	eqv = equivalent_points(pts, ε)
-	global E = eqv
 	for i in 1:length(seg)
 		seg[i] = (EquivalenceStructures.class_idx(eqv, seg[i][1]),
 		          EquivalenceStructures.class_idx(eqv, seg[i][2]))
@@ -1342,15 +1351,11 @@ and `0` iff `α` == `β`.
 end
 # sort_radial_loop««2
 function sort_radial_loop(m::CornerTable, c0, pt3 = nothing)#««
-# used for locate_point:
-# vec3, proj, dir3, dir2scaled, order
-	# prepare geometry information
 	(v1, v2) = base(m, c0)
 	dir3 = point(m, v2) - point(m, v1)
 	axis = main_axis(dir3)
 	dir2 = project2d(axis, dir3)
 	dir2scaled = dir2 ./dot(dir3, dir3)
-	# collect half-edges and corresponding opposed vertices
 	# for each adjacent face, compute a (3d) vector which, together with
 	# the edge, generates the face (and pointing from the edge to the face):
 	# 2d projection of face_vec3 (preserving orientation)
@@ -1358,7 +1363,7 @@ function sort_radial_loop(m::CornerTable, c0, pt3 = nothing)#««
 	# we could use this to determine edge orientation:
 	p1 = point(m, v1)
 	fv = [ point(m, vertex(m, c)) - p1 for c in clist ]
-	# face vector, projected in 2d:
+	# face vector, projected in 2d (as viewed from v2 to v1):
 	fv2= [ project2d(axis, v) .- dot(v, dir3) .* dir2scaled for v in fv ]
 # 	println("\e[7msort_radial_loop $c0=$(base(m,c0)): $dir3 axis $axis\e[m")
 # 	for (c, y, z) in zip(clist, fv, fv2)
@@ -1376,6 +1381,10 @@ function sort_radial_loop(m::CornerTable, c0, pt3 = nothing)#««
 		# half-edge number is proportional to face number
 	end
 	reorder = sort(1:length(clist), lt=face_cmp)
+# 	for i in reorder
+# 		c=clist[i]; u=fv2[i]
+# 		println("  $c=$(vertex(m,c)) $(base(m,c)): $u")
+# 	end
 	pt3 == nothing && return clist[reorder]
 
 	# find where `pt3 - v1` inserts in radial loop:

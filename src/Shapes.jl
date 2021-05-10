@@ -63,6 +63,8 @@ const _CLIPPER_ENUM = (#««
 Converts stuff (numbers, vectors, paths...) to and from `Clipper.jl` types.
 """
 @inline to_clipper(::Type{<:Real}) = _CLIPPER_FIXED
+@inline Base.convert(T::Type{<:FixedPoint}, x::Rational{BigInt}) =
+	convert(T, convert(Float64, x))
 @inline to_clipper(T::Type{<:FixedPoint{<:Int64}}) = T
 @inline to_clipper(T::Type, x::Real) = reinterpret(convert(to_clipper(T), x))
 @inline to_clipper(T::Type, v::StaticVector{2,<:Real}) =
