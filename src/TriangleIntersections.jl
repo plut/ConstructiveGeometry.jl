@@ -302,6 +302,15 @@ end
 		
 
 # inter_triangle2 ««2
+function connect2(n, pttype, points, itpq, itqr)
+	isempty(itpq) && return n
+	m = length(itpq) - (!isempty(itqr) && last(itpq)[2] == first(itqr)[2])
+	for i in 1:m
+		points[n+i] = itpq.points[i]
+		pttype[n+i] = itpq.pttype[i]
+	end
+	return n+m
+end
 """
     inter_triangle2
 
@@ -311,26 +320,14 @@ function inter_triangle2((p1,q1,r1),(p2,q2,r2); ε=0)
 	itpq = inter_segment2_triangle2((p1,q1),(p2,q2,r2); ε)
 	itqr = inter_segment2_triangle2((q1,r1),(p2,q2,r2); ε)
 	itrp = inter_segment2_triangle2((r1,p1),(p2,q2,r2); ε)
-	# glue those three together:
+	# connect those three together:
 	shift1!(itqr, 1)
 	shift1!(itrp, 2)
 	points = similar(itqr.points, 6)
 	pttype = similar(itqr.pttype, 6)
-	n = 0
-
-	pushit! = @closure (x, j) -> begin
-		@inbounds for i in 1:length(x)-j
-			pttype[n+i] = x.pttype[i]
-			points[n+i] = x.points[i]
-		end
-		n += (length(x)-j)
-	end
-	!isempty(itpq) && !isempty(itqr) &&
-		pushit!(itpq, last(itpq)[2] == first(itqr)[2] ? 1 : 0)
-	!isempty(itqr) && !isempty(itrp) &&
-		pushit!(itqr, last(itqr)[2] == first(itrp)[2] ? 1 : 0)
-	!isempty(itrp) && !isempty(itpq) &&
-		pushit!(itrp, last(itrp)[2] == first(itpq)[2] ? 1 : 0)
+	n = connect2(0, pttype, points, itpq, itqr)
+	n = connect2(n, pttype, points, itqr, itrp)
+	n = connect2(n, pttype, points, itrp, itpq)
 	return IntersectionData{6,eltype(points)}(n, pttype, points)
 end
 
@@ -619,7 +616,6 @@ end
 # inter_coplanar ««2
 
 @inline function inter_coplanar((p1,q1,r1), (p2,q2,r2), normal2, ε)
-	ID = IntersectionData{6,typeof(p1)}
 	proj = Projector(normal2, p2)
 	(a1,b1,c1,a2,b2,c2) = proj.((p1,q1,r1,p2,q2,r2))
 	dpqr = abs(normal2[abs(proj.dir)])
