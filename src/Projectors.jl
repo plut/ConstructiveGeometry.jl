@@ -72,6 +72,8 @@ struct Projector{T}
 	dir::Int8
 	lift::NTuple{3,T}
 end
+
+@inline main_axis(p::Projector) = p.dir
 struct FormalInv{X}
 	x::X
 end

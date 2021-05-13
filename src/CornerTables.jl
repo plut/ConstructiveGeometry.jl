@@ -1,6 +1,5 @@
 # TODO:
 #  - simplify (retriangulate) faces
-#  + add per-face attributes
 #  - maybe precompute all face normals
 #  - clarify API
 #  - make level computation output-sensitive
@@ -39,6 +38,7 @@ include("TriangleIntersections.jl")
 include("SpatialSorting.jl")
 include("EquivalenceStructures.jl")
 using .EquivalenceStructures
+include("SegmentGraphs.jl")
 
 const _INDEX_TYPE = Int
 const _DEFAULT_EPSILON=1/65536
@@ -56,31 +56,12 @@ const _DEFAULT_EPSILON=1/65536
 # tools ««1
 # uniquesort!««2
 @inline uniquesort!(a) = Base._groupedunique!(sort!(a))
-# BBox««2
-struct BBox{P}
-	min::P
-	max::P
-	@inline BBox{P}(min, max) where{P} = new{P}(min, max)
-	@inline BBox(min, max) = BBox{typeof(min)}(min, max)
-end
-
-@inline Base.eltype(::Type{BBox{P}}) where{P} = P
-@inline Base.eltype(b::BBox) = eltype(typeof(b))
-
-@inline Base.min(b::BBox) = b.min; @inline Base.max(b::BBox) = b.max
-@inline Base.:∈(x::AbstractVector, b::BBox) = all(min(b) .≤ x .≤ max(b))
-@inline Base.isempty(b::BBox) = any(min(b) .> max(b))
-@inline Base.intersect(a::BBox, b::BBox) =
-	BBox((max.(min(a), min(b))), (min.(max(a), max(b))))
+# Box««2
 @inline boundingbox(v::AbstractVector...) =
-	BBox{eltype(v)}(min.(v...), max.(v...))
-# `SpatialSorting` interface:
-SpatialSorting.position(b::BBox) = b.min + b.max
-SpatialSorting.merge(b1::BBox, b2::BBox) =
-	BBox{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
+	SpatialSorting.Box{eltype(v)}(min.(v...), max.(v...))
 
 function equivalent_points(points, ε=0)
-	boxes = [ BBox(p, p .+ ε) for p in points ]
+	boxes = [ SpatialSorting.Box(p, p .+ ε) for p in points ]
 	# `extrema` guarantees that all pairs (i,j) are sorted i < j
 	samepoints = extrema.(SpatialSorting.intersections(boxes))
 	return equivalence_structure(length(points), samepoints)
@@ -174,8 +155,10 @@ struct CornerTable{I<:Signed,P,A} # I is index type (integer), P is point type
 	fan_next::Vector{I}
 	fan_first::Vector{I}
 	attribute::Vector{A}
-	@inline CornerTable(points, opp, dest, ef, cn=[], cs=[],a=[]) = # TEMPORARY
-		new{Int,eltype(points),eltype(a)}(points, opp, dest, ef, cn, cs,a)
+	@inline CornerTable{I,P,A}(points, opp, dest, ef, cn=[], cs=[],a=[]) where{I,P,A} = # TEMPORARY
+		new{I,P,A}(points, opp, dest, ef, cn, cs,a)
+	@inline CornerTable(points, opp, dest, ef, cn, cs, a) = 
+		CornerTable{Int,eltype(points),eltype(a)}(points, opp, dest, ef, cn, cs, a)
 	@inline CornerTable{I,P,A}(points::AbstractVector) where{I,P,A} =
 		new{I,P,A}(points, zeros(I, length(points)), [], [], [], [], [])
 	@inline CornerTable{I,P,A}() where{I,P,A} = CornerTable{I,P,A}(P[])
@@ -303,7 +286,7 @@ end
 
 # vertices ««3
 @inline corner(m::CornerTable, v::Vertex) = Corner(m.corner[Int(v)])
-@inline corner!(m::CornerTable, v::Vertex, c::Corner)= m.corner[Int(v)]=Int(c)
+@inline corner!(m::CornerTable, v::Vertex, c::Corner) = m.corner[Int(v)]=Int(c)
 @inline points(m::CornerTable) = m.points
 @inline point(m::CornerTable, v::Vertex) = m.points[Int(v)]
 @inline point!(m::CornerTable, v::Vertex, p) = m.points[Int(v)] = p
@@ -651,7 +634,7 @@ function findedge(m::CornerTable, u, v, w, clist, klist, i)#««
 	isisolated(c0) && return
 	# we can safely assume that vertex `u` has an explicit fan:
 	@assert issingular(c0) "vertex $u has corner $c0"
-# 	println("rotating around $u, looking for ($v, $w) (i=$i)")
+# 	println("rotating around $u/$(nvertices(m)), looking for ($v, $w) (i=$i)")
 	for k in fans(m, Fan(c0)), c in fancorners(m, k)
 		n = next(c); r = vertex(m, n)
 		p = prev(c); l = vertex(m, p)
@@ -892,7 +875,7 @@ end#»»
 # coplanar and opposite faces««2
 # returns the equivalence relation, as pairs of indices in `flist`:
 function coplanar_faces(m::CornerTable, flist, ε = 0)
-	@inline box(l,ε) = BBox(l, l .+ ε)
+	@inline box(l,ε) = SpatialSorting.Box(l, l .+ ε)
 	boxes = [ box(normalized_plane(m, f, absolute=true), ε) for f in flist ]
 	return SpatialSorting.intersections(boxes)
 end
@@ -1070,50 +1053,31 @@ function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
 end#»»
 # subtriangulation««1
 # project_and_triangulate ««2
-function project_and_triangulate(m::CornerTable, direction, vlist,elist=nothing)
-	# build matrix of coordinates according to `vlist`:
-	    if direction == 1 d = [2,3]
-	elseif direction ==-1 d = [3,2]
-	elseif direction == 2 d = [3,1]
-	elseif direction ==-2 d = [1,3]
-	elseif direction == 3 d = [1,2]
-	else @assert direction ==-3; d = [2,1]
-	end
-	vmat = Matrix{Float64}(undef, length(vlist), 2)
-	for (i, v) in pairs(vlist)
-		p = point(m, v)
-		vmat[i, 1] = p[d[1]]
-		vmat[i, 2] = p[d[2]]
-	end
+function project_and_triangulate(m::CornerTable, proj, vlist,elist, ε = 0)
+	plist = [ proj(point(m, v)) for v in vlist ]
+	elist2 = map(e->map(v->Int(searchsortedfirst(vlist, v)), e), elist)
 
-	vref = Int.(vlist)
+	SegmentGraphs.simplify!(plist, elist2, ε)
+	newpoints = inv(proj).(plist[length(vlist)+1:end])
+	vlist = [vlist; Vertex.(nvertices(m)+1:nvertices(m)+length(plist)-length(vlist))]
+	append_points!(m, newpoints)
 
-	if elist == nothing
-		tri = LibTriangle.basic_triangulation(vmat, vref)
-	else
-		emat = Matrix{Int}(undef, length(elist), 2)
-		emat[:,1] .= collect(Int(e[1]) for e in elist)
-		emat[:,2] .= collect(Int(e[2]) for e in elist)
-# 		println("triangulate: $vmat $vlist $emat")
-#=
-plot '/tmp/a' index 0 u 1:2 w p pt 5, '' index 1 u 1:2:3:4:0 w vectors lc palette lw 3, '' index 0 u 1:2:3 w labels font "bold,14"
-=#
-# 	println("### call to constrained_triangulation:")
+	# convert to format used by constrained_triangulation
+	vmat = [ p[i] for p in plist, i in 1:2 ]
+	emat = [ e[i] for e in elist2, i in 1:2 ]
+# 	io = open("/tmp/a", "w")
 # 	for (i, v) in pairs(vlist)
-# 		println("$(vmat[i,1])\t$(vmat[i,2])\t$v")
+# 		(x,y) = vmat[i,:]
+# 		println(io,"$x\t$y\t$v")
 # 	end
-# 	println("\n\n")
-# 	for i in 1:size(emat,1)
-# 		println("# edge $(emat[i,1])--$(emat[i,2])")
-# 		v1 = findfirst(==(Vertex(emat[i,1])), vlist)
-# 		v2 = findfirst(==(Vertex(emat[i,2])), vlist)
-# 		println("$(vmat[v1,1])\t$(vmat[v1,2])\t$(vmat[v2,1]-vmat[v1,1])\t$(vmat[v2,2]-vmat[v1,2])")
+# 	println(io,"\n\n")
+# 	for (i1, i2) in eachrow(emat)
+# 		(x1,y1) = vmat[i1,:]; (x2,y2) = vmat[i2,:]
+# 		println(io,"$x1\t$y1\t$(x2-x1)\t$(y2-y1) # $(vlist[i1])--$(vlist[i2])")
 # 	end
-# 	println("\n\n")
-		tri = LibTriangle.constrained_triangulation(vmat, vref, emat)
-	end
-
-	return ((Vertex(t[1]), Vertex(t[2]), Vertex(t[3])) for t in tri)
+# 	close(io)
+	tri = LibTriangle.constrained_triangulation(vmat, [1:length(plist)...], emat)
+	return [ (vlist[a], vlist[b], vlist[c]) for (a,b,c) in tri ]
 end
 
 # subtriangulate««2
@@ -1127,8 +1091,7 @@ function edge_inserts(m, in_edge)
 		stop = start
 		v1 = in_edge[start][1]
 		v2 = in_edge[start][2]
-		while stop <= length(in_edge) &&
-			in_edge[stop][1] == v1 && in_edge[stop][2] == v2
+		while stop≤length(in_edge) && in_edge[stop][1]==v1 && in_edge[stop][2]==v2
 			stop+= 1
 		end
 		# find best coordinate and sort
@@ -1168,7 +1131,7 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 		si.in_face[i] = map(x->get(vmap, x, x), si.in_face[i])
 	end
 	for i in eachindex(si.edges)
-		si.edges[i] = map(x->get(vmap, x, x), si.edges[i])
+		si.edges[i] = extrema(map(x->get(vmap, x, x), si.edges[i]))
 	end
 	# insert points in edges
 	in_edge = edge_inserts(m, si.in_edge)
@@ -1216,22 +1179,26 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 		
 	# iterate over all clusters of broken faces
 	for icluster in classes(clusters)
-		direction = main_axis(m, si.faces[first(icluster)])
+		f0 = si.faces[first(icluster)]
+		nf0 = normal(m, f0)
+		proj = Projector(nf0, point(m, vertex(m, corner(f0, Side(1)))))
+# 		direction = main_axis(m, si.faces[first(icluster)])
 
 		# type-stable versions of vcat:
 		allvertices = uniquesort!(reduce(vcat, view(in_face_v, icluster)))
 		alledges = uniquesort!(reduce(vcat, view(in_face_e, icluster)))
 
-# 		println("\e[1mcluster $icluster\e[m $direction $(in_face_v[icluster]) $(in_face_e[icluster])")
+
+		println("\e[1mcluster $icluster\e[m $proj\e[m")
 # 		for i in icluster; f = si.faces[i]; println(" $f: $(vertices(m,f)) $(main_axis(m,f)>0) $(in_face_v[i]) $([(Int(x),Int(y)) for (x,y) in in_face_e[i]])"); end
-		alltriangles = project_and_triangulate(m, abs(direction),
-			allvertices, alledges)
+
+		alltriangles = project_and_triangulate(m, proj, allvertices, alledges, ε)
 
 		# apply face refinement:
 		for i in icluster
 			f = si.faces[i]
 			a = attribute(m, f)
-			orient = main_axis(m,f) > 0
+			orient = main_axis(m,f) == main_axis(proj)
 			isfirst = true
 			for tri in alltriangles
 				issubset(tri, in_face_v[i]) || continue
@@ -1653,7 +1620,7 @@ function verbose(m::CornerTable, k::Fan)
 end
 function verbose(m::CornerTable)
 	global V=deepcopy(m)
-	println("\e[7mtable with $(ncorners(m)) corners, $(nvertices(m)) vertices, $(nfans(m)) fans:\e[m")
+	println("\e[7mtable with $(ncorners(m)) corners = $(nfaces(m)) faces, $(nvertices(m)) vertices, $(nfans(m)) fans:\e[m")
 	for v in allvertices(m)
 		c = corner(m, v)
 		if isisolated(c)
@@ -1663,8 +1630,8 @@ function verbose(m::CornerTable)
 			print("star = (", join(("$u" for u in star(m, c)),","), ")")
 			println()
 		else
-			println("\e[34;1m$v\e[m: singular (",
-				join(("$k (first=$(fan_first(m,k)))" for k in fans(m,Fan(c))), " "),")")
+			print("\e[34;1m$v\e[m: singular [$c] (")
+			println(join(("$k (first=$(fan_first(m,k)))" for k in fans(m,Fan(c))), " "),")")
 		end
 	end
 	for f in allfaces(m)

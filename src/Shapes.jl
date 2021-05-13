@@ -444,7 +444,8 @@ function triangulate(m::PolygonXor)#««
 		Matrix{Float64}([transpose.(v)...;]),
 		collect(1:length(v)), edges)
 	# remove triangle made entirely of hole vertices
-	return tri[[!all(is_hole[t]) for t in tri]]
+	return [ (t[1], t[2], t[3]) for t in tri if !all(is_hole[t]) ]
+# 	return tri[[!all(is_hole[t]) for t in tri]]
 end#»»
 # reconstruction from triangles
 # this is used by 3d->2d projection:

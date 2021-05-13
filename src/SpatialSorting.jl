@@ -24,6 +24,28 @@ The `boxes` may be of any type, as long as the following operations exist:
 module SpatialSorting
 using StaticArrays
 
+
+# Box type — one possible type that matches the module interface
+struct Box{P}
+	min::P
+	max::P
+	@inline Box{P}(min, max) where{P} = new{P}(min, max)
+	@inline Box(min, max) = Box{typeof(min)}(min, max)
+end
+
+@inline Base.eltype(::Type{Box{P}}) where{P} = P
+@inline Base.eltype(b::Box) = eltype(typeof(b))
+
+@inline Base.min(b::Box) = b.min; @inline Base.max(b::Box) = b.max
+@inline Base.:∈(x::AbstractVector, b::Box) = all(min(b) .≤ x .≤ max(b))
+@inline Base.isempty(b::Box) = any(min(b) .> max(b))
+@inline Base.intersect(a::Box, b::Box) =
+	Box((max.(min(a), min(b))), (min.(max(a), max(b))))
+
+@inline position(b::Box) = b.min + b.max
+@inline merge(b1::Box, b2::Box) =
+	Box{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
+
 @inline intersects(box1, box2) = !isempty(box1 ∩ box2)
 @inline position(box) =
 	error("you must implement `position` for type $(typeof(box))")

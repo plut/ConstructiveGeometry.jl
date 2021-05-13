@@ -725,8 +725,7 @@ function (g::Mesh)(s::LinearExtrude)
 	#  - bottom: identical to tri
 	#  - top: reverse of tri + n
 	#  - sides:
-	faces = [ tri;
-	  [ reverse(f) .+ n for f in tri ];
+	faces = [ reverse.(tri); [ f .+ n for f in tri ];
 	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	]
