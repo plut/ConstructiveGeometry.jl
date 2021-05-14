@@ -43,7 +43,7 @@ end
 	Box((max.(min(a), min(b))), (min.(max(a), max(b))))
 
 @inline position(b::Box) = b.min + b.max
-@inline merge(b1::Box, b2::Box) =
+@inline Base.merge(b1::Box, b2::Box) =
 	Box{eltype(b1)}(min.(b1.min, b2.min), max.(b1.max, b2.max))
 
 @inline intersects(box1, box2) = !isempty(box1 ∩ box2)

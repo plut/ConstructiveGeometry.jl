@@ -1119,7 +1119,7 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 	# first renumber points, removing duplicates, including in self-intersect:
 	append_points!(m, si.points)
 	vmap = simplify_points!(m, ε)
-	explain(m, "/tmp/x.scad", scale=30)
+	explain(m, "/tmp/x.scad", scale=3)
 
 	for i in eachindex(si.in_edge)
 		(u, v, w) = map(x->get(vmap, x, x), si.in_edge[i])
@@ -1175,33 +1175,61 @@ function subtriangulate!(m::CornerTable{I}, ε=0) where{I}
 			end
 		end
 	end
-	faces_tri = [ NTuple{3,Vertex{I}}[] for _ in si.faces ]
-		
 	# iterate over all clusters of broken faces
 	for icluster in classes(clusters)
 		f0 = si.faces[first(icluster)]
 		nf0 = normal(m, f0)
 		proj = Projector(nf0, point(m, vertex(m, corner(f0, Side(1)))))
-# 		direction = main_axis(m, si.faces[first(icluster)])
 
 		# type-stable versions of vcat:
 		allvertices = uniquesort!(reduce(vcat, view(in_face_v, icluster)))
 		alledges = uniquesort!(reduce(vcat, view(in_face_e, icluster)))
 
-
-		println("\e[1mcluster $icluster\e[m $proj\e[m")
 # 		for i in icluster; f = si.faces[i]; println(" $f: $(vertices(m,f)) $(main_axis(m,f)>0) $(in_face_v[i]) $([(Int(x),Int(y)) for (x,y) in in_face_e[i]])"); end
 
 		alltriangles = project_and_triangulate(m, proj, allvertices, alledges, ε)
-
+# 			println("\e[1mcluster $icluster\e[m $proj\e[m")
+# 			for i in icluster; f = si.faces[i]; println("  $f: $(vertices(m,f)) $(in_face_v[i])"); end
+# 			println("triangles: $alltriangles")
+		# determine which points are inside which face:
+		ftri = [ proj.(triangle(m,f)) for f in view(si.faces, icluster) ]
+		boxes = Vector{SpatialSorting.Box{eltype(eltype(ftri))}}(undef,
+			length(allvertices)+length(icluster))
+		for (i,v) in pairs(allvertices)
+			p = proj(point(m, v))
+			boxes[i] = SpatialSorting.Box(p, p .+ ε)
+		end
+		for (i, t) in pairs(ftri)
+			boxes[i+length(allvertices)] = boundingbox(t...)
+		end
+		vlist = [ Vertex{I}[] for _ in icluster ]
+		for (i, j) in extrema.(SpatialSorting.intersections(boxes))
+			j -= length(allvertices)
+			(i ≤ length(allvertices) && j > 0) || continue
+			# vertex i is inside bounding box of face i
+			v = allvertices[i]
+			p = proj(point(m, v))
+			(a, b, c) = (ftri[j][1] - p, ftri[j][2] - p, ftri[j][3] - p)
+			f = si.faces[icluster[j]]
+			if main_axis(m,f) == main_axis(proj)
+				a[1]*b[2]-a[2]*b[1] ≥ -ε || continue
+				b[1]*c[2]-b[2]*c[1] ≥ -ε || continue
+				c[1]*a[2]-c[2]*a[1] ≥ -ε || continue
+			else
+				a[1]*b[2]-a[2]*b[1] ≤ -ε || continue
+				b[1]*c[2]-b[2]*c[1] ≤ -ε || continue
+				c[1]*a[2]-c[2]*a[1] ≤ -ε || continue
+			end
+			push!(vlist[j], v)
+		end
 		# apply face refinement:
-		for i in icluster
+		for (k, i) in pairs(icluster)
 			f = si.faces[i]
 			a = attribute(m, f)
 			orient = main_axis(m,f) == main_axis(proj)
 			isfirst = true
 			for tri in alltriangles
-				issubset(tri, in_face_v[i]) || continue
+				issubset(tri, vlist[k]) || continue
 				orient || (tri = reverse(tri))
 				if isfirst
 					cut_face!(m, f); isfirst = false
@@ -1439,7 +1467,7 @@ function multiplicity(m::CornerTable{I}) where{I}#««
 		v2 = right(m, c0)
 		olist = [right(m, c) == v2 for c in clist]
 		p1 = plist[1]; o1 = olist[1]
-# 		println("sorted radial loop is $clist")
+# 		println("\e[35;1mcomp ($i1, $i2), corner $c0\e[m sorted radial loop is $clist")
 # 		for i in 1:n
 # 			println("  $(clist[i]) $(olist[i]):   face $(face(clist[i]))=$(vertices(m,face(clist[i])))  p$(plist[i])")
 # 		end
