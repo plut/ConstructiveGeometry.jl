@@ -10,6 +10,9 @@ The following functions are provided (not exported):
    computed from the given boxes.
  * `search(tree, box)`: returns the vector of indices of those `boxes`
    which intersect the `box` parameter.
+ * `duplicates(points, ε)`: returns the set of all indexes of pairs of
+   ε-duplicate points.
+ * `inclusions(points, boxes, ε)`
 
 The `tree` function has an average-time quasi-linear complexity
 (w.r.to the number of boxes), while `search(tree, box)` is quasi-constant.
@@ -218,6 +221,28 @@ function intersections(boxes)
 		end
 	end
 	return r
+end
+
+"""
+    SpatialSorting.duplicates(points, ε)
+
+Returns the set of pairs of duplicate points (up to ε in ∞-norm)
+in the given list.
+"""
+function duplicates(points, ε = 0)
+	boxes = [ SpatialSorting.Box(p, p .+ ε) for p in points ]
+	# `extrema` guarantees that all pairs (i,j) are sorted i < j
+	return extrema.(intersections(boxes))
+end
+"""
+    SpatialSorting.inclusions(points, boxes, ε)
+
+Returns the set of indices (i, j) such that point[i] ∈ box[j].
+"""
+function inclusions(points, boxes, ε)
+	allboxes = vcat([ Box(p, p .+ ε) for p in points ], boxes)
+	n = length(points)
+	return ((i, j-n) for (i,j) in extrema.(intersections(boxes)) if (i≤n && j>n))
 end
 
 Base.show(io::IO, t::BoxTree) = print_tree(io, t)

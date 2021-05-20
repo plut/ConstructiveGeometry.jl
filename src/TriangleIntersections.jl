@@ -245,6 +245,37 @@ macro permute3!(i,vars)#««2
 		end
 	end
 end
+# degeneracy test««2
+"""
+    degeneracy(triangle, ε²)
+
+Returns an encoding of the degeneracy type of `triangle`, as a constant:
+ - `vertex1` if vertex 1 is less than ε from opposite edge,
+ - `edge1` if edge 1 has length less than ε,
+ - `interior` if at least two edges are shorter than ε,
+ - `invalid` if the triangle is nondegenerate.
+"""
+function degeneracy(triangle, ε² = 0)
+	(a, b, c) = triangle
+	bc=c-b; bc²=dot(bc,bc)
+	ca=a-c; ca²=dot(ca,ca)
+	ab=b-a; ab²=dot(ab,ab)
+	if ab² ≤ ε²
+		(bc² ≤ ε² || ca² ≤ ε²) && return Constants.interior # a ≈ b ≈ c
+		return Constants.edge3 # a ≈ b
+	elseif bc² ≤ ε²
+		ca² ≤ ε² && return Constants.interior
+		return Constants.edge1
+	elseif ca² ≤ ε²
+		return Constants.edge2
+	end
+	abc = norm(cross(ab, bc)); abc² = abc*abc
+
+	abc² ≤ ε²*bc² && return Constants.vertex1 # a ∈ ]bc[
+	abc² ≤ ε²*ca² && return Constants.vertex2
+	abc² ≤ ε²*ab² && return Constants.vertex3
+	return Constants.invalid # not degenerate
+end
 # 2d intersections««1
 @inline det2(u,v)=u[1]*v[2]-u[2]*v[1]
 @inline det2(p,q,r)=det2(q-p,r-p)
@@ -263,6 +294,7 @@ function inter_segment2_halfplane(it::IntersectionData, halfplane, t; ε=0)
 	d1 = det2(p,q,u1)
 	if length(it) == 1
 		d1 <-ε && return ID()
+		d1 ≤ ε && (Int(b1)|Int(t) == 7) && println("b1=$b1, t=$t")
 		d1 ≤ ε && return ID(u1 => (a1, b1|t))
 		return ID(u1 => (a1, b1))
 	end
@@ -359,10 +391,7 @@ function inter(tri1::NTuple{3,SVector{3,T}}, tri2::NTuple{3,SVector{3,T}},
 	# loosely inspired by
 	# [Devillers, Guigue, _Faster triangle-triangle intersection tests_;
 	#   https://hal.inria.fr/inria-00072100/document]
-# 	@debug "computing triangle-triangle intersection\n($p1,$q1,$r1)\n($p2,$q2,$r2)"
 
-	# return type:
-	V=SVector{3,T}
 	(p1,q1,r1) = tri1
 	(p2,q2,r2) = tri2
 	ID = IntersectionData{6,typeof(p1)}
@@ -563,10 +592,8 @@ function inter_arrow((p1,q1,r1), turn, (p2,q2,r2), flip,
 	proj = Projector(normal2, p2)
 	ID = IntersectionData{6,typeof(p1)}
 	@assert abs(zp1) ≤ ε
-# 	@debug "arrow($i1,$i2): $p2,$q2,$r2; $normal2 -> $(proj.dir)"
 
 	(a1,b1,c1,a2,b2,c2) = proj.((p1,q1,r1,p2,q2,r2))
-# 	@debug "$a2,$b2,$c2"
 	dpqr = abs(normal2[abs(proj.dir)])
 	# we know that interior of segment (q1,r1) intersects plane 2:
 	v = barycenter(b1, c1, zr1/(zr1-zq1))
@@ -577,14 +604,12 @@ function inter_arrow((p1,q1,r1), turn, (p2,q2,r2), flip,
 	w1 = (u1 == Constants.edge12) ? Constants.interior :
 		(u1 == Constants.vertex1) ? Constants.vertex1<<turn :
 		Constants.edge23<<turn
-# 	w1 = (u1 == 0) ? 0 : (u1 == 1) ? (i1+3) : i1
 	length(it) == 1 && return ID(z1 => (w1, v1))
 
 	(pt2, (u2,v2)) = it[2]; z2 = inv(proj)(pt2)
 	w2 = (u2 == Constants.edge12) ? Constants.interior :
 		(u2 == Constants.vertex1) ? Constants.vertex1<<turn :
 		Constants.edge23<<turn
-# 	w2 = (u2 == 0) ? 0 : (u2 == 1) ? (i1+3) : i1
 	return ID(z1 => (w1, v1), z2 => (w2, v2))
 end
 # inter_border ««2
@@ -598,9 +623,7 @@ function inter_border((p1,q1,r1), i1, (p2,q2,r2), normal2, ε)
 	ID = IntersectionData{6,typeof(p1)}
 	proj = Projector(normal2, p2)
 	(u1,v1,a2,b2,c2) = proj.((q1,r1,p2,q2,r2))
-# 	@debug "in inter_border\n($q1,$r1)\n($p2,$q2,$r2)\nproj=$proj"
 	dpqr = abs(normal2[abs(proj.dir)])
-# 	@debug "in inter_border to segment\n($u1,$v1)\n($a2,$b2,$c2)"
 	it = inter_segment2_triangle2((u1,v1), (a2,b2,c2); ε)
 	it3 = ID(undef, length(it))
 	for i in 1:length(it)
