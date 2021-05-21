@@ -30,6 +30,7 @@ using StaticArrays
 using LinearAlgebra
 using FastClosures
 using DataStructures
+using StructArrays
 module LibTriangle
 	using Triangle
 end
@@ -172,29 +173,49 @@ fan->nextfan, firstcorner, vertex (+3nv)
 corner -> fan, opposite (+2*6nv)
 total = 16*nv+O(1); +23%
 """
-struct CornerTable{I<:Signed,P,A} # I is index type (integer), P is point type
-	points::Vector{P}
-	corner::Vector{I}
-	vertex::Vector{I}
-	opposite::Vector{I}
-	fan_next::Vector{I}
-	fan_first::Vector{I}
+struct CornerTable{I<:Signed,P,A,VS<:StructArray,CS<:StructArray,KS<:StructArray}
+	vertex::VS
+	corner::CS
+	fan::KS
 	attribute::Vector{A}
-	@inline CornerTable{I,P,A}(points, opp, dest, ef, cn=[], cs=[],a=[]) where{I,P,A} = # TEMPORARY
-		new{I,P,A}(points, opp, dest, ef, cn, cs,a)
-	@inline CornerTable(points, opp, dest, ef, cn, cs, a) = 
-		CornerTable{Int,eltype(points),eltype(a)}(points, opp, dest, ef, cn, cs, a)
+	@inline CornerTable{I,P,A}(vertex::VS, corner::CS, fan::KS,
+			attribute::AbstractVector{A}) where{I,P,A,VS<:StructArray,
+			CS<:StructArray, KS<:StructArray} =
+		new{I,P,A,VS,CS,KS}(vertex, corner, fan, attribute)
 	@inline CornerTable{I,P,A}(points::AbstractVector) where{I,P,A} =
-		new{I,P,A}(points, zeros(I, length(points)), [], [], [], [], [])
+		CornerTable{I,P,A}(
+			StructArray((point=points, fan=zeros(I,length(points)))),
+			StructArray((opposite=I[], fan=I[])),
+			StructArray((next=I[], corner=I[], vertex=I[])),
+			A[])
 	@inline CornerTable{I,P,A}() where{I,P,A} = CornerTable{I,P,A}(P[])
 	@inline CornerTable{I}(points::AbstractVector) where{I} =
 		CornerTable{I,eltype(points),Nothing}(points)
 	@inline CornerTable(points::AbstractVector) = CornerTable{Int}(points)
-	# Possible extensions:
-	# - fan[corner]: number of the (unique) fan containing this corner
-	#   (we don't keep it: for a manifold mesh, it's a big table of zeros)
-	# - fan_prev[fan]: to make the list doubly-chained
 end
+# struct CornerTable{I<:Signed,P,A} # I is index type (integer), P is point type
+# 	points::Vector{P}
+# 	corner::Vector{I}
+# 	vertex::Vector{I}
+# 	opposite::Vector{I}
+# 	fan_next::Vector{I}
+# 	fan_first::Vector{I}
+# 	attribute::Vector{A}
+# 	@inline CornerTable{I,P,A}(points, opp, dest, ef, cn=[], cs=[],a=[]) where{I,P,A} = # TEMPORARY
+# 		new{I,P,A}(points, opp, dest, ef, cn, cs,a)
+# 	@inline CornerTable(points, opp, dest, ef, cn, cs, a) = 
+# 		CornerTable{Int,eltype(points),eltype(a)}(points, opp, dest, ef, cn, cs, a)
+# 	@inline CornerTable{I,P,A}(points::AbstractVector) where{I,P,A} =
+# 		new{I,P,A}(points, zeros(I, length(points)), [], [], [], [], [])
+# 	@inline CornerTable{I,P,A}() where{I,P,A} = CornerTable{I,P,A}(P[])
+# 	@inline CornerTable{I}(points::AbstractVector) where{I} =
+# 		CornerTable{I,eltype(points),Nothing}(points)
+# 	@inline CornerTable(points::AbstractVector) = CornerTable{Int}(points)
+# 	# Possible extensions:
+# 	# - fan[corner]: number of the (unique) fan containing this corner
+# 	#   (we don't keep it: for a manifold mesh, it's a big table of zeros)
+# 	# - fan_prev[fan]: to make the list doubly-chained
+# end
 
 @inline index_type(::Type{<:CornerTable{I}}) where{I} = I
 @inline index_type(m::CornerTable{I}) where{I} = I
@@ -205,36 +226,49 @@ point_type(m::CornerTable) = point_type(typeof(m))
 
 # size and resizing functions««2
 # vertices««3
-@inline nvertices(m::CornerTable) = length(m.points)
-@inline lastvertex(m::CornerTable{I}) where{I} = Vertex{I}(nvertices(m))
-@inline function nvertices!(m::CornerTable, nv::Integer)
-	resize!(m.points, nv)
-	resize!(m.corner, nv)
-	return m
-end
-@inline function verticeshint!(m::CornerTable, nv::Integer)
-	sizehint!(m.points, nv)
-	sizehint!(m.corner, nv)
-	return m
-end
+@inline nvertices(m::CornerTable) = length(m.vertex)
+@inline nvertices!(m::CornerTable, n::Integer) = (resize!(m.vertex, n); m)
+@inline verticeshint!(m::CornerTable, n::Integer) = (sizehint!(m.vertex, n); m)
+# @inline nvertices(m::CornerTable) = length(m.points)
+# @inline lastvertex(m::CornerTable{I}) where{I} = Vertex{I}(nvertices(m))
+# @inline function nvertices!(m::CornerTable, nv::Integer)
+# 	resize!(m.points, nv)
+# 	resize!(m.corner, nv)
+# 	return m
+# end
+# @inline function verticeshint!(m::CornerTable, nv::Integer)
+# 	sizehint!(m.points, nv)
+# 	sizehint!(m.corner, nv)
+# 	return m
+# end
 @inline allvertices(m::CornerTable) = (Vertex(v) for v in 1:nvertices(m))
 # faces««3
-@inline ncorners(m::CornerTable) = length(m.opposite)
-@inline nfaces(m::CornerTable) = length(m.opposite) ÷ 3
-@inline lastface(m::CornerTable{I}) where{I} = Face{I}(nfaces(m))
-@inline function ncorners!(m::CornerTable, nc::Integer)
-	resize!(m.opposite, nc)
-	resize!(m.vertex, nc)
-	resize!(m.attribute, nc ÷ 3)
-	return m
-end
-@inline nfaces!(m::CornerTable, nf::Integer) = ncorners!(m, 3nf)
-@inline function faceshint!(m::CornerTable, nf::Integer)
-	sizehint!(m.opposite, 3nf)
-	sizehint!(m.vertex, 3nf)
-	sizehint!(m.attribute, nf)
-	return m
-end
+# @inline ncorners(m::CornerTable) = length(m.corner)
+# @inline ncorners!(m::CornerTable, n) =
+# 	(resize!(m.corners, n); resize!(m.attribute, n÷3); m)
+@inline nfaces(m::CornerTable) = ncorners(m) ÷ 3
+@inline nfaces!(m::CornerTable, n) =
+	(resize!(m.corners, 3n); resize!(m.attribute, n); m)
+@inline faceshint!(m::CornerTable, n) =
+	(sizehint!(m.corners, 3n); sizehint!(m.attribute, 3n); m)
+
+
+# @inline ncorners(m::CornerTable) = length(m.opposite)
+# @inline nfaces(m::CornerTable) = length(m.opposite) ÷ 3
+# @inline lastface(m::CornerTable{I}) where{I} = Face{I}(nfaces(m))
+# @inline function ncorners!(m::CornerTable, nc::Integer)
+# 	resize!(m.opposite, nc)
+# 	resize!(m.vertex, nc)
+# 	resize!(m.attribute, nc ÷ 3)
+# 	return m
+# end
+# @inline nfaces!(m::CornerTable, nf::Integer) = ncorners!(m, 3nf)
+# @inline function faceshint!(m::CornerTable, nf::Integer)
+# 	sizehint!(m.opposite, 3nf)
+# 	sizehint!(m.vertex, 3nf)
+# 	sizehint!(m.attribute, nf)
+# 	return m
+# end
 @inline attribute(m::CornerTable, f::Face) = m.attribute[Int(f)]
 @inline attribute!(m::CornerTable, f::Face, a) = m.attribute[Int(f)] = a
 @inline attribute!(m::CornerTable, a) =
@@ -243,37 +277,46 @@ end
 @inline allcorners(m::CornerTable) = (Corner(c) for c in 1:length(m.opposite))
 @inline allfaces(m::CornerTable) = (Face(f) for f in 1:nfaces(m))
 # fans««3
-@inline nfans(m::CornerTable) = length(m.fan_first)
-@inline lastfan(m::CornerTable{I}) where{I} = Fan{I}(nfans(m))
-@inline function nfans!(m::CornerTable, nk::Integer)
-	resize!(m.fan_first, nk)
-	resize!(m.fan_next, nk)
-	return m
-end
-@inline function fanshint!(m::CornerTable, nk::Integer)
-	sizehint!(m.fan_first, nk)
-	sizehint!(m.fan_next, nk)
-	return m
-end
+@inline nfans(m::CornerTable) = length(m.fan)
+@inline nfans!(m::CornerTable, n::Integer) = (resize!(m.fan, n); m)
+@inline fanshint!(m::CornerTable, n::Integer) = (sizehint!(m.fan, n); m)
+# @inline nfans(m::CornerTable) = length(m.fan_first)
+# @inline lastfan(m::CornerTable{I}) where{I} = Fan{I}(nfans(m))
+# @inline function nfans!(m::CornerTable, nk::Integer)
+# 	resize!(m.fan_first, nk)
+# 	resize!(m.fan_next, nk)
+# 	return m
+# end
+# @inline function fanshint!(m::CornerTable, nk::Integer)
+# 	sizehint!(m.fan_first, nk)
+# 	sizehint!(m.fan_next, nk)
+# 	return m
+# end
 @inline allfans(m::CornerTable) = (Fan(k) for k in 1:nfans(m))
 
 # simple accessors ««2
 # corners ««3
 @inline next(c::Corner) = Corner(Int(c)+1 - 3*(Int(c)%3==0))
 @inline prev(c::Corner) = Corner(Int(c)-1 + 3*(Int(c)%3==1))
-@inline opposite(m::CornerTable, c::Corner) = Corner(m.opposite[Int(c)])
+@inline getc(m::CornerTable, c::Corner) = LazyRow(m.corner, Int(c))
+@inline opposite(m::CornerTable, c::Corner) = Corner(getc(m, c).opposite)
 @inline opposite!(m::CornerTable, c::Corner, x::Corner) =
-	m.opposite[Int(c)] = Int(x)
-@inline vertex(m::CornerTable, c::Corner) = Vertex(m.vertex[Int(c)])
-@inline vertex!(m::CornerTable, c::Corner, v::Vertex) =
-	m.vertex[Int(c)] = Int(v)
-@inline right(m::CornerTable, c::Corner) = vertex(m, next(c))
-@inline left(m::CornerTable, c::Corner) = vertex(m, prev(c))
+	getc(m, c).opposite = Int(x)
+@inline fan(m::CornerTable, c::Corner) = Fan(getc(m, c).fan)
+@inline fan!(m::CornerTable, c::Corner, k::Fan) = getc(m, c).fan = Int(k)
+
+# @inline vertex(m::CornerTable, c::Corner) = Vertex(m.vertex[Int(c)])
+# @inline vertex!(m::CornerTable, c::Corner, v::Vertex) =
+# 	m.vertex[Int(c)] = Int(v)
+# @inline getv(m::CornerTable, v::Vertex) = LazyRow(m.vertex, Int(v))
+@inline apex(m::CornerTable, c::Corner) = corner(m, fan(m, c))
+@inline right(m::CornerTable, c::Corner) = apex(m, next(c))
+@inline left(m::CornerTable, c::Corner) = apex(m, prev(c))
 @inline base(m::CornerTable, c::Corner) = (right(m, c), left(m, c))
-@inline after(m::CornerTable, c::Corner) = next(opposite(m, next(c)))
-@inline after!(m::CornerTable, c::Corner, x::Corner) =
-	opposite!(m, next(c), prev(x))
-@inline before(m::CornerTable, c::Corner) = prev(opposite(m, prev(c)))
+# @inline after(m::CornerTable, c::Corner) = next(opposite(m, next(c)))
+# @inline after!(m::CornerTable, c::Corner, x::Corner) =
+# 	opposite!(m, next(c), prev(x))
+# @inline before(m::CornerTable, c::Corner) = prev(opposite(m, prev(c)))
 
 # properties of opposite(c)
 @inline issimple(c::Corner) = Int(c) > 0
@@ -287,20 +330,20 @@ end
 @inline corners(f::Face) =
 	(corner(f,Side(1)), corner(f,Side(2)), corner(f,Side(3)))
 
-@inline vertex(m::CornerTable, f::Face, s::Side) = vertex(m, corner(f,s))
+@inline vertex(m::CornerTable, f::Face, s::Side) = apex(m, corner(f,s))
 @inline point(m::CornerTable, f::Face, s::Side) = point(m, vertex(m, f, s))
 @inline vertices(m::CornerTable, f::Face) =
 	(vertex(m,f,Side(1)), vertex(m,f,Side(2)), vertex(m,f,Side(3)))
 @inline edge(m::CornerTable, f::Face, s::Side) = base(m, corner(f, s))
-@inline faces(m::CornerTable{I}) where{I} = reinterpret(NTuple{3,I}, m.vertex)
-@inline facevertices(m::CornerTable) =
-	(Face(f) => vertices(m,Face(f)) for f in 1:nfaces(m))
-@inline function vertices!(m::CornerTable, f::Face, tri::NTuple{3,<:Vertex})
-	vertex!(m, corner(f,Side(1)), tri[1])
-	vertex!(m, corner(f,Side(2)), tri[2])
-	vertex!(m, corner(f,Side(3)), tri[3])
-	return m
-end
+@inline faces(m::CornerTable) = (vertices(m, f) for f in allfaces(m))
+# @inline facevertices(m::CornerTable) =
+# 	(Face(f) => vertices(m,Face(f)) for f in 1:nfaces(m))
+# @inline function vertices!(m::CornerTable, f::Face, tri::NTuple{3,<:Vertex})
+# 	vertex!(m, corner(f,Side(1)), tri[1])
+# 	vertex!(m, corner(f,Side(2)), tri[2])
+# 	vertex!(m, corner(f,Side(3)), tri[3])
+# 	return m
+# end
 
 @inline adjacent(m::CornerTable, f::Face, s::Side) =
 	face(opposite(m, corner(f, s)))
@@ -310,11 +353,15 @@ end
 	any(==(f2), adjacent(m, f1))
 
 # vertices ««3
-@inline corner(m::CornerTable, v::Vertex) = Corner(m.corner[Int(v)])
-@inline corner!(m::CornerTable, v::Vertex, c::Corner) = m.corner[Int(v)]=Int(c)
-@inline points(m::CornerTable) = m.points
-@inline point(m::CornerTable, v::Vertex) = m.points[Int(v)]
-@inline point!(m::CornerTable, v::Vertex, p) = m.points[Int(v)] = p
+@inline getv(m::CornerTable, v::Vertex) = LazyRow(m.corner, Int(v))
+@inline fan(m::CornerTable, v::Vertex) = Fan(getv(m, v).fan)
+@inline fan!(m::CornerTable, v::Vertex, k::Fan) = getv(m,v).fan= Int(k)
+@inline point(m::CornerTable, v::Vertex) = getv(m, v).point
+@inline point!(m::CornerTable, v::Vertex, p) = getv(m, v).point = p
+@inline points(m::CornerTable) = m.vertex.point
+# @inline corner(m::CornerTable, v::Vertex) = Corner(m.corner[Int(v)])
+# @inline corner!(m::CornerTable, v::Vertex, c::Corner) = m.corner[Int(v)]=Int(c)
+# @inline points(m::CornerTable) = m.points
 
 @inline triangle(m::CornerTable, f::Face) =
 	(point(m, f, Side(1)), point(m,f,Side(2)), point(m,f,Side(3)))
@@ -332,41 +379,31 @@ function normalized_plane(m::CornerTable, f::Face; absolute=false)
 	return SA[oftype(c, a), project2d(a, d) .* c..., dot(d, t[1])*c]
 end
 # manifold without boundary:
-@inline ismanifold(m::CornerTable) = all(m.corner .> 0) && all(m.opposite .> 0)
+# @inline ismanifold(m::CornerTable) = all(m.corner .> 0) && all(m.opposite .> 0)
 @inline volume(m::CornerTable) =
 	nfaces(m) > 0 ? sum(dot(u, cross(v, w)) for (u,v,w) in triangles(m))/6 :
 	zero(eltype(point_type(m)))
 
 # fans ««3
-# properties of `corner(::Vertex)`:
-@inline issingular(c::Corner) = Int(c) < 0
-@inline isregular(c::Corner) = Int(c) > 0
-@inline isisolated(c::Corner) = Int(c) == 0
+@inline getk(m::CornerTable, k::Fan) = LazyRow(m.fan, Int(k))
+@inline nextfan(m::CornerTable, k::Fan) = getk(m, k).next
+@inline nextfan!(m::CornerTable, k::Fan, x::Fan) = getk(m, k).next = Int(x)
+@inline fanstart(m::CornerTable, k::Fan) = getk(m, k).start
+@inline fanstart!(m::CornerTable, k::Fan, x::Integer) = getk(m, k).start = x
+@inline vertex(m::CornerTable, k::Fan) = getk(m, k).vertex
+@inline vertex!(m::CornerTable, k::Fan, v::Vertex) = getk(m, k).vertex = Int(v)
 
-@inline fan_next(m::CornerTable, k::Fan) = Fan(m.fan_next[Int(k)])
-@inline fan_next!(m::CornerTable, k::Fan, x::Fan) = m.fan_next[Int(k)] = Int(x)
-
-@inline Fan(c::Corner) = Fan(-Int(c))
-@inline Corner(k::Fan) = Corner(-Int(k))
 @inline isclosedfan(c::Int) = Int(c) > 0
 @inline isopenfan(c::Int) = Int(c) < 0
 @inline fan_open(c::Corner)   = -Int(c)
 @inline fan_closed(c::Corner) = +Int(c)
 
 const implicitfan = Fan(0)
-@inline fan_first(m::CornerTable, k::Fan) = m.fan_first[Int(k)]
-@inline fan_first!(m::CornerTable, k::Fan, x::Integer) = m.fan_first[Int(k)]= x
-@inline fan_firstcorner(m::CornerTable, k::Fan) = Corner(abs(fan_first(m,k)))
-@inline fanvertex(m::CornerTable, k::Fan) = vertex(m, fan_firstcorner(m, k))
+# @inline fan_first(m::CornerTable, k::Fan) = m.fan_first[Int(k)]
+# @inline fan_first!(m::CornerTable, k::Fan, x::Integer) = m.fan_first[Int(k)]= x
+# @inline fan_firstcorner(m::CornerTable, k::Fan) = Corner(abs(fan_first(m,k)))
+# @inline fanvertex(m::CornerTable, k::Fan) = vertex(m, fan_firstcorner(m, k))
 
-function fan_prev(m::CornerTable, k::Fan)
-	k2 = k
-	while true
-		u = fan_next(m, k2)
-		u == k && return k2
-		k2 = u
-	end
-end
 # multiple edges««3
 @inline Multi(c::Corner) = Corner(-Int(c))
 # create multiple edge - from (at least two) half-edges:
@@ -401,19 +438,35 @@ end
 @inline Base.eltype(::MeshIterator{S,I,T}) where{S,I,T} = T
 @inline Base.IteratorSize(::MeshIterator) = Base.SizeUnknown()
 
-@inline star(m::CornerTable, c::Corner) = MeshIterator{star}(m, c)
-@inline star(m::CornerTable, v::Vertex) = MeshIterator{star}(m, corner(m, v))
-@inline next(it::MeshIterator{star}, m, c) = after(m, c)
-@inline stop(it::MeshIterator{star}, m, c) = c == it.start
 
-@inline fans(m::CornerTable, k::Fan) = MeshIterator{fans}(m, k)
-@inline next(it::MeshIterator{fans}, m, k) = fan_next(m, k)
+@inline star(m::CornerTable, k::Fan) =
+	MeshIterator{star}(m, Corner(abs(fanstart(m, k))))
+# @inline star(m::CornerTable, c::Corner) = MeshIterator{star}(m, c)
+# @inline star(m::CornerTable, v::Vertex) = MeshIterator{star}(m, corner(m, v))
+@inline next(it::MeshIterator{star}, m, c) = after(m, c)
+@inline stop(it::MeshIterator{star}, m, c) = (c==it.start)||!issimple(c)
+
+@inline fans(m::CornerTable, v::Vertex) = MeshIterator{fans}(m, fan(m, v))
+@inline next(it::MeshIterator{fans}, m, k) = nextfan(m, k)
 @inline stop(it::MeshIterator{fans}, m, k) = k == it.start
 
-@inline fancorners(m::CornerTable, k::Fan) =
-	MeshIterator{fancorners}(m, Corner(abs(fan_first(m, k))))
-@inline next(it::MeshIterator{fancorners}, m, c) = after(m, c)
-@inline stop(it::MeshIterator{fancorners}, m, c) = (c==it.start)||!issimple(c)
+function prevfan(m::CornerTable, k::Fan)
+	k2 = k
+	while true
+		u = nextfan(m, k2)
+		u == k && return k2
+		k2 = u
+	end
+end
+
+# @inline fans(m::CornerTable, k::Fan) = MeshIterator{fans}(m, k)
+# @inline next(it::MeshIterator{fans}, m, k) = fan_next(m, k)
+# @inline stop(it::MeshIterator{fans}, m, k) = k == it.start
+# 
+# @inline fancorners(m::CornerTable, k::Fan) =
+# 	MeshIterator{fancorners}(m, Corner(abs(fan_first(m, k))))
+# @inline next(it::MeshIterator{fancorners}, m, c) = after(m, c)
+# @inline stop(it::MeshIterator{fancorners}, m, c) = (c==it.start)||!issimple(c)
 
 @inline radial(m::CornerTable, c::Corner) = MeshIterator{radial}(m, c)
 @inline next(it::MeshIterator{radial}, m, c) = Multi(opposite(m, c))
@@ -427,30 +480,30 @@ end
 	end
 end
 
-"iterator on (fans, corners) around a given vertex"
-@inline function vertexcorners(m::CornerTable, v::Vertex)
-	c0 = corner(m, v)
-	isregular(c0) && return ((implicitfan, c) for c in star(m, c0))
-	isisolated(c0) && return ((implicitfan, c0) for _ in 1:0)
-	return ((k,c) for k in fans(m, Fan(c0)) for c in fancorners(m, k))
-end
-
-"finds in which fan a corner lies"
-function fan(m::CornerTable, c0::Corner)
-	v = vertex(m, c0)
-	c1 = corner(m, v)
-	issingular(c1) || return implicitfan
-	for k in fans(m, Fan(c1)), c in fancorners(m, k)
-		c == c0 && return k
-	end
-	return implicitfan
-end
-
-function fan_lastcorner(m::CornerTable, k::Fan)
-	c0 = fan_first(m, k)
-	for c in fancorners(m, k);  c0 = c; end
-	return c0
-end
+# "iterator on (fans, corners) around a given vertex"
+# @inline function vertexcorners(m::CornerTable, v::Vertex)
+# 	c0 = corner(m, v)
+# 	isregular(c0) && return ((implicitfan, c) for c in star(m, c0))
+# 	isisolated(c0) && return ((implicitfan, c0) for _ in 1:0)
+# 	return ((k,c) for k in fans(m, Fan(c0)) for c in fancorners(m, k))
+# end
+# 
+# "finds in which fan a corner lies"
+# function fan(m::CornerTable, c0::Corner)
+# 	v = vertex(m, c0)
+# 	c1 = corner(m, v)
+# 	issingular(c1) || return implicitfan
+# 	for k in fans(m, Fan(c1)), c in fancorners(m, k)
+# 		c == c0 && return k
+# 	end
+# 	return implicitfan
+# end
+# 
+# function fan_lastcorner(m::CornerTable, k::Fan)
+# 	c0 = fan_first(m, k)
+# 	for c in fancorners(m, k);  c0 = c; end
+# 	return c0
+# end
 
 # mesh modification««1
 # move_xxx(m, x, y): moves object from index x to index y, overwriting
@@ -458,24 +511,16 @@ end
 # delete_xxx(m, x):  deletes object at index x (by moving last onto it)
 # vertices««2
 function append_points!(m::CornerTable, plist)#««
-	if Base.IteratorSize(plist) ≠ Base.SizeUnknown()
+	Base.IteratorSize(plist) ≠ Base.SizeUnknown() &&
 		verticeshint!(m, nvertices(m) + length(plist))
-	end
-	for p in plist
-		push!(m.points, p)
-		push!(m.corner, 0)
-	end
-	return m
+	push!(m.vertex, ((point=p, fan=0) for p in plist)...)
 end#»»
-@inline function move_vertex!(m::CornerTable, v::Vertex, x::Vertex, l=nothing)
-	for (_,c) in vertexcorners(m, v)
+@inline function rename_vertex!(m::CornerTable, v::Vertex, x::Vertex, l=nothing)
+	for c in corners(m, fan(m, v))
 		vertex!(m, c, x)
 	end
 	l ≠ nothing && replace!(l, v=>x)
-end
-@inline function move_point!(m::CornerTable, v::Vertex, x::Vertex, l=nothing)
-	move_vertex!(m, v, x, l)
-	corner!(m, x, corner(m, v))
+	fan!(m, x, fan(m, v))
 	point!(m, x, point(m,v))
 end
 "deletes O(1) vertices at once, by moving the last ones to their place"
@@ -483,7 +528,7 @@ function delete_vertex!(m::CornerTable, vlist::Vertex...)
 	vlist = MVector(vlist)
 	n = nvertices(m)
 	for (i, v) in pairs(vlist)
-		Int(v) ≠ n && move_point!(m, Vertex(n), v, vlist[i+1:end])
+		Int(v)≠n && rename_point!(m, Vertex(n), v, view(vlist, i+1:length(vlist)))
 		n-= 1
 	end
 	nvertices!(m, n)
