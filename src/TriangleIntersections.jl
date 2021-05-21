@@ -262,12 +262,12 @@ function degeneracy(triangle, ε² = 0)
 	ab=b-a; ab²=dot(ab,ab)
 	if ab² ≤ ε²
 		(bc² ≤ ε² || ca² ≤ ε²) && return Constants.interior # a ≈ b ≈ c
-		return Constants.edge3 # a ≈ b
+		return Constants.edge12 # a ≈ b
 	elseif bc² ≤ ε²
 		ca² ≤ ε² && return Constants.interior
-		return Constants.edge1
+		return Constants.edge23
 	elseif ca² ≤ ε²
-		return Constants.edge2
+		return Constants.edge31
 	end
 	abc = norm(cross(ab, bc)); abc² = abc*abc
 

@@ -678,83 +678,110 @@ function edge_flip!(m::CornerTable, ab)
 	@assert vertex(m, ba) == d
 	return m
 end
-"replaces vertex b by vertex a"
 function edge_collapse!(m::CornerTable, ab)
-	#   c         c
-	#  ╱ ╲       ╱
-	# a———b  => a
-	#  ╲ ╱       ╲
-	#   d         d
-	bc = next(ab); ca = next(bc)
-	# replace vertex b by a:
-	a = vertex(m, bc); b = vertex(m, ca)
-	for x in star(m, ca); vertex!(m, x, a); end
-	ba = opposite(m, ab); @assert issimple(ba)
-	ad = next(ba); db = next(ad)
-	ac = opposite(m, ca); @assert issimple(ac)
-	cb = opposite(m, bc); @assert issimple(cb)
-	bd = opposite(m, db); @assert issimple(bd)
-	da = opposite(m, ad); @assert issimple(da)
-	# cb becomes ca
-	opposite!(m, cb, ac); opposite!(m, ac, cb);
-	# bd becomes ad
-	opposite!(m, bd, da); opposite!(m, da, bd)
-	# delete 2 faces and 1 vertex
-	corner!(m, a, next(ac))
-	delete_face!(m, face(ab), face(ba))
-	delete_vertex!(m, b)
-	return m
+	rad = collect(genradial(m, ab))
+	a = right(m, ab); b = left(m, ab)
+	merge_point!(m, b, a)
+	for c in rad
+		cut_face!(m, face(c))
+	end
+	delete_face!(m, face.(rad)...)
 end
+function face_collapse!(m::CornerTable, f)
+	ab = corner(f, Side(3))
+	ca = corner(f, Side(2))
+	a = vertex(m, corner(f, Side(1)))
+	b = vertex(m, ca)
+	c = vertex(m, ab)
+	rad_ab = collect(genradial(m, ab))
+	rad_ac = collect(genradial(m, ca))
+	merge_point!(m, c, a)
+	merge_point!(m, b, a)
+	for x in rad_ab
+		cut_face!(m, face(x))
+	end
+	for x in rad_ac
+		cut_face!(m, face(x))
+	end
+	delete_face!(m, face.(rad_ab)..., face.(rad_ac)...)
+end
+"replaces vertex b by vertex a"
+# function edge_collapse!(m::CornerTable, ab)#««
+# 	#   c         c
+# 	#  ╱ ╲       ╱
+# 	# a———b  => a
+# 	#  ╲ ╱       ╲
+# 	#   d         d
+# 	bc = next(ab); ca = next(bc)
+# 	# replace vertex b by a:
+# 	a = vertex(m, bc); b = vertex(m, ca)
+# 	for x in star(m, ca); vertex!(m, x, a); end
+# 	ba = opposite(m, ab); @assert issimple(ba)
+# 	ad = next(ba); db = next(ad)
+# 	ac = opposite(m, ca); @assert issimple(ac)
+# 	cb = opposite(m, bc); @assert issimple(cb)
+# 	bd = opposite(m, db); @assert issimple(bd)
+# 	da = opposite(m, ad); @assert issimple(da)
+# 	# cb becomes ca
+# 	opposite!(m, cb, ac); opposite!(m, ac, cb);
+# 	# bd becomes ad
+# 	opposite!(m, bd, da); opposite!(m, da, bd)
+# 	# delete 2 faces and 1 vertex
+# 	corner!(m, a, next(ac))
+# 	delete_face!(m, face(ab), face(ba))
+# 	delete_vertex!(m, b)
+# 	return m
+# end#»»
 "given a corner abc, collapses b, then c, onto a"
-function face_collapse!(m::CornerTable, n)
-	#      e             e
-	#     ╱ ╲           ╱
-	#    a———c    =>   a
-	#   ╱ ╲ ╱ ╲       ╱ ╲
-	#  f———b———d     f   d
-	bc = corner(n, Side(1))
-	ca = corner(n, Side(2))
-	ab = corner(n, Side(3))
-	a = vertex(m, bc); b = vertex(m, ca); c = vertex(m, ab)
-	# this guarantees that all edges from these three vertices are simple:
-	@assert isregular(corner(m, a))
-	@assert isregular(corner(m, b))
-	@assert isregular(corner(m, c))
-	for x in star(m, ab); vertex!(m, x, a); end
-	for x in star(m, ca); vertex!(m, x, a); end
-	cb = opposite(m, bc)
-	ac = opposite(m, ca)
-	ba = opposite(m, ab)
-	bd = next(cb); dc = next(bd)
-	ce = next(ac); ea = next(ce)
-	af = next(ba); fb = next(af)
-	ae = opposite(m, ea)
-	ec = opposite(m, ce)
-	cd = opposite(m, dc)
-	db = opposite(m, bd)
-	bf = opposite(m, fb)
-	fa = opposite(m, af)
-	d = vertex(m, cb)
-	e = vertex(m, ac)
-	f = vertex(m, ba)
-	# (ae, ec) ⇒ (ae, ea)
-	opposite!(m, ae, ec); opposite!(m, ec, ae)
-	pec = prev(ec); vertex!(m, pec, a); corner!(m, a, pec)
-	corner!(m, e, next(ec))
-	# (cd, db) ⇒ (ad, da)
-	opposite!(m, cd, db); opposite!(m, db, cd)
-	vertex!(m, next(cd), a)
-	vertex!(m, prev(db), a)
-	corner!(m, d, next(db))
-	# (bf, fa) ⇒ (af, fa)
-	opposite!(m, bf, fa); opposite!(m, fa, bf)
-	vertex!(m, next(bf), a)
-	corner!(m, f, next(fa))
-
-	# delete 4 faces and 2 vertices
-	delete_face!(m, n, face(cb), face(ba), face(ac))
-	delete_vertex!(m, b, c)
-end
+# function face_collapse!(m::CornerTable, n)#««
+# 	#      e             e
+# 	#     ╱ ╲           ╱
+# 	#    a———c    =>   a
+# 	#   ╱ ╲ ╱ ╲       ╱ ╲
+# 	#  f———b———d     f   d
+# 	bc = corner(n, Side(1))
+# 	ca = corner(n, Side(2))
+# 	ab = corner(n, Side(3))
+# 	a = vertex(m, bc); b = vertex(m, ca); c = vertex(m, ab)
+# 	# this guarantees that all edges from these three vertices are simple:
+# 	@assert isregular(corner(m, a))
+# 	@assert isregular(corner(m, b))
+# 	@assert isregular(corner(m, c))
+# 	for x in star(m, ab); vertex!(m, x, a); end
+# 	for x in star(m, ca); vertex!(m, x, a); end
+# 	cb = opposite(m, bc)
+# 	ac = opposite(m, ca)
+# 	ba = opposite(m, ab)
+# 	bd = next(cb); dc = next(bd)
+# 	ce = next(ac); ea = next(ce)
+# 	af = next(ba); fb = next(af)
+# 	ae = opposite(m, ea)
+# 	ec = opposite(m, ce)
+# 	cd = opposite(m, dc)
+# 	db = opposite(m, bd)
+# 	bf = opposite(m, fb)
+# 	fa = opposite(m, af)
+# 	d = vertex(m, cb)
+# 	e = vertex(m, ac)
+# 	f = vertex(m, ba)
+# 	# (ae, ec) ⇒ (ae, ea)
+# 	opposite!(m, ae, ec); opposite!(m, ec, ae)
+# 	pec = prev(ec); vertex!(m, pec, a); corner!(m, a, pec)
+# 	corner!(m, e, next(ec))
+# 	# (cd, db) ⇒ (ad, da)
+# 	opposite!(m, cd, db); opposite!(m, db, cd)
+# 	vertex!(m, next(cd), a)
+# 	vertex!(m, prev(db), a)
+# 	corner!(m, d, next(db))
+# 	# (bf, fa) ⇒ (af, fa)
+# 	opposite!(m, bf, fa); opposite!(m, fa, bf)
+# 	vertex!(m, next(bf), a)
+# 	corner!(m, f, next(fa))
+# 
+# 	# delete 4 faces and 2 vertices
+# 	delete_face!(m, n, face(cb), face(ba), face(ac))
+# 	delete_vertex!(m, b, c)
+# end#»»
 # mesh queries««2
 "returns (corner, fan at u, fan at v)"
 function findedge(m::CornerTable, u, v, w, clist, klist, i)#««
@@ -816,7 +843,8 @@ function move_corner!(m::CornerTable, c::Corner, x::Corner)
 	if issimple(co)
 		opposite!(m, co, x)
 	elseif ismultiple(co)
-		for r in radial(m, co)
+		for r in radial(m, Multi(co))
+			println("in radial($co): $r")
 			opposite(m, r) == Multi(c) || continue
 			opposite!(m, r, Multi(x))
 			break
@@ -827,8 +855,8 @@ function move_corner!(m::CornerTable, c::Corner, x::Corner)
 end
 # edges««2
 
-function match_edge!(m::CornerTable, c, cin, cout, klist, i1)
-# function match_edge!(m::CornerTable, klist, clist, i1)#««
+# function match_edge!(m::CornerTable, c, cin, cout, klist, i1)
+function match_edge!(m::CornerTable, klist, clist, i1)#««
 	i2 = @inbounds (2,3,1)[i1]; i3=@inbounds (3,1,2)[i1]
 	# corner id:
 	# i2  :  previous inner corner
@@ -837,7 +865,7 @@ function match_edge!(m::CornerTable, c, cin, cout, klist, i1)
 	# i1:    fan before corner
 	# i1+3:  (new) fan inside corner
 	# i1+6:  fan after corner
-# 	c = clist[i1+6]; cout = clist[i3+3]; cin = clist[i2]
+	c = clist[i1+6]; cout = clist[i3+3]; cin = clist[i2]
 # 	println("\e[34;7m glue_edge($c $(base(m,c))) cout=$cout cin=$cin\e[m");verbose(m); global ME=deepcopy(m)
 	if !isboundary(cin) # there is already an inner corner
 		op_in = opposite(m, cin)
@@ -871,7 +899,7 @@ function match_edge!(m::CornerTable, c, cin, cout, klist, i1)
 	end
 end#»»
 function cut_edge!(m::CornerTable, c::Corner, t = nothing)#««
-# 	println("\e[35;7m  cut_edge $c = $(base(m,c))\e[m"); verbose(m)
+	println("\e[35;7m  cut_edge $c = $(base(m,c))\e[m"); # verbose(m)
 	# 1. cut fans if needed
 	p = prev(c)
 	n = next(c)
@@ -893,18 +921,27 @@ function cut_edge!(m::CornerTable, c::Corner, t = nothing)#««
 		# to simple: only if there are three edges (c, c1, c2) in the loop...
 		c1 = Multi(op)
 		c2 = Multi(opposite(m, c1))
-# 		println("\e[1mremoving multiple edge $c ($c1, $c2) $(base(m,c))\e[m")
+		println("\e[1mremoving multiple edge $c ($c1, $c2) $(base(m,c))\e[m")
 		if c2 == c # create boundary edge
 			@assert left(m, c1) == left(m, c)
-# 			println("\e[1m  => create boundary edge $c1 => nothing\e[m")
+			println("\e[1m  => create boundary edge $c1 => nothing\e[m")
 			opposite!(m, c1, Corner(0))
 		else # does this create a simple edge?
 			c3 = Multi(opposite(m, c2))
-# 			println("  c3=$c3")
+			println("  c3=$c3")
 			# ... and both remaining edges (c1 and c2) are opposed
 			if c3 == c && left(m, c1) ≠ left(m, c2)
-# 				println("\e[1m  => create simple edge $c1 $c2\e[m")
+				println("\e[1m  => create simple edge $c1 $c2\e[m")
+				println((opposite(m, c1), opposite(m, c2)))
+				verbose(m, vertex(m, c1))
+				verbose(m, vertex(m, c2))
+				println("*** glue fans: $(fan(m, prev(c2))) $(fan(m, next(c1)))")
+				verbose(m, fan(m, prev(c2)))
+				verbose(m, fan(m, next(c1)))
 				glue_fans!(m, fan(m,prev(c2)), fan(m, next(c1)))
+				println("*** glue fans: $(fan(m, prev(c1))) $(fan(m, next(c2)))")
+				verbose(m, fan(m, prev(c1)))
+				verbose(m, fan(m, next(c2)))
 				glue_fans!(m, fan(m,prev(c1)), fan(m, next(c2)))
 				opposite!(m, c1, c2)
 				opposite!(m, c2, c1)
@@ -1182,6 +1219,7 @@ self-intersection graph of `s`.
 """
 function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
 	regularize!(m)
+	println("REGULARIZED $(nvertices(m)), $(nfaces(m))")
 	boxes = [ boundingbox(t...) for t in triangles(m) ]
 	si = (points=similar(points(m), 0),
 		in_face = SortedDict{Face{I},Vector{Vertex{I}}}(),
@@ -1193,7 +1231,7 @@ function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
 	for (f1, f2) in SpatialSorting.intersections(boxes)
 		f1 = Face(f1); f2 = Face(f2)
 		isadjacent(m, f1, f2) && continue
-# 		println("inter: ($f1 = $(vertices(m, f1)) $(triangle(m,f1))\n      ($f2=$(vertices(m,f2)) $(triangle(m,f2)))")
+		println("inter: ($f1 = $(vertices(m, f1)) $(triangle(m,f1))\n      ($f2=$(vertices(m,f2)) $(triangle(m,f2)))")
 		it = TriangleIntersections.inter(triangle(m, f1), triangle(m, f2), ε)
 		isempty(it) && continue
 		
@@ -1487,6 +1525,7 @@ function regular_patches(m::CornerTable{I}) where{I}
 					end
 				elseif ismultiple(op) # singular edge
 					for c1 in radial(m, c0)
+						println("radial($c0): $c1")
 						l = label[Int(face(c1))]
 						!iszero(l) && (adjacency[l,n] = adjacency[n,l] = c0)
 					end
@@ -1718,17 +1757,24 @@ end#»»
 # simplification (retriangulate faces) ««1
 function regularize!(m::CornerTable, ε = _DEFAULT_EPSILON)
 	ε² = ε*ε
+	ε3 = ε^(1/3)
+	println("regularizing...")
 	TI = TriangleIntersections
 	# remove all triangular faces with area less than ε
 	for f in allfaces(m)
-		d = TI.degeneracy(triangle(m, f))
+		d = TI.degeneracy(triangle(m, f), ε3)
 		d == TI.Constants.invalid && continue
-		println("  face $f=$(vertices(m,f)): $t")
+		println("  regularizing degenerate face $f=$(vertices(m,f)): $d")
 		if TI.isedge(d)
-			edge_collapse!(m, corner(f, TI.index(m, TI.isedge)))
+			edge_collapse!(m, corner(f, Side(TI.index(d, TI.isedge))))
 		elseif TI.isvertex(d)
-			edge_flip!(m, corner(f, TI.index(m, TI.isvertex)))
+			edge_flip!(m, corner(f, Side(TI.index(d, TI.isvertex))))
 		else # interior: all three points confounded
+			println("   3 confounded points, merging")
+			verbose(m, f)
+			verbose(m, vertex(m, corner(f, Side(1))))
+			verbose(m, vertex(m, corner(f, Side(2))))
+			verbose(m, vertex(m, corner(f, Side(3))))
 			face_collapse!(m, f)
 		end
 	end
@@ -1843,32 +1889,38 @@ function verbose(m::CornerTable, k::Fan)
 	print("  next=\e[35m$(fan_next(m,k))\e[m")
 	println()
 end
+function verbose(m::CornerTable, v::Vertex)
+	c = corner(m, v)
+	if isisolated(c)
+		println("\e[34;1m$v\e[m: isolated")
+	elseif isregular(c)
+		print("\e[34;1m$v\e[m: regular first corner $c, ")
+		print("star = (", join(("$u" for u in star(m, c)),","), ")")
+		println()
+	else
+		print("\e[34;1m$v\e[m: singular [$c] (")
+		println(join(("$k (first=$(fan_first(m,k)))" for k in fans(m,Fan(c))), " "),")")
+	end
+end
+function verbose(m::CornerTable, f::Face)
+	println("\e[32;1m$f\e[m: ", join(vertices(m, f), ","))
+	for c in corners(f)
+		o = Int(opposite(m,c))
+		println("  \e[33;1m$c\e[m: \e[34m", vertex(m, c), "\e[m",
+# 				" \e[35m", fan(m, c), "\e[m",
+			" edge(", vertex(m, next(c)), ",", vertex(m, prev(c)), ") ",
+			" opposite=", (o > 0 ? "\e[32m" : o < 0 ? "\e[31m" : "\e[38;5;8m"),
+			opposite(m, c), "\e[m")
+	end
+end
 function verbose(m::CornerTable)
 	global V=deepcopy(m)
 	println("\e[7mtable with $(ncorners(m)) corners = $(nfaces(m)) faces, $(nvertices(m)) vertices, $(nfans(m)) fans:\e[m")
 	for v in allvertices(m)
-		c = corner(m, v)
-		if isisolated(c)
-			println("\e[34;1m$v\e[m: isolated")
-		elseif isregular(c)
-			print("\e[34;1m$v\e[m: regular first corner $c, ")
-			print("star = (", join(("$u" for u in star(m, c)),","), ")")
-			println()
-		else
-			print("\e[34;1m$v\e[m: singular [$c] (")
-			println(join(("$k (first=$(fan_first(m,k)))" for k in fans(m,Fan(c))), " "),")")
-		end
+		verbose(m, v)
 	end
 	for f in allfaces(m)
-		println("\e[32;1m$f\e[m: ", join(vertices(m, f), ","))
-		for c in corners(f)
-			o = Int(opposite(m,c))
-			println("  \e[33;1m$c\e[m: \e[34m", vertex(m, c), "\e[m",
-# 				" \e[35m", fan(m, c), "\e[m",
-				" edge(", vertex(m, next(c)), ",", vertex(m, prev(c)), ") ",
-				" opposite=", (o > 0 ? "\e[32m" : o < 0 ? "\e[31m" : "\e[38;5;8m"),
-				opposite(m, c), "\e[m")
-		end
+		verbose(m, f)
 	end
 	done = falses(ncorners(m))
 	for c0 in allcorners(m)
