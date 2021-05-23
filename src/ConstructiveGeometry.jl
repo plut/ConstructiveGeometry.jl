@@ -657,7 +657,8 @@ end
 function (g::Mesh)(s::AffineTransform{3})
 	# FIXME what to do if signdet(s.f) == 0 ?
 	m = g(s.child)
-	m.points .= s.f.(m.points)
+	map!(s.f, m)
+# 	m.points .= s.f.(m.points)
 	return signdet(s.f) > 0 ? m : reverse(m)
 end
 
