@@ -784,9 +784,10 @@ function (g::Mesh{T})(s::RotateExtrude) where{T}
 	@debug "firstindex: $firstindex"
 	@debug "arclength: $arclength"
 	# point i ∈ polygonxor: firstindex[i]:(firstindex[i]-1+arclength[i])
+	get3 = @closure (a,t) -> (a[t[1]], a[t[2]], a[t[3]])
 	triangles = vcat(
-		[ firstindex[t] for t in tri ],
-		[ firstindex[t] .+ arclength[t] .- 1 for t in reverse.(tri) ]
+		[ get3(firstindex,t) for t in tri ],
+		[ get3(firstindex,t) .+ get3(arclength,t) .- 1 for t in reverse.(tri) ]
 	)
 	@debug "triangles: $(Vector.(triangles))"
 	for l in peri
@@ -798,12 +799,12 @@ function (g::Mesh{T})(s::RotateExtrude) where{T}
 			@debug "triangulating between points $p1 and $p2:"
 			@debug "   $(firstindex[p1])..$(firstindex[p1]-1+arclength[p1])"
 			@debug "   $(firstindex[p2])..$(firstindex[p2]-1+arclength[p2])"
-			nt = SVector.(ladder_triangles(
+			nt = ladder_triangles(
 				arclength[p2], arclength[p1],
 				firstindex[p2], firstindex[p1],
-				))
+				)
 			push!(triangles, nt...)
-			@debug "new triangles: $(Vector.(nt))"
+			@debug "new triangles: $(nt)"
 		end
 		@debug "(end perimeter)»»"
 	end

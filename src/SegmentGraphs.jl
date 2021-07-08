@@ -18,10 +18,10 @@ include("SpatialSorting.jl")
 @inline det2(u,v) = u[1]*v[2]-u[2]*v[1]
 
 @inline segboxes(p,l) = [ boundingbox(p[s[1]], p[s[2]]) for s in l ]
-@inline ptboxes(l, ε) =  [ SpatialSorting.Box(p, p .+ ε) for p in l ]
+@inline ptboxes(l, ε) =  [ SpatialSorting.Box(p .- ε, p .+ ε) for p in l ]
 
 "computes all intersection points in the set of segments"
-function intersections(points, segments, ε = 0;
+function intersections(points, segments, ε = 0,
 		sboxes = segboxes(points, segments), pboxes = ptboxes(points, ε))
 	r = similar(points, 0)
 	for (s1, s2) in SpatialSorting.intersections(sboxes)
@@ -43,7 +43,7 @@ function intersections(points, segments, ε = 0;
 end
 
 "returns adjacency matrix, as a list of pairs of indices (segment, point)."
-function seg_point_adjacency(points, segments, ε = 0;
+function seg_point_adjacency(points, segments, ε = 0,
 		pboxes = ptboxes(points, ε), sboxes = segboxes(points, segments))
 	boxes = [ sboxes; pboxes]
 	ns = length(segments)
@@ -74,9 +74,10 @@ Data is returned by modifying the input datasets
 (`points` is modified only by appending new points).
 """
 function simplify!(points, segments, ε = 0)
+	length(points) ≤ 3 && return
 	sboxes = segboxes(points, segments)
 	pboxes = ptboxes(points, ε)
-	newpoints = intersections(points, segments, ε; pboxes, sboxes)
+	newpoints = intersections(points, segments, ε, pboxes, sboxes)
 	newboxes = [SpatialSorting.Box(p, p .+ ε) for p in newpoints]
 	allboxes = [pboxes; newboxes]
 
@@ -96,7 +97,7 @@ function simplify!(points, segments, ε = 0)
 			push!(pboxes, newboxes[i])
 		end
 	end
-	adjacency = seg_point_adjacency(points, segments, ε; pboxes, sboxes)
+	adjacency = seg_point_adjacency(points, segments, ε, pboxes, sboxes)
 	# group by segment:
 	start = 1
 	while start ≤ length(adjacency)
