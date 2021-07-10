@@ -107,7 +107,7 @@ struct NamedIndex{S,T<:Signed} i::T; end
 macro NamedIndex(name,S)
 	quote
 	const $(esc(name)) = NamedIndex{$(QuoteNode(S))}
-# 	Base.show(io::IO, ::Type{<:$(esc(name))}) = print(io, $(string(name)))
+	Base.show(io::IO, ::Type{<:$(esc(name))}) = print(io, $(string(name)))
 end end
 @NamedIndex Vertex v
 @NamedIndex Corner c
@@ -136,13 +136,6 @@ and one corner per poitn), the `CornerTable` type also defines *fans*,
 which are set of connected corners around a single vertex.
 A fan may be either open (i.e. with definite first and last corners)
 or closed (i.e. a simple loop of corners around a vertex).
-A regular point has a single closed fan.
-For simplification, this fan (“implicit fan”) is usually not stored
-in the data structure.
-
-                    fan ↺ 
-                     ↑↓
-  point ←— vertex —→ corner
 
 The fields are as follow:
   - `vertex[v]`:
@@ -230,6 +223,11 @@ end
 	return m
 end
 @inline lastface(m::CornerTable{I}) where{I} = Face{I}(nfaces(m))
+struct AllFaces{T<:CornerTable} m::T; end
+@inline Base.IteratorSize(a::AllFaces) = Base.SizeUnknown()
+@inline Base.iterate(a::AllFaces, i=1) =
+	i ≤ nfaces(a.m) ? (Face(i), i+1) : nothing
+@inline allfaces(m::CornerTable) = AllFaces(m)
 
 @inline attribute(m::CornerTable, f::Face) = m.attribute[Int(f)]
 @inline attribute!(m::CornerTable, f::Face, a) = m.attribute[Int(f)] = a
@@ -238,7 +236,6 @@ end
 
 @inline allcorners(m::CornerTable{I}) where{I}=
 	(Corner{I}(c) for c in 1:ncorners(m))
-@inline allfaces(m::CornerTable) = (Face(f) for f in 1:nfaces(m))
 # fans««3
 @inline nfans(m::CornerTable) = length(m.fan)
 @inline nfans!(m::CornerTable, n::Integer) = (resize!(m.fan, n); m)
@@ -256,9 +253,42 @@ end
 @inline opposite!(m::CornerTable, c::Corner, x::Corner) =
 	getc(m, c).opposite = Int(x)
 @inline fan(m::CornerTable{I}, c::Corner) where{I} = Fan{I}(getc(m, c).fan)
-@inline fan!(m::CornerTable, c::Corner, k::Fan) = getc(m, c).fan = Int(k)
+@inline fan!(m::CornerTable, c::Corner, k::Fan) = begin
+  getc(m, c).fan = Int(k)
+# 	Int(c) == 1049 && check1049(m)
+end
+function checkn(m::CornerTable, n)
+	ncorners(m) < n && return true
+	@assert Int(fan(m, Corner(n))) ≤ nfans(m) "fan($n)=$(fan(m,Corner(n)))/$(nfans(m))"
+end
+	
+# function checkfans(m::CornerTable)
+# 	star1 = [ Int[] for _ in allfans(m) ]
+# 	for c in allcorners(m)
+# 		k = Int(fan(m,c))
+# 		k > 0 && push!(star1[k], Int(c))
+# 	end
+# 	for k in allfans(m)
+# 		stark = Int.(collect(star(m,k)))
+# 		issubset(star1[Int(k)], stark) && continue
+# 		println("\e[31;7m error for fan $k:\n  star=$stark\n  corners $(star1[Int(k)])\e[m")
+# 		@assert false
+# 	end
+# end
+function check1049(m::CornerTable)
+	@assert isvalid(m)
+	checkn(m, 1049)
+	checkn(m, 630)
+end
 
-@inline apex(m::CornerTable, c::Corner) = vertex(m, fan(m, c))
+# @inline apex(m::CornerTable, c::Corner) = vertex(m, fan(m, c))
+@inline apex(m::CornerTable, c::Corner) =
+begin
+# 	check1049(m)
+	k = fan(m, c)
+	println("      apex($c): fan=$k/$(nfans(m))")
+	vertex(m, k)
+end
 @inline right(m::CornerTable, c::Corner) = apex(m, next(c))
 @inline left(m::CornerTable, c::Corner) = apex(m, prev(c))
 @inline base(m::CornerTable, c::Corner) = (right(m, c), left(m, c))
@@ -516,52 +546,79 @@ function new_fan!(m::CornerTable, v::Vertex, c::Corner)
 end
 "moves a fan from index k to index x"
 function move_fan!(m::CornerTable, k::Fan, x::Fan, t = nothing)
-# 	println("\e[34;1mmove_fan!($k, $x)\e[m")
+	println("\e[34;1mmove_fan!($k, $x)\e[m")
+	verbose(m, k)
+	verbose(m, x)
 	nextfan!(m, prevfan(m, k), x)
 	nextfan!(m, x, nextfan(m, k))
 	fanstart!(m, x, fanstart(m, k))
 	vertex!(m, x, vertex(m, k))
 	anyfan!(m, vertex(m, k), x)
+# 	Int(k) == 231 && println("star($k) = $(collect(star(m,k)))")
+# 	Int(k) == 231 && println("fan(630) = $(fan(m,Corner(630)))")
 	for c in star(m, k)
-# 		println("    change fan for corner $c (fan=$(fan(m,c))) from $k to $x")
+		println("    change fan for corner $c (fan=$(fan(m,c))) from $k to $x")
 		fan(m, c) ≠ k && break
+		println("    calling fan!($c, $x)")
 		fan!(m, c, x)
+		println("    now fan($c) = $(fan(m, c))")
 	end
 	t ≠ nothing && replace!(t, k => x)
+	println("\e[34;3m move_fan($k) done\e[m")
 end
 function delete_fan!(m::CornerTable, k::Fan, t = nothing)
-# 	println("\e[34;1mdelete_fan!($k / $(nfans(m)))\e[m")
+	println("\e[34;1mdelete_fan!($k / $(nfans(m)))\e[m")
 	@assert k ≠ implicitfan
+	verbose(m, k)
 	n = nextfan(m, k)
 	v = vertex(m, k)
-# 	verbose(m, v)
+	verbose(m, v)
+	println("vertex $v, next fan is $n")
 	if n == k # this is the single fan at this point
 		anyfan!(m, v, Fan(0))
 	else
 		# remove from cyclic list
 		anyfan!(m, v, n)
 		nextfan!(m, prevfan(m, k), n)
+		verbose(m, v)
 	end
 	# replace all references to last fan with references to k
 	l = lastfan(m)
+# 	Int(k) == 133 && nfans(m) == 231 &&
+# 		println("\e[1;7m  fan(630)=$(fan(m,Corner(630)))\e[m")
 	l ≠ k && move_fan!(m, l, k, t)
+# 	Int(k) == 133 && nfans(m) == 231 &&
+# 		println("\e[1;7m  fan(630)=$(fan(m,Corner(630)))\e[m")
 	nfans!(m, nfans(m)-1)
+	println("\e[34;3mfan $k deleted\e[m")
 end
-"connects two open fans together (k2 after k1)."
+@inline Base.show(io::IO, ::Type{<:CornerTable}) = print(io, "CTable")
+"connects two open fans together (k2 after k1).
+Assumes the corresponding edges are already connected (for `star`)."
 function glue_fans!(m::CornerTable, k1, k2, t = nothing)
-# 	println("\e[34;1mglue_fans!($k1, $k2) $t\e[m")
+	println("\e[34;1mglue_fans!($k1, $k2) $t\e[m")
+	println("   common vertex is $(vertex(m, k1))")
+	println("   star($k1) is $(collect(star(m,k1)))")
+	println("   star($k2) is $(collect(star(m,k2)))")
 	@assert vertex(m, k1) == vertex(m, k2)
 	@assert isopenfan(fanstart(m, k1))
 	@assert isopenfan(fanstart(m, k2))
 	if k1 == k2 # glue an open fan with itself by making it closed
 			fanstart!(m, k2, -fanstart(m, k2))
 	else # remove fan k2 from linked list
+		println(" modifying corners in star($k2)=$(collect(star(m,k2)))")
 		for c in star(m, k2)
+			println("    fan!($c) <- $k1")
 			fan!(m, c, k1)
 		end
+		println("  all corners are modified")
+		verbose(m, vertex(m, k1))
 # 		t ≠ nothing && replace!(t, k2 => k1)
 		delete_fan!(m, k2, t)
+	# Note: k1 may now point to a non-existent fan (if k1 was == last,
+	# delete_fan! has moved it).
 	end
+	println("\e[34;3m glue_fans($k1,$k2) done\e[m")
 end
 
 "splits fan `k` at a simple edge, making `c` its new first corner."
@@ -580,15 +637,26 @@ end
 		end
 	end
 end
+"removes the corner `c` from its fan and adjusts (splits/removes) it."
+function unfan_corner!(m::CornerTable, c::Corner)
+	TODO
+	# TODO
+end
 
 # mesh queries««2
 function findedge(m::CornerTable, u::Vertex, v::Vertex)
-# 	println("\e[31;1m findedge($u, $v)\e[m")
+	println("\e[33;1;7m findedge($u, $v)/$(nvertices(m))\e[m")
+	ncorners(m) ≥ 1049 && println("  fan(1049)=$(fan(m,Corner(1049)))")
+	for k in fans(m, u); println("$k: $(collect(star(m, k)))"); end
 # 	verbose(m, u)
 # 	for k in fans(m, u)
 # 		verbose(m, k)
 # 	end
 	for k in fans(m, u), c in star(m, k)
+		println("** $k -> $c/$(ncorners(m))")
+		println("   after $c = $(after(m, c))")
+	ncorners(m) ≥ 1049 && println("    fan(1049)=$(fan(m,Corner(1049)))")
+
 # 		println("  corner $c = $(apex(m,c))->$(base(m,c)) has fan $(fan(m, c))")
 		right(m, c) == v && return prev(c)
 	end
@@ -623,10 +691,12 @@ end
 # mesh modification (high level)««1
 # edges««2
 function match_edge!(m::CornerTable, c, cin, cout)#««
-# 	println("\e[34;7m match_edge($c $(base(m,c))) cout=$cout cin=$cin\e[m")
+	println("\e[32;7m match_edge($c $(base(m,c))) cout=$cout cin=$cin\e[m")
+	@assert isvalid(m)
 # 	Int(cout) > 0 && println(" cout: $(apex(m, cout)) $(base(m, cout))")
 # 	Int(cin) > 0 && println(" cin: $(apex(m, cin)) $(base(m, cin))")
 # 	verbose(m)
+
 	if !isboundary(cin) # there is already an inner corner
 		op_in = opposite(m, cin)
 		if isboundary(op_in) # cin is the last edge in its fan
@@ -664,10 +734,13 @@ function match_edge!(m::CornerTable, c, cin, cout)#««
 		end
 # 	else
 # 		println("\e[1mcin=$cin, cout=$cout, nothing to do\e[m")
+	@assert isvalid(m)
+	println("\e[32;3m match_edge($c) done\e[m")
 	end
 end#»»
 function cut_edge!(m::CornerTable, c::Corner, t = nothing)#««
-# 	println("\e[35;7m  cut_edge $c = $(base(m,c))\e[m"); # verbose(m)
+	println("\e[35;7m  cut_edge $c = $(base(m,c))\e[m"); # verbose(m)
+	@assert isvalid(m)
 	# 1. cut fans if needed
 	(n, p) = next2(c)
 	@assert Int(c) > 0
@@ -675,12 +748,12 @@ function cut_edge!(m::CornerTable, c::Corner, t = nothing)#««
 	if isboundary(op) # nothing to do
 	elseif issimple(op)
 		# simple edge: we need to split fans at both vertices v2 and v3
-# 		println("\e[1m  cutting *simple edge* $c--$op = $(base(m,c))\e[m")
+		println("\e[1m  cutting *simple edge* $c--$op = $(base(m,c))\e[m")
 		k2 = fan(m, n)
 		k3 = fan(m, p)
 		split_fan!(m, k2, n)
 		split_fan!(m, k3, next(op))
-# 		println("\e[33;7mafter split_fans:\e[m"); verbose(m)
+		println("\e[33;7mafter split_fans:\e[m")
 		opposite!(m, op, Corner(0))
 		opposite!(m, c, Corner(0))
 		# delete a simple edge: replace by two boundaries
@@ -688,22 +761,44 @@ function cut_edge!(m::CornerTable, c::Corner, t = nothing)#««
 		# to simple: only if there are three edges (c, c1, c2) in the loop...
 		c1 = Multi(op)
 		c2 = Multi(opposite(m, c1))
-# 		println("\e[1mremoving multiple edge $c ($c1, $c2) $(base(m,c))\e[m")
+		println("\e[1mremoving multiple edge $c ($c1, $c2) $(base(m,c))\e[m")
+		println(collect(genradial(m, c)))
 		if c2 == c # create boundary edge
 			@assert left(m, c1) == left(m, c)
-# 			println("\e[1m  => create boundary edge $c1 => nothing\e[m")
+			println("\e[1m  => create boundary edge $c1 => nothing\e[m")
 			opposite!(m, c1, Corner(0))
 		else # does this create a simple edge?
 			c3 = Multi(opposite(m, c2))
-# 			println("  c3=$c3")
+			println("  c3=$c3")
 			# ... and both remaining edges (c1 and c2) are opposed
 			if c3 == c && left(m, c1) ≠ left(m, c2)
-# 				println("\e[1m  => create simple edge $c1 $c2\e[m")
-				glue_fans!(m, fan(m,prev(c2)), fan(m, next(c1)))
-				glue_fans!(m, fan(m,prev(c1)), fan(m, next(c2)))
+				println("\e[1m  => create simple edge opposite=$c1 sameside=$c2\e[m")
+				println("  base($c1) = $(base(m,c1)) base($c2) = $(base(m,c2))")
+				verbose(m, fan(m, c1))
+				verbose(m, fan(m, next(c1)))
+				verbose(m, fan(m, prev(c1)))
+				verbose(m, fan(m, c2))
+				verbose(m, fan(m, next(c2)))
+				verbose(m, fan(m, prev(c2)))
+				println("  nfans=$(nfans(m))")
+				Int(c) == 452 && println("  fan(843)=$(fan(m,Corner(843)))")
+				println("making $c1 and $c2 opposite...")
 				opposite!(m, c1, c2)
 				opposite!(m, c2, c1)
+				glue_fans!(m, fan(m,prev(c2)), fan(m, next(c1)))
+				Int(c) == 452 && println("  fan(843)=$(fan(m,Corner(843)))")
+				glue_fans!(m, fan(m,prev(c1)), fan(m, next(c2)))
+				Int(c) == 452 && println("  fan(843)=$(fan(m,Corner(843)))")
+				println("now fan($(prev(c1))) = $(fan(m,prev(c1)))")
+				println("now fan($(next(c2))) = $(fan(m,next(c2)))")
+				println("now fan($(prev(c2))) = $(fan(m,prev(c2)))")
+				println("now fan($(next(c1))) = $(fan(m,next(c1)))")
+				Int(c) == 452 && println("  fan(843)=$(fan(m,Corner(843)))")
+				println("  nfans=$(nfans(m))")
+				verbose(m, c1)
+				verbose(m, c2)
 			else # otherwise, this edge remains multiple, we unlink c
+			println("\e[1m => remains multiple...\e[m")
 				for c2 in radial(m, c1)
 					opposite(m, c2) == Multi(c) || continue
 					opposite!(m, c2, op)
@@ -712,6 +807,8 @@ function cut_edge!(m::CornerTable, c::Corner, t = nothing)#««
 		end
 	end
 	opposite!(m, c, Corner(0))
+	@assert isvalid(m)
+	println("\e[35;3m cut_edge($c) done\e[m")
 end#»»
 # faces««2
 "creates a new, detached face"
@@ -748,25 +845,48 @@ end
 
 "disconnects all three edges of a face"
 function detach_face!(m::CornerTable, f::Face)
-# 	println("\e[31;7mdetach_face!($f $(vertices(m,f)))\e[m"); verbose(m)
+	println("\e[31;7mdetach_face!($f $(vertices(m,f)))\e[m")
+	check1049(m)
 # 	@assert isvalid(m)
 # 	verbose(m)
 	c1 = corner(f, Side(1)); v1 = apex(m, c1)
 	c2 = corner(f, Side(2)); v2 = apex(m, c2)
 	c3 = corner(f, Side(3)); v3 = apex(m, c3)
+	println("fan(m, $c1)=$(fan(m,c1))")
+	println("fan(m, $c2)=$(fan(m,c2))")
+	println("fan(m, $c3)=$(fan(m,c3))")
+	verbose(m, fan(m, c1))
+	verbose(m, fan(m, c2))
+	verbose(m, fan(m, c3))
+	check1049(m)
 	cut_edge!(m, c1)
+	check1049(m)
 	cut_edge!(m, c2)
+	check1049(m)
 	cut_edge!(m, c3)
+	check1049(m)
 # 	println("\e[31;1m after cut_edge:\e[m"); verbose(m)
 	@assert opposite(m, c1) == Corner(0)
 	@assert opposite(m, c2) == Corner(0)
 	@assert opposite(m, c3) == Corner(0)
-	delete_fan!(m, fan(m, c1)); fan!(m, c1, Fan(0))
-	delete_fan!(m, fan(m, c2)); fan!(m, c2, Fan(0))
-	delete_fan!(m, fan(m, c3)); fan!(m, c3, Fan(0))
+	# FIXME: don't delete fans, but remove one corner from the fan
+	# (possibly deleting/splitting/moving the beginning).
+	verbose(m, fan(m, c1))
+	verbose(m, fan(m, c2))
+	verbose(m, fan(m, c3))
+	check1049(m)
+	k = fan(m, c1); fan!(m, c1, Fan(0)); delete_fan!(m, k)
+	k = fan(m, c2); fan!(m, c2, Fan(0)); delete_fan!(m, k)
+	k = fan(m, c3); fan!(m, c3, Fan(0)); delete_fan!(m, k)
+# 	delete_fan!(m, fan(m, c1)); fan!(m, c1, Fan(0))
+# 	delete_fan!(m, fan(m, c2)); fan!(m, c2, Fan(0))
+# 	delete_fan!(m, fan(m, c3)); fan!(m, c3, Fan(0))
+	println("\e[1m face $f detached\e[m")
 end
 "deletes O(1) (detached) faces at once, by moving last faces in their place"
 function delete_faces!(m::CornerTable, flist)#««
+	println("\e[31;1;7mdelete_faces($flist)\e[m")
+	check1049(m)
 	isempty(flist) && return
 	l = lastface(m)
 	for (i, f) in pairs(flist)
@@ -789,6 +909,7 @@ end
 # vertices««2
 "merge_point!(m, v, x): replaces all references to `v` by `x`; deletes `v`"
 function merge_point!(m::CornerTable, v::Vertex{I}, x::Vertex, l=nothing) where{I}#««
+	check1049(m)
 # 	println("\e[7mmerge_point($v => $x)\e[m")
 # 	verbose(m)
 	# we need to precompute the list of incident corners
@@ -801,7 +922,8 @@ function merge_point!(m::CornerTable, v::Vertex{I}, x::Vertex, l=nothing) where{
 	for c in clist
 		b = false
 		f = face(c)
-# 		println("  examining corner $c in face $f")
+		println("  examining corner $c in face $f")
+		check1049(m)
 		if side(c) == Side(1)
 			u1 = vertex(m, f, Side(2))
 			u2 = vertex(m, f, Side(3))
@@ -816,19 +938,22 @@ function merge_point!(m::CornerTable, v::Vertex{I}, x::Vertex, l=nothing) where{
 			vlist = (u1, u2, x)
 		end
 		checkface(m,f)
+		check1049(m)
 # 		println("  vertices = $(vertices(m,f))")
 		detach_face!(m, f)
+		check1049(m)
 		if u1 == x || u2 == x
 # 				println("    mark $f for deletion")
 			push!(delfaces, f)
 # 			delete_face!(m, f)
 		else
 # 			println("    set face $f to $vlist")
+			check1049(m)
 			attach_face!(m, f, vlist, attribute(m, f))
+			check1049(m)
 			checkface(m,f)
 		end
 	end
-	println("delete faces $delfaces")
 	delete_faces!(m, delfaces)
 	delete_vertex!(m, v, l)
 end#»»
@@ -953,7 +1078,7 @@ function regularize!(m::CornerTable, ε = _DEFAULT_EPSILON)
 		elseif TI.isvertex(d)
 			println("    vertex on edge $(TI.index(d,TI.isvertex))")
 			s = Side(TI.index(d, TI.isvertex))
-			flatten_face!(m, f, s)
+			flatten_face!(m, corner(f, s))
 		else # interior: all three points confounded
 			println("   3 confounded points, merging")
 			verbose(m, f)
@@ -982,32 +1107,6 @@ function simplify!(m::CornerTable, ε = _DEFAULT_EPSILON)
 	end
 end
 # create new meshes««1
-"""
-    select_faces(m, fkept)
-
-Select faces in `m` from vector `fkept`.
-"""
-function select_faces(m::CornerTable{I}, fkept) where{I}#««
-	# fkept is a list of kept faces
-	# first step: compute vertex/face renaming
-	vkept = sizehint!(Vertex{I}[], 3*length(fkept))
-	for f in fkept
-		push!(vkept, vertices(m, f)...)
-	end
-
-	uniquesort!(vkept)
-
-	# FIXME do something about fans!
-	r = (typeof(m))(points(m)[Int.(vkept)])
-	for f in fkept
-		(v1, v2, v3) = vertices(m, f)
-		u1 = Vertex(searchsortedfirst(vkept, v1))
-		u2 = Vertex(searchsortedfirst(vkept, v2))
-		u3 = Vertex(searchsortedfirst(vkept, v3))
-		append_face!(r, (u1, u2, u3), attribute(m, f))
-	end
-	return r
-end#»»
 """
     reverse(m::CornerTable)
 
@@ -1226,11 +1325,8 @@ function project_and_triangulate(m::CornerTable, proj, vlist,elist, ε = 0)
 	elist2 = map(e->map(v->Int(searchsortedfirst(vlist, v)), e), elist)
 
 # 	global K=(plist, elist2, ε); @assert false
-	println("# plist = $plist")
-	println("# elist2= $elist2")
-	println("# simplify($ε)...")
+	println("plist = $plist\nelist=$elist2\n")
 	SegmentGraphs.simplify!(plist, elist2, ε)
-	println("# now elist2=$elist2")
 	newpoints = inv(proj).(plist[length(vlist)+1:end])
 	vlist = [vlist; Vertex.(nvertices(m)+1:nvertices(m)+length(plist)-length(vlist))]
 	append_points!(m, newpoints)
@@ -1733,6 +1829,11 @@ function isvalid(m::CornerTable)
 		end
 	end
 	for c in allcorners(m)
+		k = Int(fan(m,c))
+		if (k < 0 || k > nfans(m))
+			println(" fan($c) is invalid: $k (should be 0:$(nfans(m)))")
+			return false
+		end
 		cop = opposite(m, c)
 		if issimple(cop)
 			cop2 = opposite(m, cop)
@@ -1749,7 +1850,24 @@ function isvalid(m::CornerTable)
 			# multiple edge
 		end
 	end
+	allstars = [ Int[] for _ in allfans(m) ]
+	for c in allcorners(m)
+		k = Int(fan(m,c))
+		k > 0 && push!(allstars[k], Int(c))
+	end
 	for k in allfans(m)
+		star_k = Int.(collect(star(m,k)))
+		issubset(allstars[Int(k)], star_k) && continue
+		println("\e[31;7m error for fan $k:\n  star=$star_k\n  but fan found in corners $(allstars[Int(k)])\e[m")
+		return false
+	end
+	for k in allfans(m)
+		v1 = vertex(m, k)
+		v2 = vertex(m, nextfan(m, k))
+		if v1 ≠ v2
+			println("Fans $k and next=$(nextfan(m,k)) have different vertices $v1 ≠ $v2")
+			return false
+		end
 		for c in star(m, k)
 			kc = fan(m, c)
 			if kc ≠ k
