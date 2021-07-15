@@ -100,6 +100,7 @@ function intersections!(points, segments, ε = 0)
 	point_lt = @closure (i,j) -> points[i] < points[j]
 	point_ord = Base.Order.Lt(point_lt)
 	queue = heapify(eachindex(points), point_ord)
+	result = empty(segments)
 	println("queue = $queue")
 
 	# list of active segments, sorted by y-intercept
@@ -121,19 +122,20 @@ function intersections!(points, segments, ε = 0)
 				z == nothing && continue
 				# FIXME: search if z is an existing point
 				# replace segments (a,b) by (a,z), (p,q) by (p,z)
-				push!(points, z); n = length(points)
-				replace!(segmentsfrom[a], b=>n)
-				replace!(segmentsfrom[p], q=>n)
-				if det2(points[[n,b,q]]...) > 0
+				push!(points, z); m = length(points)
+				replace!(segmentsfrom[a], b=>m)
+				replace!(segmentsfrom[p], q=>m)
+				active[n] = (a,m)
+				if det2(points[[m,b,q]]...) > 0
 					push!(segmentsfrom, [b,q])
 				else
 					push!(segmentsfrom, [q,b])
 				end
-				println("\e[32;7m * \e[ecreate point $n = $z for ($a,$b)∩($p,$q)")
+				println("\e[32;7m * \e[mcreate point $m = $z for ($a,$b)∩($p,$q)")
 				println("  segmentfrom[$a] = $(segmentsfrom[a])")
 				println("  segmentfrom[$p] = $(segmentsfrom[p])")
-				println("  segmentfrom[$n] = $(segmentsfrom[n])")
-				heappush!(queue, n, point_ord)
+				println("  segmentfrom[$m] = $(segmentsfrom[m])")
+				heappush!(queue, m, point_ord)
 				println("  now queue = $queue")
 			end
 		end#»»
@@ -155,6 +157,7 @@ function intersections!(points, segments, ε = 0)
 # 			b == p && continue
 # 			active[i] = (p,b)
 			println("  \e[34;7moutput: segment ($a,$p)\e[m")
+			push!(result, (a,p))
 		end
 		print("  \e[1m〈\e[m\e[38;5;8m")
 		join(stdout, active[begin:first(range)-1], ",")
@@ -165,6 +168,7 @@ function intersections!(points, segments, ε = 0)
 		print("\e[m\e[1m|\e[m\e[38;5;8m")
 		join(stdout, active[last(range)+1:end], ",")
 		println("\e[m\e[1m〉\e[m")
+# 		@assert length(points) ≤ 7
 # 		println("  \e[38;5;8m$(active[begin:first(range)-1])\e[m\e[1m|\e[m\e[32m$([(p,i) for i in segmentsfrom[p]])\e[m\e[1m|\e[m\e[38;5;8m$(active[last(range)+1:end])\e[m")
 		# insert new active segments
 		active = [active[begin:first(range)-1];
@@ -173,6 +177,7 @@ function intersections!(points, segments, ε = 0)
 		for j in segmentsfrom[p]
 		end
 	end
+	result
 
 end
 

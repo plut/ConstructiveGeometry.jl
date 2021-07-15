@@ -466,6 +466,8 @@ end
 # delete_xxx(m, x):  deletes object at index x (by moving last onto it)
 # vertices««2
 function append_points!(m::CornerTable, plist)#««
+	length(plist) == 0 && return
+	@debug "appending $(length(plist)) points: $(nvertices(m)+1)..$(nvertices(m)+length(plist))"
 	Base.IteratorSize(plist) ≠ Base.SizeUnknown() &&
 		verticeshint!(m, nvertices(m) + length(plist))
 	push!(m.vertex, ((point=p, fan=0) for p in plist)...)
@@ -481,6 +483,7 @@ end#»»
 end#»»
 "deletes a vertex by swap-and-pop; modifies `l` to account for this"
 function delete_vertex!(m::CornerTable, v::Vertex, l=nothing)#««
+	@debug "deleting vertex $v/$(nvertices(m))"
 	# FIXME: this may leak fans
 	w = lastvertex(m)
 	if v ≠ w
@@ -1217,6 +1220,13 @@ function self_intersect(m::CornerTable{I}, ε=0) where{I}#««
 			idx[i] = identify_point(m, f2, t2, p, idx[i], ε)
 			if iszero(Int(idx[i]))
 				push!(si.points, p)
+				@debug "««creating point $p at $f1 ∩ $f2"
+				for s in Side, f in (f1,f2)
+					@debug "    distance to $(vertex(m,f,s)) = $(norm(p-point(m,vertex(m,f,s)),1))"
+					(norm(p-point(m,vertex(m,f,s)),1)) < 1e-3 && @debug "$p, $(point(m,vertex(m,f,s)))"
+
+				end
+				@debug "»»"
 				idx[i] = Vertex(length(si.points) + nvertices(m))
 			end
 			push_entry!(si.in_face, f1, idx[i])
@@ -1245,6 +1255,7 @@ function select_faces(m::CornerTable{I}, fkept) where{I}
 	end
 
 	uniquesort!(vkept)
+	@debug  "selecting $(length(fkept)) faces, $(length(vkept)) vertices"
 
 	# FIXME do something about fans!
 	r = (typeof(m))(points(m)[Int.(vkept)])
