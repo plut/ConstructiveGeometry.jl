@@ -1,3 +1,4 @@
+# http://people.scs.carleton.ca/~michiel/lecturenotes/ALGGEOM/bentley-ottmann.pdf
 # J. Hobby, Practical segment intersection with finite precision output
 # https://www.sciencedirect.com/science/article/pii/S0925772199000218/pdf?isDTMRedir=true&download=true
 # J. Hersberger, Stable snap rounding
@@ -6,6 +7,11 @@
 # https://link.springer.com/content/pdf/10.1007/s00454-007-9015-0.pdf
 # P. Guigue, thèse
 # https://tel.archives-ouvertes.fr/tel-00471447/document
+#
+# Must return enough data to
+#  - tweak existing points (changing coordinates + lift is enough)
+#  - merge corresponding points (?)
+#  - link all of these
 module SegmentIntersections
 using DataStructures
 using StaticArrays
@@ -30,6 +36,7 @@ Returns > 0 if point p is above the line (p1p2),
 and < 0 if it is below this line.
 """
 function point_cmp(p1,p2,p)#««
+	println(det2(p1,p2,p))
 	return sign(det2(p1,p2,p))
 end#»»
 """
@@ -41,11 +48,13 @@ function segfind(points, active, p)#««
 	
 	# we go for the simpler version returning a range, i.e. doing this in
 	# two passes [http://www.tbray.org/ongoing/When/200x/2003/03/22/Binary]
+	p[1] == 8.0 && println("  *** segfind($p)")
 	(lo, hi) = (0, 1+length(active))
 	while lo + 1 < hi
 		m = Base.Sort.midpoint(lo, hi)
 		(a,b) = active[m]
 		c = point_cmp(points[a], points[b], p)
+		p[1] == 8 && println("point_cmp(points[$a],points[$b],p) = $c")
 		if c > 0
 			lo = m
 		else
@@ -58,6 +67,7 @@ function segfind(points, active, p)#««
 		m = Base.Sort.midpoint(lo, hi)
 		(a,b) = active[m]
 		c = point_cmp(points[a], points[b], p)
+		p[1]==8 && println("point_cmp(points[$a],points[$b],p) = $c")
 		if c ≥ 0
 			lo = m
 		else
@@ -69,46 +79,82 @@ function segfind(points, active, p)#««
 end#»»
 
 """
+Inputs
  - `points`: list of points (as vectors)
  - `segments`: list of pairs `(a, b)` of indices of linked points
- - `names`: list of name of each point (indices used by default)
+ - `ε`: diameter of pixels for snap rounding.
 
 Returns
- - the list of points (old points + new points (appended at the end))
+ - the list of points (old points + new points (appended at the end));
  - the list of segments between all those points.
 """
 function intersections!(points, segments, ε = 0)
-	# http://people.scs.carleton.ca/~michiel/lecturenotes/ALGGEOM/bentley-ottmann.pdf
 	# make all segments left-to-right
 	for (i, s) in pairs(segments)
 		points[s[1]] ≤ points[s[2]] && continue
 		segments[i] = (s[2], s[1])
 	end
-	# segmentsfrom[i] = destination points for segments from i,
 	# sorted by increasing slope:
 	unique!(sort!(segments))
-	segmentsfrom = [ sort(last.(segments[searchsorted(segments,i;by=first)]);
-		lt=(j,k)->det2(points[[i,j,k]]...) > 0)
-		for i in eachindex(points)]
 	# segmentsto[i] = origins for segments to i, by increasing slope:
-	rsegments = reverse.(segments); sort!(rsegments)
-	segmentsto = [ sort(last.(rsegments[searchsorted(rsegments,i;by=first)]);
-		lt=(j,k)->det2(points[[i,j,k]]...) < 0)
+
+	byslope = let points=points;
+		i ->(j,k)->det2(points[[i,j,k]]...) > 0
+	end
+	segmentsfrom = [ sort(last.(segments[searchsorted(segments,i;by=first)]);
+		lt=byslope(i))
 		for i in eachindex(points)]
+	# FIXME: this should insert the segment at correct position *after*
+	# point i, i.e. (11,14) is *after* (12,3) in the cross picture.
+	addsegment = @closure (i,q)-> begin
+		pos = searchsortedfirst(segmentsfrom[i], q;lt=byslope(i))
+		insert!(segmentsfrom[i], pos, q)
+	end
+# 	end
+# 	rsegments = reverse.(segments); sort!(rsegments)
+# 	segmentsto = [ sort(last.(rsegments[searchsorted(rsegments,i;by=first)]);
+# 		lt=(j,k)->det2(points[[i,j,k]]...) < 0)
+# 		for i in eachindex(points)]
 
 	# build a queue of all future events:
 	point_lt = @closure (i,j) -> points[i] < points[j]
 	point_ord = Base.Order.Lt(point_lt)
 	queue = heapify(eachindex(points), point_ord)
-	result = empty(segments)
 	println("queue = $queue")
 
 	# list of active segments, sorted by y-intercept
 	# FIXME: use an appropriate data structure instead of a vector
 	active = NTuple{2,Int}[]
+	# debug points to /tmp/points««
+	io = open("/tmp/points", "w")
+	for (i,p) in pairs(points)
+		println(io,"$(p[1])\t$(p[2]) # $i")
+	end
+	println(io,"\n\n")
+	for (i1,i2) in segments
+		(x1,y1) = points[i1]; (x2,y2) = points[i2]
+		println(io,"$x1\t$y1\t$(x2-x1)\t$(y2-y1)\t# $i1--$i2")
+	end
+	close(io)
+#»»
 
 	# we ue the incoming segments list to store the result:
 	empty!(segments)
+
+	# hot pixels are used to merge segments as needed:
+	# the `reverse` operation ensures that only the smallest index is stored
+	# rounding to `Int` prevents the dreaded `-0.0`
+	roundcoord = iszero(ε) ? identity : @closure x->round(Int,x/ε)*ε
+	pixel_id = Dict(roundcoord.(points[i])=>i
+		for i in reverse(eachindex(points)))
+	hotpixel = @closure p -> get!(pixel_id, roundcoord.(p), length(points)+1)
+	# renaming of points (if needed):
+	newname = Pair{Int,Int}[]
+	for (i,p) in pairs(points)
+		j = hotpixel(p)
+		j ≠ i && push!(newname, i=>j)
+	end
+
 
 	while !isempty(queue)
 		p = heappop!(queue, point_ord)
@@ -120,22 +166,42 @@ function intersections!(points, segments, ε = 0)
 				(a==p||a==q||b==p||b==q) && continue
 				z = inter(points[a],points[b],points[p],points[q],ε)
 				z == nothing && continue
-				# FIXME: search if z is an existing point
-				# replace segments (a,b) by (a,z), (p,q) by (p,z)
-				push!(points, z); m = length(points)
-				replace!(segmentsfrom[a], b=>m)
-				replace!(segmentsfrom[p], q=>m)
-				active[n] = (a,m)
-				if det2(points[[m,b,q]]...) > 0
-					push!(segmentsfrom, [b,q])
+				# h is the point index for the new point; either an existing one,
+				# or a new one, created for the occasion:
+				h = get!(pixel_id, roundcoord.(z), length(points)+1)
+				# two cases here:
+				# 1. this is a new hot pixel: create a point
+				# (and push to segmentsfrom[] as appropriate)
+				println("\e[32;7m * \e[mcreate point $h = $z for ($a,$b)∩($p,$q)")
+				println("   round = $(roundcoord.(z))")
+				h == 18 && println("   round(12) = $(roundcoord.(points[12]))")
+				if h == length(points)+1
+					z = roundcoord.(z)
+					push!(points, z)
+					if det2(points[[h,b,q]]...) > 0
+						push!(segmentsfrom, [b,q])
+					else
+						push!(segmentsfrom, [q,b])
+					end
+					heappush!(queue, h, point_ord)
+				# 2. this is a pre-existing pixel:
+				# break segments (a,b) and (p,q) as (a,h)+(h,b) and (p,h)+(h,q)
+				# i.e. insert h in segmentsfrom[a] and segmentsfrom[b]
 				else
-					push!(segmentsfrom, [q,b])
+					h ∈ (a,b,p,q) && continue
+					println("  inserting segments $h => $b and $q")
+					println("     before: $(segmentsfrom[h])")
+					addsegment(h, b)
+					addsegment(h, q)
+					println("     after: $(segmentsfrom[h])")
 				end
-				println("\e[32;7m * \e[mcreate point $m = $z for ($a,$b)∩($p,$q)")
+				replace!(segmentsfrom[a], b=>h)
+				replace!(segmentsfrom[p], q=>h)
+				# replace n-th active segment (a,b) by (a,h)
+				active[n] = (a,h)
 				println("  segmentfrom[$a] = $(segmentsfrom[a])")
 				println("  segmentfrom[$p] = $(segmentsfrom[p])")
-				println("  segmentfrom[$m] = $(segmentsfrom[m])")
-				heappush!(queue, m, point_ord)
+				println("  segmentfrom[$h] = $(segmentsfrom[h])")
 				println("  now queue = $queue")
 			end
 		end#»»
@@ -143,6 +209,7 @@ function intersections!(points, segments, ε = 0)
 		println("  current active list=$active")
 # 		println("  segments to $p = $(segmentsto[p])")
 		# find insert position for this point in `active`
+		println("  ### segfind($(points[p]))")
 		range = segfind(points, active, points[p])
 		println("  insert at position $range")
 		# if some segment(s) match the given point position:
@@ -157,7 +224,6 @@ function intersections!(points, segments, ε = 0)
 # 			b == p && continue
 # 			active[i] = (p,b)
 			println("  \e[34;7moutput: segment ($a,$p)\e[m")
-			push!(result, (a,p))
 		end
 		print("  \e[1m〈\e[m\e[38;5;8m")
 		join(stdout, active[begin:first(range)-1], ",")
@@ -177,8 +243,6 @@ function intersections!(points, segments, ε = 0)
 		for j in segmentsfrom[p]
 		end
 	end
-	result
-
 end
 
 

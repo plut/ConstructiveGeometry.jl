@@ -40,7 +40,8 @@ include("TriangleIntersections.jl")
 include("SpatialSorting.jl")
 include("EquivalenceStructures.jl")
 using .EquivalenceStructures
-include("SegmentGraphs.jl")
+# include("SegmentGraphs.jl")
+include("SegmentIntersections.jl")
 
 const _INDEX_TYPE = Int
 const _DEFAULT_EPSILON=1/65536
@@ -1337,7 +1338,8 @@ function project_and_triangulate(m::CornerTable, proj, vlist,elist, ε = 0)
 
 # 	global K=(plist, elist2, ε); @assert false
 	println("plist = $plist\nelist=$elist2\n")
-	SegmentGraphs.simplify!(plist, elist2, ε)
+	SegmentIntersections.intersections!(plist, elist2, ε)
+# 	SegmentGraphs.simplify!(plist, elist2, ε)
 	newpoints = inv(proj).(plist[length(vlist)+1:end])
 	vlist = [vlist; Vertex.(nvertices(m)+1:nvertices(m)+length(plist)-length(vlist))]
 	append_points!(m, newpoints)
