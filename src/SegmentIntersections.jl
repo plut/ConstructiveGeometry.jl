@@ -173,7 +173,7 @@ end
 @inline Base.round(snap::SnapRounding, point) = roundLinf(point, snap.ε)
 
 function SnapRounding(points, segments, ε)#««
-	println("\e[48;5;57m****************************\e[m"*"\n"^30)
+# 	println("\e[48;5;57m****************************\e[m"*"\n"^30)
 	# make all segments left-to-right
 	for (i, s) in pairs(segments)
 		(points[s[1]] >  points[s[2]]) && (segments[i] = (s[2], s[1]))
@@ -194,7 +194,7 @@ function point!(snap::SnapRounding, point)
 	@assert !isnan(point[1])
 	n = get!(snap.pointid, point, length(snap.events)+1)
 	if n == length(snap.events)+1
-		println("\e[32;7;1m create event $n=$point\e[m")
+# 		println("\e[32;7;1m create event $n=$point\e[m")
 		push!(snap.events, (point=point, start=[], reinsert=[], pass=[]))
 		heappush!(snap.queue, n, ord(snap))
 	end
@@ -220,12 +220,12 @@ function newinter(snap::SnapRounding, n, j)#««
 	(a2, b2) = snap.segments[s2]
 	a1 == a2 && return false
 	b1 == b2 && return false
-	println("\e[33;1m intersect active[$j]=($a1,$b1) and [$(j+1)]=($a2,$b2)\e[m")
+# 	println("\e[33;1m intersect active[$j]=($a1,$b1) and [$(j+1)]=($a2,$b2)\e[m")
 	p = inter(points(snap, a1, b1, a2, b2)...)
 	p == nothing && return false
 	p > point(snap, n) || return false
 	c = point!(snap, p)
-	println("   \e[34m ($a1,$b1) ∩ ($a2,$b2) found point $p=$c\e[m")
+# 	println("   \e[34m ($a1,$b1) ∩ ($a2,$b2) found point $p=$c\e[m")
 	ev = event(snap, c)
 	c ≠ a1 && push!(ev.pass, s1)
 	c ≠ a2 && push!(ev.pass, s2)
@@ -239,7 +239,7 @@ end#»»
 
 function cmp1(snap::SnapRounding, n, before, u, v)
 	c = cmpf(snap, n, before)(u, v)
-	println("\e[36mchecking ($n, $before)($u, $v) = $c\e[m")
+# 	println("\e[36mchecking ($n, $before)($u, $v) = $c\e[m")
 	return c
 end
 function check(snap::SnapRounding, n, before)
@@ -266,7 +266,7 @@ end
 deletes segment `s` *before* point `n`
 """
 function Base.delete!(snap::SnapRounding, n, s)
-	println("\e[31mdelete!\e[m($n, $s=$(snap.segments[s])) $(Tuple.(snap.segments[snap.active]))")
+# 	println("\e[31mdelete!\e[m($n, $s=$(snap.segments[s])) $(Tuple.(snap.segments[snap.active]))")
 # 	i = locate(snap, n, s, true)
 # 	println("  found i=$i / $(Tuple.(snap.segments[snap.active]))")
 # 	@assert snap.active[i] == s
@@ -281,13 +281,13 @@ end
 inserts segment `s` in the correct place *after* point `n`
 """
 function Base.insert!(snap::SnapRounding, n, s)
-	println("\e[32minsert!\e[m($n, $s=$(snap.segments[s]))")
+# 	println("\e[32minsert!\e[m($n, $s=$(snap.segments[s]))")
 	i = locate(snap, n, s, false)
-	println("  found i=$i")
+# 	println("  found i=$i")
 	insert!(snap.active, i, s)
 	i > 1 && newinter(snap, n, i-1)
 	i < length(snap.active) && newinter(snap, n, i)
-	println("  after insertion of $(snap.segments[s]): $(snap.segments[snap.active])")
+# 	println("  after insertion of $(snap.segments[s]): $(snap.segments[snap.active])")
 end
 
 # Treating a pixel««1
@@ -309,7 +309,7 @@ function process(snap::SnapRounding, n)
 			c = point(snap, s, 3)
 			pix1 = pixel!(snap, c)
 			pix1 ≠ pix2 && push!(snap.links, (pix1, pix2))
-			println("\e[34;7;1m link pixels $pix1 => $pix2\e[m (points $(snap.segments[s][3])=>$n)")
+# 			println("\e[34;7;1m link pixels $pix1 => $pix2\e[m (points $(snap.segments[s][3])=>$n)")
 			@assert pix2 < 18
 	# 		push!(snap.links, (snap.segments[s][3], n))
 # 			println("\e[34;1m $(snap.segments[s]) =>,$n\e[m")
@@ -318,7 +318,7 @@ function process(snap::SnapRounding, n)
 		
 
 	for s in e.pass
-		println("terminating $(snap.segments[s])")
+# 		println("terminating $(snap.segments[s])")
 		delete!(snap, n, s)
 		snap.segments[s][2] == n && continue # n is the end point
 		q = pixel_exit(center, ε, point(snap, s, 1), point(snap, s, 2))
@@ -327,10 +327,10 @@ function process(snap::SnapRounding, n)
 		c = point!(snap, q)
 		snap.segments[s][3] = n
 		push!(event(snap, c).reinsert, s)
-		println("reinserting $(snap.segments[s]) at point $c=$q")
+# 		println("reinserting $(snap.segments[s]) at point $c=$q")
 	end
 	for s in e.start
-		println("at $n: segments $s=$(snap.segments[s]) starts")
+# 		println("at $n: segments $s=$(snap.segments[s]) starts")
 		insert!(snap, n, s)
 	end
 	for s in e.reinsert
@@ -349,31 +349,30 @@ Output:
 """
 function snapround(points, segments, ε)#««
 # 	println("\e[48;5;87m****************************\e[m"*"\n"^30)
-	io = open("/tmp/points", "w")#««
-	for (i,p) in pairs(points)
-		println(io,"$(p[1])\t$(p[2]) # $i")
-	end
-	println(io,"\n\n")
-	for (i1,i2) in segments
-		(x1,y1) = points[i1]; (x2,y2) = points[i2]
-		println(io,"$x1\t$y1\t$(x2-x1)\t$(y2-y1)\t# $i1--$i2")
-	end
-	close(io)#»»
+# 	io = open("/tmp/points", "w")#««
+# 	for (i,p) in pairs(points)
+# 		println(io,"$(p[1])\t$(p[2]) # $i")
+# 	end
+# 	println(io,"\n\n")
+# 	for (i1,i2) in segments
+# 		(x1,y1) = points[i1]; (x2,y2) = points[i2]
+# 		println(io,"$x1\t$y1\t$(x2-x1)\t$(y2-y1)\t# $i1--$i2")
+# 	end
+# 	close(io)#»»
 	snap = SnapRounding(points, segments, ε)
 
-	# pixel rounding:
-	count = 0
+# 	count = 0
 	while !isempty(snap.queue)
-		count += 1
+# 		count += 1
 # 		@assert count < 10
 		n = heappop!(snap.queue, ord(snap)); p = point(snap, n)
-		print("""
-\e[1;7m event $n = $p $(point(snap,n))\e[m => $(event(snap,n).start)
-  pass=$(event(snap,n).pass)=$(Tuple.(snap.segments[event(snap,n).pass]))
-  reinsert=$(event(snap,n).reinsert)
-  active=\e[3m$(snap.active)=$(Tuple.(snap.segments[snap.active]))\e[m
-  queue=$(sort(snap.queue; order=ord(snap)))
-""")
+# 		print("""
+# \e[1;7m event $n = $p $(point(snap,n))\e[m => $(event(snap,n).start)
+#   pass=$(event(snap,n).pass)=$(Tuple.(snap.segments[event(snap,n).pass]))
+#   reinsert=$(event(snap,n).reinsert)
+#   active=\e[3m$(snap.active)=$(Tuple.(snap.segments[snap.active]))\e[m
+#   queue=$(sort(snap.queue; order=ord(snap)))
+# """)
 	process(snap, n)
 	end
 	pix = similar(points, length(snap.pixel))
