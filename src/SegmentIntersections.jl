@@ -1,4 +1,21 @@
-# After [Melhorn, Näher 1994] _Implementation of a sweep line algorithm
+# FIXME: due to float inexactitude issues, the ordering of segments in the
+# active line is not completely consistent; it may happen that the
+# intersection point `p` of two consecutive segments `s1, s2` is
+# approximated, so that the ordering of `s1, s2` at `p` is wrong.
+#
+# For now we use a lazy solution, which works only for small graphs: we
+# remove segments using a O(n) loop iterating on all segments.
+# Two possible 'clean' solutions:
+# (1) use double precision (e.g. `DoubleFloats.jl`) for all points and
+# hope that the ordering becomes consistent;
+# (2) use an indexed structure for storing active segments, making
+# segment removal O(log n) given its tree pointer
+#
+# (1) was tried but, at least “out-of-the-box”, does not work.
+# (2) is much more complicated and probably more expensive for the short
+# structures we handle anyway.
+#
+# [Melhorn, Näher 1994] _Implementation of a sweep line algorithm
 # for the straight line segment intersection problem_
 # http://people.scs.carleton.ca/~michiel/lecturenotes/ALGGEOM/bentley-ottmann.pdf
 # J. Hobby, Practical segment intersection with finite precision output
@@ -22,8 +39,8 @@ using FastClosures
 # Geometry tools««1
 @inline det2(a,b)=a[1]*b[2]-a[2]*b[1]
 @inline det2(a,b,c)=det2(b-a,c-a)
-"(p1p2) ∩ (p3p4), or `nothing` if no intersection"
-function inter(p1, p2, p3, p4, ε)#««
+"returns the point (p1p2) ∩ (p3p4), or `nothing` if no intersection"
+function inter(p1, p2, p3, p4)#««
 	@assert p1 < p2
 	# special case: (p1p2) is vertical, we *need* the intersection point
 	# to be on that same vertical line.
@@ -35,52 +52,48 @@ function inter(p1, p2, p3, p4, ε)#««
 	d = d3 - d4
 	d1 = d2 - d
 	sign(d1) == sign(d2) && return nothing
-	abs(d) ≤ ε && return nothing
+	d == 0 && return nothing
+# 	abs(d) ≤ ε && return nothing
 	z= p1+d2/d*v12
-# 	println("p1=$p1\np2=$p2\np3=$p3\np4=$p4\n \e[31mz=$z\e[m\n")
-# 	(p1[1] ≤ z[1] ≤ p2[1]) && (p3[1] ≤ z[1] ≤ p4[1]) &&
-# 	(p1[2] ≤ z[2] ≤ p2[2]) && (p3[2] ≤ z[2] ≤ p4[2]) &&
 		return z
 	return nothing
 end#»»
 """
-Returns > 0 if point p is above the line (p1p2),
-0 if it on the line (up to ε),
-and < 0 if it is below this line.
+compares two segments at their intersection with the sweepline either
+before of after n-the point.
 """
-@inline function point_cmp(p1,p2,p)#««
-	return sign(det2(p1,p2,p))
+function cmpseg(p, (a1, b1), (a2, b2), before=false)#««
+	(u1, v1, u2, v2) = (x - p for x in (a1, b1, a2, b2))
+	d1 = det2(v1, u1) # d1 > 0 iff (a1,b1) crosses *above* p
+	d2 = det2(v2, u2) # ditto
+	dx1 = v1[1]-u1[1]
+	dx2 = v2[1]-u2[1]
+# 	println("\e[31;1mp=$p, a1=$a1\e[m, u1=$u1")
+# 	print(""" cmpseg at $p: ($a1,$b1) and ($a2,$b2)
+#   seg1 crosses at $d1/$dx1, seg2 at $d2/$dx2
+# """)
+# 	println(u1, v1, u2, v2)
+	if dx1 == 0 # segment 1 is vertical through
+		dx2 == 0 && return cmp(b1[2], b2[2]) # some arbitrary, consistent test...
+		d2 == 0 && return before ? -1 : 1
+		return cmp(0, d2)
+	elseif dx2 == 0
+		d1 == 0 && return before ? 1 : -1
+		return cmp(d1, 0)
+	end
+	# segment (a1, b1) crosses at d1/dx1, etc.
+	c = cmp(d1*dx2, d2*dx1)
+	c ≠ 0 && return c
+	# both segments cross at the same point: check directions
+	d = det2(v1-u1, v2-u2)
+	s = before ? (d1 < 0) : (d1 ≤ 0)
+	return (-1)^s*Int(sign(d))
 end#»»
 
-# L¹ pixels ««1
-"rounds in L¹ norm to an *even* multiple of ε, e.g. (0,0), (0,2), (1,1)…"
-function roundL1(point, ε)#««
-	# we need diamond-pixels closed on the right side:
-	# we use ceil() instead of round(), which has strange behaviour
-	# for half-integers (rounding to closest *even* integer).
-	iszero(ε) && return point
-# 	println(((point[1]+point[2])/(2ε),(point[1]-point[2])/(2ε)))
-	u = ceil(Int,(point[1]+point[2]-ε)/(2ε))
-	v = ceil(Int,(point[1]-point[2]-ε)/(2ε))
-	return SA[(u+v)*ε,(u-v)*ε]
-end#»»
-"returns the point where (p,q) exits the diagonal pixel with width ε"
-function diagonal_exit(pixel, ε, p, q)#««
-	c = pixel .+ (ε, 0) # right corner
-	(cp, cq) = (p-c, q-c)
-	@assert (cp[1]+cp[2] < 0 || cp[1]-cp[2] < 0)
-	# point `q` is inside the pixel:
-	(cq[1]+cq[2] < 0) && (cq[1]-cq[2] < 0) && return nothing
-	d2 = det2(cp, cq)
-	if d2 ≥ 0 # exits through the bottom
-		x = d2/(cq[1]-cp[1]+cp[2]-cq[2])
-		return c .- (x, x)
-	else
-		x = d2/(cp[1]+cp[2]-cq[1]-cq[2])
-		return c .+ (-x,x)
-	end
-end#»»
 # L∞ pixels ««1
+@inline roundreal(x, ε) = iszero(ε) ? x : ε*floor(Int,x/ε+1/2)
+@inline roundLinf(point, ε) = roundreal.(point, ε)
+	
 "returns the point where segment (p,q) exits the pixel, or `nothing`."
 function pixel_exit(pixel, ε, p, q)#««
 	c = pixel .+ ε/2 # upper-right corner
@@ -111,21 +124,6 @@ function pixel_exit(pixel, ε, p, q)#««
 	@assert x ≤ ε
 	return c .- (x,ε)
 end#»»
-# function trim(pixel, segment, ε)#««
-# 	println("\e[1mtrim($sweepline, $segment)\e[m")
-# 	i = findfirst(==(segment), sweepline) # FIXME sorted search!
-# 	println("   found at $i")
-# 	@assert i ≠ nothing "segment $segment found in sweepline"
-# 	deleteat!(sweepline, i)
-# 	(a,b) = segment
-# 	q = pixel .+ ε/2
-# 	all(points[b] .< q) && return
-# 	# compute the re-entering point `r`
-# 	r = pixel_exit(pixel, ε, points[a], points[b])
-# 	println("  exit point is $r")
-# 	r == nothing && return nothing
-# 	return Event(r, segment, SEGMENT_REINSERT)
-# end#»»
 # SnapRounding structure««1
 """
  - `active`: all segments crossing sweepline, in order
@@ -133,281 +131,213 @@ end#»»
    (≈ events associated with this point in the queue)
  - `queue`: heap of future points to examine (sorted lex.)
 """
-struct SnapRounding{P,I<:Integer,E} # P is point type
-	points::Vector{P}
-	segmentsfrom::Vector{Vector{I}}
+struct SnapRounding{P,I<:Integer,E,EV}
+	# P: point type
+	# E: ε type
+	# I: index type
+	# EV: StructVector (constructor computed) for events
+	# active: (start, end, last visited point)
+	events::EV
+	segments::Vector{MVector{3,I}} # (a,b,last-active-point)
 	ε::E
-	queue::Vector{I} # should be a tree instead
-	active::Vector{NTuple{2,I}} # should be a tree instead
-	isreinsert::Vector{Bool} # should be collected with other point properties as a StructVector
+	queue::Vector{I}
+	active::Vector{I}
 	pointid::Dict{P,I}
-	@inline SnapRounding{P,I}(points, segmentsfrom, ε::E) where{P,I,E} =
-		new{P,I,E}(points, segmentsfrom, ε, eachindex(points), [],
-			[false for _ in points],
-			Dict{P,I}(points[i]=>i for i in reverse(eachindex(points))),
+	pixel::Dict{P,I}
+	links::Set{NTuple{2,I}}
+	@inline SnapRounding{P,I}(events::EV, segments, ε::E, queue
+			) where{P,I,EV,E} =
+		new{P,I,E,EV}(events, segments, ε, queue, [], Dict(), Dict(), Set())
+	@inline SnapRounding{P,I}(points, segments, ε) where{P,I} =
+		SnapRounding{P,I}(StructVector((
+			# start: segments starting at this point (original segment start)
+			# pass: segments passing through this intersection point
+			# reinsert: segments reinserted at this point
+				point=roundLinf.(points, ε),
+				start = [collect(searchsorted(segments, i;by=first))
+					for i in eachindex(points)],
+				pass = [I[] for _ in points ],
+				reinsert=[ I[] for _ in points ],
+			)),
+			[(s[1], s[2], s[1]) for s in segments], # segments
+			ε,  # ε
+			heapify!([1:length(points)...], Base.Order.By(@closure i->points[i])),
 			)
 end
 
-@inline ord(snap::SnapRounding) = Base.Order.By(@closure i->snap.points[i])
-@inline Base.round(snap::SnapRounding, point) = roundL1(point, snap.ε)
-@inline byslope(points,i) = (j,k)->det2(points[[i,j,k]]...) > 0
-@inline DataStructures.heappush!(snap::SnapRounding, plist...) =
-	for p in plist; p ∉ snap.queue && heappush!(snap.queue, p, ord(snap)); end
+@inline event(snap::SnapRounding, i) = LazyRow(snap.events, i)
+@inline point(snap::SnapRounding, i) = event(snap, i).point
+@inline point(snap::SnapRounding, i, j) = point(snap, snap.segments[i][j])
+@inline points(snap::SnapRounding, l...)= (x.point for x in snap.events[[l...]])
+@inline ord(snap::SnapRounding) = Base.Order.By(@closure i->point(snap, i))
+@inline Base.round(snap::SnapRounding, point) = roundLinf(point, snap.ε)
 
 function SnapRounding(points, segments, ε)#««
 	println("\e[48;5;57m****************************\e[m"*"\n"^30)
-# 	z = inter(points[10],points[8],points[2],points[3],ε)
-# 	println(sort([10,8,2,3],by=i->points[i]))
-# 	println(z)
-# 	return z
 	# make all segments left-to-right
 	for (i, s) in pairs(segments)
 		(points[s[1]] >  points[s[2]]) && (segments[i] = (s[2], s[1]))
 	end
 	unique!(sort!(segments))
-
-	segmentsfrom = [ sort(last.(segments[searchsorted(segments,i;by=first)]);
-		lt=byslope(points, i)) for i in eachindex(points)]
-	println("\e[36m",collect(pairs(segmentsfrom)),"\e[m")
-	snap = SnapRounding{eltype(points),Int}(points, segmentsfrom, ε)
-	heapify!(snap.queue, ord(snap))
+	snap = SnapRounding{eltype(points),Int}(points, segments, ε)
+	for i in reverse(eachindex(points))
+		snap.pointid[points[i]] = i
+		snap.pixel[round(snap, points[i])] = i
+	end
+	for (s, (a,b)) in pairs(snap.segments)
+		push!(event(snap, b).pass, s)
+	end
 	return snap
 end#»»
 
 function point!(snap::SnapRounding, point)
 	@assert !isnan(point[1])
-	n = get!(snap.pointid, point, length(snap.points)+1)
-	if n == length(snap.points)+1
-		println("\e[32;7;1m create point $n=$point\e[m")
-		push!(snap.points, point)
-		push!(snap.segmentsfrom, [])
-		push!(snap.isreinsert, false)
+	n = get!(snap.pointid, point, length(snap.events)+1)
+	if n == length(snap.events)+1
+		println("\e[32;7;1m create event $n=$point\e[m")
+		push!(snap.events, (point=point, start=[], reinsert=[], pass=[]))
+		heappush!(snap.queue, n, ord(snap))
 	end
 	return n
 end
 @inline points!(snap::SnapRounding, plist...)= [point!(snap, p) for p in plist]
-# Heating a pixel««1
-"""
-heats the pixel containing `point`, if needed,
-clips outgoing segments
-"""
-function pixel!(snap::SnapRounding, n)
-	point = snap.points[n]
-	ε = snap.ε
-	if point[1] == -8.0
-		println(point)
-		println(point==snap.points[15])
-	end
+
+function pixel!(snap::SnapRounding, point)
 	center = round(snap, point)
-	cright = center .+ (ε, 0)
-	cbelow = center .- (0, ε)
-	cabove = center .+ (0, ε)
-	(nr, nb, na) = points!(snap, cright, cbelow, cabove)
-# 	newsegmentfrom(snap, nb, nr)
-# 	newsegmentfrom(snap, na, nr)
-	if cright == point # end of hot pixel:
-		println("\e[31;1m end of hot pixel at $cright\e[m")
-		range = intercept(snap, snap.points[nb], snap.points[na])
-		splice!(snap, range, [])
-		return
-	end
-	heappush!(snap, nr)
-	println("\e[36mpixel for $center: $nr=$cright $nb=$cbelow $na=$cabove\e[m")
-	# the guards are added
-	range = intercept(snap, snap.points[nb], snap.points[na])
-	println("  \e[43msegments intercepted:\e[m $(snap.active[range])")
-# 	range = min(j, first(range)):max(j+1,last(range))
-# 	println("    after correction: $(snap.active[range])")
-	newseg = empty(snap.active)
-	# trim incoming segments:
-	for i in range
-		(a, b) = snap.active[i]
-		b == nr && continue
-		p = diagonal_exit(center, snap.ε, snap.points[[a,b]]...)
-		p == nothing && continue
-		n = point!(snap, p)
-		snap.isreinsert[n] = true
-		println("segment ($a,$b) exits at $n=$p")
-		newsegmentfrom(snap, n, b)
-		heappush!(snap, n)
-		push!(newseg, (n, b))
-		println("   segment $(snap.active[i]) exits at $n=$p")
-	end
-	# insert (truncated) segments from point in list
-	# segments going down are inserted between nb and nr
-	# segments going up are inserted between na and nr (reverse order)
-	segdown = [nb]
-	segup = [na]
-	println("\e[35m insert truncated segments: $n -- $(snap.segmentsfrom[n])\e[m")
-	for b in snap.segmentsfrom[n]
-		c = point!(snap, diagonal_exit(center, snap.ε, snap.points[[n, b]]...))
-		println("  segment ($n, $b) exits pixel at $c")
-		y = snap.points[c][2] - center[2]
-		snap.isreinsert[c] = true
-		newsegmentfrom(snap, c, b)
-		println("  segmentsfrom[$c] = $(snap.segmentsfrom[c])")
-		(x, y) = snap.points[b] .- center
-		y == 0 && continue
-		heappush!(snap, c)
-		x ≠ 0 && push!(y < 0 ? segdown : segup, c)
-	end
-	newsegs = sizehint!(NTuple{2,Int}[], length(segup)+length(segdown))
-	push!(segdown, nr)
-	reverse!(segup); push!(segup, nr)
-	for s in (segdown, segup), i in 1:length(s)-1
-		push!(newsegs, (s[i], s[i+1]))
-	end
-# 	newsegs = [
-# 		(segdown[i], segdown[i+1]) for i in 1:length(segdown)-1
-# 		(segup[i+1], segup[i]) for i in length(segup)-1:-1:1
-# 	]
-	println("\e[1mreplace segments by $newsegs\e[m ($segdown, $segup)")
-	splice!(snap, range, newsegs)
+	n = get!(snap.pixel, center, length(snap.pixel)+1)
+	return n
 end
-function newsegmentfrom(snap::SnapRounding, p, q)#««
-	println("newsegmentfrom($p, $q)")
-	@assert snap.points[p] < snap.points[q] "points[$p] < points[$q]"
-	plist = snap.segmentsfrom[p]
-	pos = searchsorted(plist, q; lt=byslope(snap.points, p))
-	if !isempty(pos) # keep only shorter vector
-		println("segment ($p, $q) is collinear to segments[$pos] = ($p, $(plist[pos]))")
-		i = first(pos)
-		r = plist[i]
-		@assert r ≠ p
-		q == r && return # do nothing if q already present
-		snap.points[r] < snap.points[q] && ((q,r) = (r,q))
-		println("  points aligned in order $p--$q--$r")
-		println("  replacing $(plist[i]) by $q")
-		plist[i] = q
-		println("  and calling newsegmentfrom($q, $r)")
-		q ≠ r && newsegmentfrom(snap, q, r)
-	else
-		insert!(plist, first(pos), q)
-	end
-end#»»
-"returns the range of active segments intercepted by points p and q"
-function intercept(snap::SnapRounding, p, q)#««
-	# two passes [http://www.tbray.org/ongoing/When/200x/2003/03/22/Binary]
-# 	p = snap.points[i]
-	(lo, hi) = (0, 1+length(snap.active)); while lo+1 < hi
-		m = Base.Sort.midpoint(lo, hi)
-		c = det2(p, snap.points[[snap.active[m]...]]...)
-# 		c = cmpf(snap.points[[snap.active[m]...]])
-		c > 0 ? (lo = m) : (hi = m)
-	end
-	a1 = lo
-	(lo, hi) = (0, 1+length(snap.active)); while lo+1 < hi
-		m = Base.Sort.midpoint(lo, hi)
-		c = det2(q, snap.points[[snap.active[m]...]]...)
-# 		c = cmpf(snap.points[[snap.active[m]...]])
-		c ≥ 0 ? (lo = m) : (hi = m)
-	end
-	a2 = hi
-	return (a1+1:a2-1)
-end#»»
-# @inline cmppoint(p) = s-> det2(s[1]-p, s[2]-p)
-# @inline cmpleft(p, q) = s -> begin
-# 	(a,b) = s
-# 	d = det2(a-p, b-p)
-# 	!iszero(d) && return d
-# 	# FIXME
-# end
+
 
 # Adding an intersection point««1
-# "returns the insertion point for this event in the list of active segments"
-# function locate(list, p, q)#««
-# 	cmpf = @closure s -> begin # returns >0 if point p is *above* s
-# 		(a,b) = s
-# 		d = det2(a-p, b-p)
-# 		!iszero(d) && return d
-# 		# FIXME
-# 	end
-# 	(lo, hi) = (0, 1+length(list)); while lo+1 < hi
-# 		m = Base.Sort.midpoint(lo, hi)
-# 		c = cmpf(list[m].segment)
-# 		c > 0 ? (lo = m) : (hi = m)
-# 	end
-# 	a1 = lo
-# 	(lo, hi) = (0, 1+length(list)); while lo+1 < hi
-# 		m = Base.Sort.midpoint(lo, hi)
-# 		c = cmpf(list[m].segment)
-# 		c ≥ 0 ? (lo = m) : (hi = m)
-# 	end
-# 	a2 = hi
-# 	return (a1+1:a2-1)
-# end#»»
 """
 intersects active[j] and active[j+1] if needed.
 pushes the intersection point in the queue (with appropriate segmentsfrom[]).
 """
-function newinter(snap::SnapRounding, j)#««
-	(a1, b1) = snap.active[j]
-	(a2, b2) = snap.active[j+1]
+function newinter(snap::SnapRounding, n, j)#««
+	s1, s2 = snap.active[j:j+1]
+	(a1, b1) = snap.segments[s1]
+	(a2, b2) = snap.segments[s2]
 	a1 == a2 && return false
 	b1 == b2 && return false
-	println("newinter(snap, $j)\n$(snap.active)")
-	println("\e[34;1m intersect active[$j]=($a1,$b1) and [$(j+1)]=($a2,$b2)\e[m")
-	p = inter(snap.points[[a1,b1,a2,b2]]..., 0)
+	println("\e[33;1m intersect active[$j]=($a1,$b1) and [$(j+1)]=($a2,$b2)\e[m")
+	p = inter(points(snap, a1, b1, a2, b2)...)
 	p == nothing && return false
-	n = point!(snap, p)
-	println("   \e[34m ($a1,$b1) ∩ ($a2,$b2) found point $n\e[m")
-	if n == a1
-		snap.active[j+1] = (a2, a1)
-		newsegmentfrom(snap, a1, b2)
-	elseif n == a2
-		println("\e[35;1;7m case a2=$a2:\e[m")
-		snap.active[j] = (a1, a2)
-		println("\e[35mchange active[$j] to ($a1,$a2)\e[m")
-		newsegmentfrom(snap, a2, b1)
-	elseif n == b1
-		snap.active[j+1] = (a2, b1)
-		newsegmentfrom(snap, b1, b2)
-	elseif n == b2
-		snap.active[j] = (a1, b2)
-		newsegmentfrom(snap, b2, b1)
-	else
-		snap.active[j] = (a1, n)
-		snap.active[j+1] = (a2, n)
-		newsegmentfrom(snap, n, b1)
-		newsegmentfrom(snap, n, b2)
-		heappush!(snap, n)
-	end
+	p > point(snap, n) || return false
+	c = point!(snap, p)
+	println("   \e[34m ($a1,$b1) ∩ ($a2,$b2) found point $p=$c\e[m")
+	ev = event(snap, c)
+	c ≠ a1 && push!(ev.pass, s1)
+	c ≠ a2 && push!(ev.pass, s2)
 end#»»
 
 # Inserting new segments ««1
-"""
-inserts new segments, computes intersection for top of range
-and bottom of range.
-no intersection is computed between the inserted segments themselves
-(they are assumed divergent).
-"""
-function Base.splice!(snap::SnapRounding, range, segments)#««
-	println("splice: $range => $segments")
-	(bot, top) = (first(range), last(range))
-	# show changes in active list««
-	print("\e[1m〈\e[m\e[38;5;8m")
-	join(stdout, snap.active[begin:bot-1], ",")
-	print("\e[m\e[1m|\e[m\e[31m")
-	join(stdout, snap.active[range],",")
-	print("\e[m\e[1m→\e[m\e[32m")
-	join(stdout,segments, ",")
-	print("\e[m\e[1m|\e[m\e[38;5;8m")
-	join(stdout, snap.active[top+1:end], ",")
-	println("\e[m\e[1m〉\e[m")#»»
-	# insert new snap.active segments
-	splice!(snap.active, range, segments)
-	println(" now active=$(snap.active)")
-	if isempty(segments)
-		# TODO: intersect bottom and top of range
-		bot < length(segments) && newinter(snap, bot-1)
-	else
-		bot > 1 && newinter(snap, bot-1)
-		top = bot + length(segments)-1
-		top < length(snap.active) && newinter(snap, top)
-	end
-	println("  after inter: active=$(snap.active)")
-end#»»
+@inline cmpf(snap::SnapRounding, n, before) =
+	@closure (s1, s2) -> cmpseg(point(snap, n),
+		(point(snap, s1, 1), point(snap, s1, 2)),
+		(point(snap, s2, 1), point(snap, s2, 2)), before)
 
+function cmp1(snap::SnapRounding, n, before, u, v)
+	c = cmpf(snap, n, before)(u, v)
+	println("\e[36mchecking ($n, $before)($u, $v) = $c\e[m")
+	return c
+end
+function check(snap::SnapRounding, n, before)
+	for i in 1:length(snap.active), j in 1:length(snap.active)
+# 		println("\e[36m($n,$before) checking ($i, $j) = $(Tuple.(snap.segments[snap.active[[i,j]]]))\e[m")
+		c = cmp1(snap, n, before, snap.active[[i,j]]...)
+# 		c = cmpf(snap, n, before)(snap.active[i], snap.active[j])
+# 		println("    \e[1mreturned $c\e[m")
+		@assert c == cmp(i,j)
+	end
+end
+function locate(snap::SnapRounding, n, s, before)
+	(lo, hi) = (0, 1+length(snap.active)); while lo+1 < hi
+		m = Base.Sort.midpoint(lo, hi)
+		c = cmpf(snap, n, before)(s, snap.active[m])
+# 		println("comparing @$n segments $(snap.segments[s]) and $m=$(snap.segments[snap.active[m]]) returned $c")
+		c == 0 && return m
+		c ≥ 0 ? (lo = m) : (hi = m)
+	end
+	return lo+1
+end
+
+"""
+deletes segment `s` *before* point `n`
+"""
+function Base.delete!(snap::SnapRounding, n, s)
+	println("\e[31mdelete!\e[m($n, $s=$(snap.segments[s])) $(Tuple.(snap.segments[snap.active]))")
+# 	i = locate(snap, n, s, true)
+# 	println("  found i=$i / $(Tuple.(snap.segments[snap.active]))")
+# 	@assert snap.active[i] == s
+# 	deleteat!(snap.active, s)
+	for (i, t) in pairs(snap.active)
+		t ≠ s && continue
+		deleteat!(snap.active, i)
+		return
+	end
+end
+"""
+inserts segment `s` in the correct place *after* point `n`
+"""
+function Base.insert!(snap::SnapRounding, n, s)
+	println("\e[32minsert!\e[m($n, $s=$(snap.segments[s]))")
+	i = locate(snap, n, s, false)
+	println("  found i=$i")
+	insert!(snap.active, i, s)
+	i > 1 && newinter(snap, n, i-1)
+	i < length(snap.active) && newinter(snap, n, i)
+	println("  after insertion of $(snap.segments[s]): $(snap.segments[snap.active])")
+end
+
+# Treating a pixel««1
+"""
+treats the n-th event in the structure
+heats the pixel containing `point`, if needed,
+clips outgoing segments
+"""
+function process(snap::SnapRounding, n)
+# 	check(snap, n, true)
+	p = point(snap, n)
+	e = event(snap, n)
+	ε = snap.ε
+	unique!(sort!(e.pass))
+	center = round(snap, p)
+	if !isempty(e.pass)
+		pix2 = pixel!(snap, p)
+		for s in e.pass
+			c = point(snap, s, 3)
+			pix1 = pixel!(snap, c)
+			pix1 ≠ pix2 && push!(snap.links, (pix1, pix2))
+			println("\e[34;7;1m link pixels $pix1 => $pix2\e[m (points $(snap.segments[s][3])=>$n)")
+			@assert pix2 < 18
+	# 		push!(snap.links, (snap.segments[s][3], n))
+# 			println("\e[34;1m $(snap.segments[s]) =>,$n\e[m")
+		end
+	end
+		
+
+	for s in e.pass
+		println("terminating $(snap.segments[s])")
+		delete!(snap, n, s)
+		snap.segments[s][2] == n && continue # n is the end point
+		q = pixel_exit(center, ε, point(snap, s, 1), point(snap, s, 2))
+		q == nothing && continue
+		# mark for reinsertion at q:
+		c = point!(snap, q)
+		snap.segments[s][3] = n
+		push!(event(snap, c).reinsert, s)
+		println("reinserting $(snap.segments[s]) at point $c=$q")
+	end
+	for s in e.start
+		println("at $n: segments $s=$(snap.segments[s]) starts")
+		insert!(snap, n, s)
+	end
+	for s in e.reinsert
+		insert!(snap, n, s)
+	end
+# 	check(snap, n, false)
+end
 # Main function««1
 """
 Snap-rounding after the [Hershberger 1996] algorithm.
@@ -432,38 +362,23 @@ function snapround(points, segments, ε)#««
 	snap = SnapRounding(points, segments, ε)
 
 	# pixel rounding:
-	hotgraph = empty(segments)
-	hotpixel = empty(points)
-# 	roundcoord = iszero(ε) ? identity : @closure x->round(Int,x/ε)*ε
-
 	count = 0
 	while !isempty(snap.queue)
 		count += 1
-# 		@assert count < 6
-		n = heappop!(snap.queue, ord(snap)); p = snap.points[n]
+# 		@assert count < 10
+		n = heappop!(snap.queue, ord(snap)); p = point(snap, n)
 		print("""
-\e[1;7m p $n = $p $(snap.isreinsert[n])\e[m  $(sort(snap.queue; order=ord(snap)))
-  active=\e[3m$(snap.active)\e[m
-  segfrom=\e[32m$(snap.segmentsfrom[n])\e[m
+\e[1;7m event $n = $p $(point(snap,n))\e[m => $(event(snap,n).start)
+  pass=$(event(snap,n).pass)=$(Tuple.(snap.segments[event(snap,n).pass]))
+  reinsert=$(event(snap,n).reinsert)
+  active=\e[3m$(snap.active)=$(Tuple.(snap.segments[snap.active]))\e[m
+  queue=$(sort(snap.queue; order=ord(snap)))
 """)
-		if snap.isreinsert[n]
-			println("\e[36;7;1mpoint $n=$p is reinsert: $(snap.segmentsfrom[n])\e[m")
-			range = intercept(snap, p, p)
-			println("\e[36m range = $range\e[m")
-			splice!(snap, range, [(n, i) for i in snap.segmentsfrom[n]])
-		else
-			pixel!(snap, n)
-		end
-		# first remove all segments ending at this p
-# 		range = intercept(snap, p, p)
-# 		(bot, top) = (first(range), last(range))
-# 		println("\e[31m found range = $range\e[m")
-# 		slist = snap.segmentsfrom[n]
-# 		splice!(snap, range, [(n,i) for i in slist])
+	process(snap, n)
 	end
-
-# 	unique!(sort!(hotpixel))
-	return hotpixel
+	pix = similar(points, length(snap.pixel))
+	for (k, v) in snap.pixel; pix[v] = k; end
+	return (pix, sort(collect(snap.links)))
 end#»»
 
 # ««1
