@@ -33,6 +33,8 @@ using .TriangleMeshes
 # const TriangleMesh = IGLBoolean.TriangleMesh
 include("scad.jl")
 
+using GLMakie
+
 # General tools««1
 struct Consecutives{T,V} <: AbstractVector{T}
 	parent::V
@@ -1380,6 +1382,19 @@ end
 #————————————————————— Extra tools —————————————————————————————— ««1
 
 #»»1
+# Viewing««1
+function view!(scene::Makie.AbstractScene, m::TriangleMesh)
+	T = TriangleMeshes
+	vmat = similar(first(T.points(m)), 3*T.nfaces(m), 3)
+	for (i, f) in pairs(T.faces(m)), j in 1:3, k in 1:3
+		vmat[3*i+j-3, k] = T.points(m)[f[j]][k]
+	end
+	fmat = collect(1:size(vmat, 1))
+	attr = [ m.attributes[fld1(i,3)] for i in 1:size(vmat, 1)]
+	GLMakie.mesh!(scene, vmat, fmat, color=attr)
+end
+@inline view(m::TriangleMesh) = view!(Makie.Scene(), m)
+@inline view(g::AbstractGeometry{3}) = view(mesh(g))
 # OpenSCAD output««1
 
 # # Attachments««1
