@@ -7,12 +7,11 @@ module ConstructiveGeometry
 using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers
-# using Logging
 using FastClosures
-# using DataStructures
 
 import Rotations
 import Colors: Colors, Colorant
+using GLMakie
 
 import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
@@ -30,10 +29,7 @@ using .TriangleMeshes
 	TriangleMesh{A}(points, faces, [ c for _ in faces ])
 @inline Base.map!(f, m::TriangleMesh) =
 	TriangleMeshes.points(m) .= f.(TriangleMeshes.points(m))
-# const TriangleMesh = IGLBoolean.TriangleMesh
 include("scad.jl")
-
-using GLMakie
 
 # General tools««1
 struct Consecutives{T,V} <: AbstractVector{T}
