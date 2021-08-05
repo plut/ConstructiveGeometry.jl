@@ -24,12 +24,13 @@ using .ConvexHull
 include("Shapes.jl")
 using .Shapes
 
-# include("SpatialSorting.jl")
-# include("TriangleIntersections.jl")
-include("CornerTables.jl")
-using .CornerTables
-@inline corner_table(points, faces, c::Colorant) =
-	CornerTable(points, faces, Iterators.repeated(c))
+include("TriangleMeshes.jl")
+using .TriangleMeshes
+@inline triangle_mesh(points, faces, c::A) where{A<:Colorant} =
+	TriangleMesh{A}(points, faces, [ c for _ in faces ])
+@inline Base.map!(f, m::TriangleMesh) =
+	TriangleMeshes.points(m) .= f.(TriangleMeshes.points(m))
+# const TriangleMesh = IGLBoolean.TriangleMesh
 include("scad.jl")
 
 # General tools««1
@@ -406,9 +407,8 @@ end
 	Mesh(merge(_DEFAULT_PARAMETERS, kwargs.data))(s)
 @inline get_parameter(g::Mesh, name) = get_parameter(g.parameters, name)
 
-@inline corner_table(g::Mesh{T}, points, faces) where{T} =
-	CornerTable{Int,SVector{3,T},typeof(g.color)}(
-		points, faces, Iterators.repeated(g.color))
+@inline triangle_mesh(g::Mesh{T}, points, faces) where{T} =
+	triangle_mesh(points, faces, g.color)
 @inline polygon_xor(::Mesh{T}, args...) where{T} = PolygonXor{T}(args...)
 # 2d primitives««1
 # Square««2
@@ -474,7 +474,7 @@ end
 		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
 
 (g::Mesh{T})(s::Cube) where{T} =
-	corner_table(g, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
+	triangle_mesh(g, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
 	[ # 12 triangular faces:
 	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
 	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
@@ -490,7 +490,7 @@ end
 function (g::Mesh{T})(s::Sphere) where{T}
 	plist = fibonacci_sphere_points(T(s.radius), g.parameters)
 	(pts, faces) = convex_hull(plist)
-	return corner_table(g, pts, faces)
+	return triangle_mesh(g, pts, faces)
 end
 
 # Cylinder is implemented as an extrusion
@@ -539,17 +539,14 @@ struct CSGUnion{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
 @inline (g::Mesh)(s::CSGUnion{2}) = Shapes.clip(:union, g.(s.children)...)
-@inline (g::Mesh)(s::CSGUnion{3}) =
-	CornerTables.combine(g.(s.children), 1, g.parameters.ε)
+@inline (g::Mesh)(s::CSGUnion{3}) = union(g.(s.children)...)
 
 # Intersection««2
 struct CSGInter{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
-@inline (g::Mesh)(s::CSGInter{2}) =
-	Shapes.clip(:intersection, g.(s.children)...)
-@inline (g::Mesh)(s::CSGInter{3}) =
-	CornerTables.combine(g.(s.children), length(s.children), g.parameters.ε)
+@inline (g::Mesh)(s::CSGInter{2})= Shapes.clip(:intersection, g.(s.children)...)
+@inline (g::Mesh)(s::CSGInter{3}) = intersect(g.(s.children)...)
 
 # Difference««2
 struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
@@ -557,9 +554,7 @@ struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
 end
 @inline (g::Mesh)(s::CSGDiff{2}) =
 	Shapes.clip(:difference, g(s.children[1]), g(s.children[2]))
-@inline (g::Mesh)(s::CSGDiff{3}) =
-	CornerTables.combine([g(s.children[1]), reverse(g(s.children[2]))],
-		2, g.parameters.ε)
+@inline (g::Mesh)(s::CSGDiff{3}) = setdiff(g(s.children[1]), g(s.children[2]))
 
 # Complement««2
 # TODO
@@ -620,7 +615,7 @@ CSGHull = constructed_solid_type(:hull)
 	return polygon_xor(g, convex_hull(v))
 end
 
-@inline vertices3(m::CornerTable) = CornerTables.points(m)
+@inline vertices3(m::TriangleMesh) = TriangleMeshes.points(m)
 @inline vertices3(m::PolygonXor) =
 	(SA[p[1], p[2], 0] for p in Shapes.vertices(m))
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
@@ -680,8 +675,8 @@ end
 
 function (g::Mesh)(s::Project)
 	m = g(s.child)
-	p = CornerTables.points(m)
-	f = CornerTables.faces(m)
+	p = TriangleMeshes.points(m)
+	f = TriangleMeshes.faces(m)
 	return PolygonXor([SA[x[1], x[2]] for x in p], f)
 end
 
@@ -730,7 +725,7 @@ function (g::Mesh)(s::LinearExtrude)
 	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	]
-	return corner_table(g, pts3, faces)
+	return triangle_mesh(g, pts3, faces)
 end
 
 # Cone««2
@@ -1327,10 +1322,10 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 	Expr(:toplevel, expr_filter.(f, x.args)...)
 
 # STL ««1
-function stl(io::IO, m::CornerTable)
+function stl(io::IO, m::TriangleMesh)
 	println(io, "solid Julia_ConstructiveGeometry_jl_model")
-	points = CornerTables.points(m)
-	faces = CornerTables.faces(m)
+	points = TriangleMeshes.points(m)
+	faces = TriangleMeshes.faces(m)
 	for f in faces
 		tri = (points[f[1]], points[f[2]], points[f[3]])
 		n = cross(tri[2]-tri[1], tri[3]-tri[1])

@@ -97,10 +97,10 @@ function scad(io::IO, m::PolygonXor)
 	end
 	println(io, "} } ")
 end
-function scad(io::IO, m::CornerTable)
+function scad(io::IO, m::TriangleMesh)
 	println(io, "polyhedron(points=",
-		Vector{Float64}.(CornerTables.points(m)), ",")
-	println(io, "  faces=", [collect(f.-1) for f in CornerTables.faces(m)], ");")
+		Vector{Float64}.(TriangleMeshes.points(m)), ",")
+	println(io, "  faces=", [collect(f.-1) for f in TriangleMeshes.faces(m)], ");")
 end
 
 # FIXME: mat44 for 4x4 matrices

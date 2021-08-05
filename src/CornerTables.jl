@@ -287,7 +287,7 @@ end
 begin
 # 	check1049(m)
 	k = fan(m, c)
-	println("      apex($c): fan=$k/$(nfans(m))")
+# 	println("      apex($c): fan=$k/$(nfans(m))")
 	vertex(m, k)
 end
 @inline right(m::CornerTable, c::Corner) = apex(m, next(c))
@@ -340,7 +340,7 @@ end
 @inline point!(m::CornerTable, v::Vertex, p) = getv(m, v).point = p
 @inline points(m::CornerTable) = m.vertex.point
 
-@inline Base.map!(f, m::CornerTable) = points(m) .= f.(points(m))
+# @inline Base.map!(f, m::CornerTable) = points(m) .= f.(points(m))
 
 @inline triangle(m::CornerTable, f::Face) =
 	(point(m, f, Side(1)), point(m,f,Side(2)), point(m,f,Side(3)))
@@ -1337,8 +1337,9 @@ function project_and_triangulate(m::CornerTable, proj, vlist,elist, ε = 0)
 	elist2 = map(e->map(v->Int(searchsortedfirst(vlist, v)), e), elist)
 
 # 	global K=(plist, elist2, ε); @assert false
-	println("plist = $plist\nelist=$elist2\n")
-	SegmentIntersections.intersections!(plist, elist2, ε)
+	println("plist = $plist\nelist=$elist2 ε=$ε\n")
+	SegmentIntersections.snapround!(plist, elist2, ε)
+	println("returned $(length(plist)), $(length(elist2)):")
 # 	SegmentGraphs.simplify!(plist, elist2, ε)
 	newpoints = inv(proj).(plist[length(vlist)+1:end])
 	vlist = [vlist; Vertex.(nvertices(m)+1:nvertices(m)+length(plist)-length(vlist))]
@@ -1355,11 +1356,12 @@ function project_and_triangulate(m::CornerTable, proj, vlist,elist, ε = 0)
 	println(io,"\n\n")
 	for (i1, i2) in eachrow(emat)
 		(x1,y1) = vmat[i1,:]; (x2,y2) = vmat[i2,:]
-		println(io,"$x1\t$y1\t$(x2-x1)\t$(y2-y1) # $(vlist[i1])--$(vlist[i2])")
+		println(io,"$x1\t$y1\t$(x2-x1)\t$(y2-y1) # ($i1,$i2): $(vlist[i1])--$(vlist[i2])")
 	end
 	println(io, "# using Triangle; constrained_triangulation($vmat, [1:$(length(plist))...], $emat)")
 	close(io)
 	tri = LibTriangle.constrained_triangulation(vmat, [1:length(plist)...], emat)
+	println("triangulation=$tri")
 	return [ (vlist[a], vlist[b], vlist[c]) for (a,b,c) in tri ]
 end
 
@@ -1974,11 +1976,11 @@ end
 function verbose(m::CornerTable, c::Corner)
 	print("  \e[33;1m$c\e[m: \e[32m", fan(m,c), "\e[m")
 	global M=m
-	if isisolated(fan(m, c))
-		print("  (isolated corner)")
-	else
-		print(" \e[34;7m", apex(m, c), "\e[m")
-	end
+# 	if isisolated(fan(m, c))
+# 		print("  (isolated corner)")
+# 	else
+# 		print(" \e[34;7m", apex(m, c), "\e[m")
+# 	end
 	o = Int(opposite(m, c))
 	print(" opposite=", (o > 0 ? "\e[32m" : o < 0 ? "\e[31m" : "\e[38;5;8m"),
 		opposite(m, c), "\e[m")
