@@ -1388,9 +1388,11 @@ function view!(scene::Makie.AbstractScene, m::TriangleMesh)
 	fmat = collect(1:size(vmat, 1))
 	attr = [ m.attributes[fld1(i,3)] for i in 1:size(vmat, 1)]
 	GLMakie.mesh!(scene, vmat, fmat, color=attr)
+	return scene
 end
 @inline view(m::TriangleMesh) = view!(Makie.Scene(), m)
 @inline view(g::AbstractGeometry{3}) = view(mesh(g))
+@inline Base.display(m::Union{TriangleMesh,AbstractGeometry{3}}) = view(m)
 # OpenSCAD output««1
 
 # # Attachments««1
@@ -1651,6 +1653,12 @@ end
 # end
 # 
 # # # Annotations ««1
+struct Annotated{A,X<:AbstractGeometry}
+	geometry::X
+	annotations::A
+end
+# arrows!(s,[0],[0],[0],[1],[1],[1],color=:truc)
+# ! arrowtail does not seem to work...
 # # abstract type AbstractAnnotation{D} end
 # # 
 # # struct DimensionArrow{D,T} <: AbstractAnnotation{D}

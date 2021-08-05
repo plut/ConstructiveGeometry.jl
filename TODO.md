@@ -3,7 +3,8 @@
  - **2d subsystem**
   - [x] reconstruct polygonal shape by list of segments (for projections)
  - **3d subsystem**
-  - [ ] add half-space and [x] plane intersections
+  - [ ] add half-space and
+  - [ ] plane intersections
  - **Definitions of geometric objects**
   - [ ] ortho and ball are useless now
   - [x] Some 3d primitives are accessible via extrusion:
@@ -27,6 +28,10 @@
   - STL
  - **Visualization** (TODO)
  - [x] **Convex hull** (in its own file)
+# Visualization
+ - [x] 3d visualization with `Makie` `mesh`
+   - [x] add some per-face visualization data (colors?).
+ - [ ] 2d with `polygon`
 # For version 0.2 (performance update)
  - [ ] allow exact (rational) arithmetic
  - [?] split in several packages:
@@ -70,12 +75,7 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
    - in `BasicGeometry`: a list of polygons + list of holes
    - this is simplest (it works as a xor polygon, whereas converting any
      xor to this is harder)
-# For version 0.3 (visualization update)
- - [ ] add some per-face visualization data (colors?).
 # Performance
- - [ ] try to prevent `TriangleIntersections.inter` from typing
-   (e.g. by returning separately the intersection + an array of points,
-   or passing the return type of points as a parameter?).
  - [ ] try to use SIMD (e.g. bbox computation)
  - [?] `@inbounds` wherever possible
 # Dependencies
@@ -195,6 +195,7 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
    terribly useful (in particular with angles in radians).
 # Packaging
  - [?] write a full doc about how to define a new transform
+ - [ ] write another package with `BinaryBuilder.jl` for IGL wrapper(s)
  - [x] complete the list of exports
  - [x] write a minimal regression test
  - [x] make this a proper package
@@ -205,15 +206,15 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [ ] export to SVG/STL/PLY
    - [ ] `MeshIO`
 # Extras
+ - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
+ - [ ] decimation (`igl::decimate`)
  - [ ] [Loop subdivision](https://github.com/cmu462/Scotty3D/wiki/Loop-Subdivision)
+   - [ ] `igl::upsample`, `igl::loop`
+ - [ ] deformation https://libigl.github.io/tutorial/#chapter-4-shape-deformation
  - [ ] https://student.cs.uwaterloo.ca/~cs779/Gallery/Winter2018/anietoro/doc/
  - [ ] add a display method that shows the tree
- - [ ] try 2 strategies for n-ary intersection/union:
-   - [ ] merge all structures and compute multiplicity with ray-shooting,
-   - [x] or reduce with binary op
  - [ ] icosphere (from Blender)
  - [ ] sphere made from extruding a half-circle
- - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
  - [ ] improve `unit_n_gon` to take advantage of symmetries
  - [ ] Annotations in 2d
  - [ ] Annotations in 3d (this might depend on the visualizer though)
