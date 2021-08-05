@@ -1126,8 +1126,9 @@ child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
 Colors objects `s...` in the given color.
 """
 @inline color(c::Colorant, s...) = operator(SetParameters, ((color=c,),), s...)
-@inline color(c::AbstractString, s...) = color(parse(Colorant, c), s...)
-@inline color(c::AbstractString, a::Real, s...) =
+@inline color(c::Union{Symbol,AbstractString}, s...) =
+	color(parse(Colorant, c), s...)
+@inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
 
 # Affine transformations««1
@@ -1248,6 +1249,8 @@ Computes the (3d to 2d) intersection of a shape and the (z=0) plane.
 
 @inline Base.:*(c::Real, x::AbstractGeometry) = scale(c, x)
 @inline Base.:*(c::AbstractVector, x::AbstractGeometry) = scale(c, x)
+
+@inline Base.:*(c::Symbol, x::AbstractGeometry) = color(String(c), x)
 
 ⋃ = Base.union
 ⋂ = Base.intersect

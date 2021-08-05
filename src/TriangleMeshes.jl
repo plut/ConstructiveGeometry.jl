@@ -5,12 +5,13 @@ const libiglboolean_so = joinpath(@__DIR__, "libiglboolean.so")
 # the bits types are hard-coded on the C side:
 const Point=SVector{3,Cdouble}
 const Face=NTuple{3,Cint}
+@inline _face(a)=(Cint.(a[1:3])...,)
 
 struct TriangleMesh{A}
 	vertices::Vector{Point}
 	faces::Vector{Face}
 	attributes::Vector{A}
-	@inline TriangleMesh{A}(v, f, a) where{A} = new{A}(v, f, a)
+	@inline TriangleMesh{A}(v, f, a) where{A} = new{A}(v, _face.(f), a)
 	@inline TriangleMesh(v, f, a::AbstractVector{A}) where{A} =
 		TriangleMesh{A}(v, f, a)
 end

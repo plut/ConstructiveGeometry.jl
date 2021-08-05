@@ -44,11 +44,11 @@ libraries.
 
 Currently (as of 2021-08), `ConstructiveGeometry.jl` uses the following
 libraries:
- - `libigl` for boolean mesh operations;
- - `Clipper` for boolean polygon operations;
- - `Triangle` for triangulation;
- - `Polyhedra` and `GLPK` for convex hull;
- - `Makie` for visualization.
+ - [`libigl`](https://libigl.github.io/) for 3d mesh operations;
+ - [`Clipper`](https://github.com/JuliaGeometry/Clipper.jl) for polygon operations;
+ - [`Makie`](https://github.com/JuliaPlots/Makie.jl) for visualization;
+ - [`Triangle`](https://cvdlab.github.io/Triangle.jl/) for triangulation;
+ - [`Polyhedra`](https://github.com/JuliaPolyhedra/Polyhedra.jl) and [`GLPK`](https://github.com/jump-dev/GLPK.jl) for convex hull.
 
 The roadmap now includes at least the following:
  - built-in visualization of models;
