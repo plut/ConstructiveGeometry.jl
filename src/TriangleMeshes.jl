@@ -18,9 +18,10 @@ end
 
 @inline points(m::TriangleMesh) = m.vertices
 @inline faces(m::TriangleMesh) = m.faces
+@inline attributes(m::TriangleMesh) = m.attributes
 @inline nvertices(m::TriangleMesh) = size(m.vertices, 1)
 @inline nfaces(m::TriangleMesh) = size(m.faces, 1)
-@inline shift(f, k) = f .+ Face((k,k,k))
+@inline shift(f::Face, k) = f .+ Face((k,k,k))
 
 function boolean(op, m1::TriangleMesh{A}, m2::TriangleMesh{A}) where{A}#««
 	n = nfaces(m1)

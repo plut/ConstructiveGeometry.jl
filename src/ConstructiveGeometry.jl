@@ -24,12 +24,7 @@ include("Shapes.jl")
 using .Shapes
 
 include("TriangleMeshes.jl")
-using .TriangleMeshes
-@inline triangle_mesh(points, faces, c::A) where{A<:Colorant} =
-	TriangleMesh{A}(points, faces, [ c for _ in faces ])
-@inline Base.map!(f, m::TriangleMesh) =
-	TriangleMeshes.points(m) .= f.(TriangleMeshes.points(m))
-include("scad.jl")
+# using .TriangleMeshes
 
 # General tools««1
 struct Consecutives{T,V} <: AbstractVector{T}
@@ -405,9 +400,25 @@ end
 	Mesh(merge(_DEFAULT_PARAMETERS, kwargs.data))(s)
 @inline get_parameter(g::Mesh, name) = get_parameter(g.parameters, name)
 
+abstract type AbstractVisual{D} end
+struct Mesh3d{A} <: AbstractVisual{3}
+	mesh::TriangleMeshes.TriangleMesh{A}
+	@inline Mesh3d{A}(m::TriangleMeshes.TriangleMesh{A}) where{A}= new{A}(m)
+	@inline Mesh3d{A}(args...) where{A} =
+		new{A}(TriangleMeshes.TriangleMesh{A}(args...))
+end
+@inline points(m::Mesh3d) = TriangleMeshes.points(m.mesh)
+@inline faces(m::Mesh3d) = TriangleMeshes.faces(m.mesh)
+@inline attributes(m::Mesh3d) = TriangleMeshes.attributes(m.mesh)
+
+@inline triangle_mesh(points, faces, c::A) where{A<:Colorant} =
+	Mesh3d{A}(points, faces, [ c for _ in faces ])
+@inline Base.map!(f, m::Mesh3d) = points(m) .= f.(points(m))
 @inline triangle_mesh(g::Mesh{T}, points, faces) where{T} =
 	triangle_mesh(points, faces, g.color)
 @inline polygon_xor(::Mesh{T}, args...) where{T} = PolygonXor{T}(args...)
+
+include("scad.jl")
 # 2d primitives««1
 # Square««2
 struct Square{T} <: AbstractGeometryCoord{2,T}
@@ -509,7 +520,7 @@ end
 
 @inline scad_info(s::Surface) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
-@inline (g::Mesh)(s::Surface) = corner_table(g, s.points, s.faces)
+@inline (g::Mesh)(s::Surface) = triangle_mesh(g, s.points, s.faces)
 
 # Constructive geometry operations««1
 # https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
@@ -537,14 +548,19 @@ struct CSGUnion{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
 @inline (g::Mesh)(s::CSGUnion{2}) = Shapes.clip(:union, g.(s.children)...)
-@inline (g::Mesh)(s::CSGUnion{3}) = union(g.(s.children)...)
+@inline (g::Mesh)(s::CSGUnion{3}) = reduce(csgunion, g.(s.children))
+@inline csgunion(m1::Mesh3d{A}, m2::Mesh3d{A}) where{A} =
+	Mesh3d{A}(union(m1.mesh, m2.mesh))
+
 
 # Intersection««2
 struct CSGInter{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
 @inline (g::Mesh)(s::CSGInter{2})= Shapes.clip(:intersection, g.(s.children)...)
-@inline (g::Mesh)(s::CSGInter{3}) = intersect(g.(s.children)...)
+@inline (g::Mesh)(s::CSGInter{3}) = reduce(csginter, g.(s.children))
+@inline csginter(m1::Mesh3d{A}, m2::Mesh3d{A}) where{A} =
+	Mesh3d{A}(intersect(m1.mesh, m2.mesh))
 
 # Difference««2
 struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
@@ -552,7 +568,9 @@ struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
 end
 @inline (g::Mesh)(s::CSGDiff{2}) =
 	Shapes.clip(:difference, g(s.children[1]), g(s.children[2]))
-@inline (g::Mesh)(s::CSGDiff{3}) = setdiff(g(s.children[1]), g(s.children[2]))
+@inline (g::Mesh)(s::CSGDiff{3}) = csgdiff(g(s.children[1]), g(s.children[2]))
+@inline csgdiff(m1::Mesh3d{A}, m2::Mesh3d{A}) where{A} =
+	Mesh3d{A}(setdiff(m1.mesh, m2.mesh))
 
 # Complement««2
 # TODO
@@ -613,7 +631,7 @@ CSGHull = constructed_solid_type(:hull)
 	return polygon_xor(g, convex_hull(v))
 end
 
-@inline vertices3(m::TriangleMesh) = TriangleMeshes.points(m)
+@inline vertices3(m::Mesh3d) = TriangleMeshes.points(m)
 @inline vertices3(m::PolygonXor) =
 	(SA[p[1], p[2], 0] for p in Shapes.vertices(m))
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
@@ -1323,7 +1341,7 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 	Expr(:toplevel, expr_filter.(f, x.args)...)
 
 # STL ««1
-function stl(io::IO, m::TriangleMesh)
+function stl(io::IO, m::Mesh3d)
 	println(io, "solid Julia_ConstructiveGeometry_jl_model")
 	points = TriangleMeshes.points(m)
 	faces = TriangleMeshes.faces(m)
@@ -1382,20 +1400,19 @@ end
 
 #»»1
 # Viewing««1
-function view!(scene::Makie.AbstractScene, m::TriangleMesh)
-	T = TriangleMeshes
-	vmat = similar(first(T.points(m)), 3*T.nfaces(m), 3)
-	for (i, f) in pairs(T.faces(m)), j in 1:3, k in 1:3
-		vmat[3*i+j-3, k] = T.points(m)[f[j]][k]
+function plot!(scene::Makie.AbstractScene, m::Mesh3d)
+	vmat = similar(first(points(m)), 3*length(faces(m)), 3)
+	for (i, f) in pairs(faces(m)), j in 1:3, k in 1:3
+		vmat[3*i+j-3, k] = points(m)[f[j]][k]
 	end
 	fmat = collect(1:size(vmat, 1))
-	attr = [ m.attributes[fld1(i,3)] for i in 1:size(vmat, 1)]
+	attr = [ attributes(m)[fld1(i,3)] for i in 1:size(vmat, 1)]
 	GLMakie.mesh!(scene, vmat, fmat, color=attr)
 	return scene
 end
-@inline view(m::TriangleMesh) = view!(Makie.Scene(), m)
-@inline view(g::AbstractGeometry{3}) = view(mesh(g))
-@inline Base.display(m::Union{TriangleMesh,AbstractGeometry{3}}) = view(m)
+@inline plot(m::AbstractVisual) = plot!(Makie.Scene(), m)
+@inline plot(g::AbstractGeometry) = plot(mesh(g))
+@inline Base.display(m::Union{Mesh3d,AbstractGeometry{3}}) = plot(m)
 # OpenSCAD output««1
 
 # # Attachments««1
@@ -1655,11 +1672,36 @@ end
 # 	mult_matrix(AffineMap(a1, a1*-translation(m)), x)
 # end
 # 
-# # # Annotations ««1
-struct Annotated{A,X<:AbstractGeometry}
-	geometry::X
-	annotations::A
+# # Annotations ««1
+abstract type AbstractAnnotation end
+struct Annotate{D,A<:AbstractAnnotation}<:AbstractTransform{D}
+	annotation::A
+	child::AbstractGeometry{D}
 end
+
+struct TextAnnotation{S,P} <:AbstractAnnotation
+	text::S
+	position::P
+end
+
+struct DisplayText{D,S,P} <: AbstractVisual{D}
+	text::S
+	position::P
+	child::AbstractVisual{D}
+end
+@inline annotate(s::AbstractString, p::AbstractVector, x...) =
+	operator(Annotate,(TextAnnotation(s,p),), x...)
+@inline (g::Mesh{T})(a::Annotate) where{T} =
+	DisplayText(a.annotation.text, a.annotation.position, g(a.child))
+
+function plot!(scene::Makie.AbstractScene, m::DisplayText)
+	plot!(scene, m.child)
+	text!(scene, [m.text]; position=[(m.position...,)], align=(:center,:center))
+	return scene
+end
+@inline plot(m::DisplayText) = plot!(Makie.Scene(), m)
+
+
 # arrows!(s,[0],[0],[0],[1],[1],[1],color=:truc)
 # ! arrowtail does not seem to work...
 # # abstract type AbstractAnnotation{D} end

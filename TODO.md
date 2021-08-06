@@ -6,11 +6,10 @@
   - [ ] add half-space and
   - [ ] plane intersections
  - **Definitions of geometric objects**
-  - [ ] ortho and ball are useless now
   - [x] Some 3d primitives are accessible via extrusion:
    - cube, cylinder, frustum, cone
    - simplicity vs. efficiency?
-  - [ ]_Geometry transforms_:
+  - [x]_Geometry transforms_:
    - [x] invertible affine transform
    - [x] projection,
    - [x] plane intersection,
@@ -24,11 +23,16 @@
    - [ ] minkowski+, minkowski-
  - **Syntactic sugar**
  - **Import/export**
-  - SCAD
-  - STL
+  - [x] SCAD
+  - [x] STL
  - **Visualization** (TODO)
  - [x] **Convex hull** (in its own file)
 # Visualization
+ - [ ] Annotations:
+    [1,0,0] + annotate("blah", (.5,.5,5))* sphere(3);
+    # when meshing, produces
+    Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))
+
  - [x] 3d visualization with `Makie` `mesh`
    - [x] add some per-face visualization data (colors?).
  - [ ] 2d with `polygon`
