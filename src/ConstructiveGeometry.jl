@@ -413,9 +413,10 @@ end
 
 @inline triangle_mesh(points, faces, c::A) where{A<:Colorant} =
 	Mesh3d{A}(points, faces, [ c for _ in faces ])
-@inline Base.map!(f, m::Mesh3d) = points(m) .= f.(points(m))
 @inline triangle_mesh(g::Mesh{T}, points, faces) where{T} =
 	triangle_mesh(points, faces, g.color)
+
+@inline Base.map!(f, m::Mesh3d) = points(m) .= f.(points(m))
 @inline polygon_xor(::Mesh{T}, args...) where{T} = PolygonXor{T}(args...)
 
 include("scad.jl")
@@ -1412,7 +1413,7 @@ function plot!(scene::Makie.AbstractScene, m::Mesh3d)
 end
 @inline plot(m::AbstractVisual) = plot!(Makie.Scene(), m)
 @inline plot(g::AbstractGeometry) = plot(mesh(g))
-@inline Base.display(m::Union{Mesh3d,AbstractGeometry{3}}) = plot(m)
+@inline Base.display(m::Union{AbstractVisual,AbstractGeometry}) = plot(m)
 # OpenSCAD output««1
 
 # # Attachments««1
@@ -1684,23 +1685,33 @@ struct TextAnnotation{S,P} <:AbstractAnnotation
 	position::P
 end
 
-struct DisplayText{D,S,P} <: AbstractVisual{D}
-	text::S
-	position::P
-	child::AbstractVisual{D}
-end
 @inline annotate(s::AbstractString, p::AbstractVector, x...) =
 	operator(Annotate,(TextAnnotation(s,p),), x...)
-@inline (g::Mesh{T})(a::Annotate) where{T} =
-	DisplayText(a.annotation.text, a.annotation.position, g(a.child))
 
-function plot!(scene::Makie.AbstractScene, m::DisplayText)
+struct AnnotatedVisual{A,D} <: AbstractVisual{D}
+	annotation::A
+	child::AbstractVisual{D}
+end
+@inline (g::Mesh)(a::Annotate) = AnnotatedVisual(g(a.annotation), g(a.child))
+@inline Base.map!(f, m::AnnotatedVisual) =
+	(map!(f, m.child); map!(f, m.annotation))
+function plot!(scene::Makie.AbstractScene, m::AnnotatedVisual)
 	plot!(scene, m.child)
-	text!(scene, [m.text]; position=[(m.position...,)], align=(:center,:center))
+	plot!(scene, m.annotation)
 	return scene
 end
-@inline plot(m::DisplayText) = plot!(Makie.Scene(), m)
 
+struct TextVisual{S,P}
+	text::S
+	position::Base.RefValue{P}
+end
+@inline (::Mesh)(a::TextAnnotation) = TextVisual(a.text, Ref(a.position))
+@inline Base.map!(f, m::TextVisual) = m.position[] = f(m.position[])
+
+function plot!(scene::Makie.AbstractScene, m::TextVisual)
+	text!(scene, [m.text]; position=[(m.position[]...,)], align=(:center,:center))
+	return scene
+end
 
 # arrows!(s,[0],[0],[0],[1],[1],[1],color=:truc)
 # ! arrowtail does not seem to work...
