@@ -396,6 +396,13 @@ struct Mesh{T<:Real,C}
 	@inline Mesh(parameters::NamedTuple) = Mesh{parameters.type}(parameters)
 end
 @inline coordtype(::Mesh{T}) where{T} = T
+"""
+    mesh(object; kwargs...)
+
+Converts the ideal geometric `object` to a concrete mesh.
+`kwargs` control the precision of meshing;
+these are the same values used in `set_parameters`.
+"""
 @inline mesh(s::AbstractGeometry; kwargs...) =
 	Mesh(merge(_DEFAULT_PARAMETERS, kwargs.data))(s)
 @inline get_parameter(g::Mesh, name) = get_parameter(g.parameters, name)
@@ -469,7 +476,7 @@ Path(points, width; ends=:round, join=:round, miter_limit=2.) =
 function (g::Mesh{T})(s::Path) where{T}
 	r = one_half(T(s.width))
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * r)
-	return polygon_xor(g, offset([s.path], r;
+	return polygon_xor(g, Shapes.offset([s.points], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
 # 3d primitives««1
@@ -1123,8 +1130,8 @@ Offsets by given radius.
     ends=:round|:square|:butt|:loop
     join=:round|:miter|:square
 """
-@inline offset(r::Real, s...; join=:round, miter_limit=2.) =
-	operator(Offset,(r,:loop,join,miter_limit),s...)
+@inline offset(r::Real, s...; ends=:butt, join=:round, miter_limit=2.) =
+	operator(Offset,(r,ends,join,miter_limit),s...)
 
 # set_parameters««2
 """
@@ -1342,6 +1349,13 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 	Expr(:toplevel, expr_filter.(f, x.args)...)
 
 # STL ««1
+"""
+    stl(file, object; options...)
+
+Outputs an STL description of `object` to the given `file` (string or IO).
+Optional `kwargs` are the same as for the `mesh` function
+or the `set_parameters` object.
+"""
 function stl(io::IO, m::Mesh3d)
 	println(io, "solid Julia_ConstructiveGeometry_jl_model")
 	points = TriangleMeshes.points(m)
@@ -1444,11 +1458,29 @@ function plot!(scene::Makie.AbstractScene, m::AnnotatedVisual)
 end
 
 # Text annotation ««2
-@inline annotate(s::AbstractString, p::AbstractVector, x...) =
+@inline annotate(s::AbstractString, p::AbstractVector{<:Real}, x...) =
 	operator(Annotate,(s,[p],), x...)
 
 function annotate!(scene::Makie.AbstractScene, s::AbstractString, points)
 	text!(scene, [s]; position=[(points[1]...,)], align=(:center,:center))
+	return scene
+end
+
+# Arrow annotation ««2
+struct ArrowAnnotation{S}
+	text::S
+end
+@inline arrows(s::AbstractString, pos1::AbstractVector{<:Real},
+	pos2::AbstractVector{<:Real}, x...) =
+	operator(Annotate,(ArrowAnnotation(s), [pos1,pos2]), x...)
+
+function annotate!(scene::Makie.AbstractScene, a::ArrowAnnotation, points)
+	p1, p2 = points
+	c = (p1+p2)/2
+	v = (p2-p1)/2
+	text!(scene, [a.text]; position= [(c...,)], align=(:left, :center))
+	arrows!(scene, [c[1],c[1]], [c[2],c[2]], [c[3],c[3]],
+		[v[1],-v[1]],[v[2],-v[2]],[v[3],-v[3]])
 	return scene
 end
 
