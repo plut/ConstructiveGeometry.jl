@@ -639,7 +639,7 @@ function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	v = SVector{3,T}[]
 	for x in children(s); push!(v, vertices3(g(x))...); end
 	(p, f) = convex_hull(v)
-	return corner_table(g, p, f)
+	return triangle_mesh(g, p, f)
 end
 # # # Convex hull««2
 # # # """
@@ -764,7 +764,7 @@ function (g::Mesh{T})(s::Cone) where{T}
 	push!(pts3, SVector{3,T}(s.apex))
 	faces = [ tri;
 		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
-	return corner_table(g, pts3, faces)
+	return triangle_mesh(g, pts3, faces)
 end
 # Rotate extrusion««2
 struct RotateExtrude{T} <: AbstractTransform{3}
@@ -821,7 +821,7 @@ function (g::Mesh{T})(s::RotateExtrude) where{T}
 		@debug "(end perimeter)»»"
 	end
 	@debug "triangles = $triangles"
-	return corner_table(g, pts3, triangles)
+	return triangle_mesh(g, pts3, triangles)
 end
 
 
@@ -1416,6 +1416,98 @@ end
 @inline Base.display(m::Union{AbstractVisual,AbstractGeometry}) = plot(m)
 # OpenSCAD output««1
 
+# Annotations ««1
+# Abstract type ««2
+abstract type AbstractAnnotation end
+struct Annotate{D,A<:AbstractAnnotation}<:AbstractTransform{D}
+	annotation::A
+	child::AbstractGeometry{D}
+end
+
+struct AnnotatedVisual{A,D} <: AbstractVisual{D}
+	annotation::A
+	child::AbstractVisual{D}
+end
+@inline Base.map!(f, m::AnnotatedVisual) =
+	(map!(f, m.child); map!(f, m.annotation))
+@inline (g::Mesh)(a::Annotate) = AnnotatedVisual(g(a.annotation), g(a.child))
+
+function plot!(scene::Makie.AbstractScene, m::AnnotatedVisual)
+	plot!(scene, m.child)
+	plot!(scene, m.annotation)
+	return scene
+end
+
+
+# Text annotation ««2
+struct TextAnnotation{S,P} <:AbstractAnnotation
+	text::S
+	position::P
+end
+
+@inline annotate(s::AbstractString, p::AbstractVector, x...) =
+	operator(Annotate,(TextAnnotation(s,p),), x...)
+
+struct TextVisual{S,P}
+	text::S
+	position::Base.RefValue{P}
+end
+@inline (::Mesh)(a::TextAnnotation) = TextVisual(a.text, Ref(a.position))
+@inline Base.map!(f, m::TextVisual) = m.position[] = f(m.position[])
+
+function plot!(scene::Makie.AbstractScene, m::TextVisual)
+	text!(scene, [m.text]; position=[(m.position[]...,)], align=(:center,:center))
+	return scene
+end
+
+# Arrow annotation (TODO) ««2
+# arrows!(s,[0],[0],[0],[1],[1],[1],color=:truc)
+# ! arrowtail does not seem to work...
+# # abstract type AbstractAnnotation{D} end
+# # 
+# # struct DimensionArrow{D,T} <: AbstractAnnotation{D}
+# # 	center::Vec{D,T}
+# # 	vec::Vec{D,T}
+# # 	label::AbstractString
+# # 	fontsize::Float64
+# # 	offset::Float64
+# # end
+# # """
+# #     DiameterArrow{X}
+# # 
+# # Indicates that a diameter arrow should be drawn for the given object. The
+# # parameter `X` is a type indicating which type of arrow should be drawn.
+# # 
+# #  - `Circle`: parametrized by center (`Vec{2}`) and radius (scalar),
+# #  and possibly preferred orientation (vector if non-zero).
+# # 
+# #  - `Sphere`: parametrized by center (`Vec{3}`) and radius (scalar),
+# #   and possibly preferred orientation.
+# # 
+# #  - `Cylinder`: shows a circle in 3d space, parametrized by center (`Vec{3}`), normal vector (non-zero), radius (scalar), and preferred orientation (vector; should be in the circle plane).
+# # """
+# # struct DiameterArrow{X<:Geometry,T,D,N} <: AbstractAnnotation{D}
+# # 	center::Vec{D,T}
+# # 	radius::T
+# # 	orientation::Vec{D,T}
+# # 	normal::N
+# # 	# inner constructors enforce the correct type for N
+# # 	DiameterArrow{Circle,T}(center, radius, orientation) where{T} =
+# # 		new{Circle, T, 2, Nothing}(center, radius, orientation, nothing)
+# # 	DiameterArrow{Sphere,T}(center, radius, orientation) where{T} =
+# # 		new{Sphere, T, 3, Nothing}(center, radius, orientation, nothing)
+# # 	DiameterArrow{Cylinder,T}(center, radius, orientation, normal) where{T} =
+# # 		new{Cylinder, T, 3, Vec{3,T}}(center, radius, orientation, normal)
+# # end
+# # 
+# # struct Annotate{D,T} <: Geometry{D,T}
+# # 	annotations::Vector{<:AbstractAnnotation{D}}
+# # 	child::Geometry{D,T}
+# # end
+# # # the offset is just a hint; we let the visualizer take care of using
+# # # this
+# # 
+# #
 # # Attachments««1
 # # Anchor system««2
 # """
@@ -1673,93 +1765,6 @@ end
 # 	mult_matrix(AffineMap(a1, a1*-translation(m)), x)
 # end
 # 
-# # Annotations ««1
-abstract type AbstractAnnotation end
-struct Annotate{D,A<:AbstractAnnotation}<:AbstractTransform{D}
-	annotation::A
-	child::AbstractGeometry{D}
-end
-
-struct TextAnnotation{S,P} <:AbstractAnnotation
-	text::S
-	position::P
-end
-
-@inline annotate(s::AbstractString, p::AbstractVector, x...) =
-	operator(Annotate,(TextAnnotation(s,p),), x...)
-
-struct AnnotatedVisual{A,D} <: AbstractVisual{D}
-	annotation::A
-	child::AbstractVisual{D}
-end
-@inline (g::Mesh)(a::Annotate) = AnnotatedVisual(g(a.annotation), g(a.child))
-@inline Base.map!(f, m::AnnotatedVisual) =
-	(map!(f, m.child); map!(f, m.annotation))
-function plot!(scene::Makie.AbstractScene, m::AnnotatedVisual)
-	plot!(scene, m.child)
-	plot!(scene, m.annotation)
-	return scene
-end
-
-struct TextVisual{S,P}
-	text::S
-	position::Base.RefValue{P}
-end
-@inline (::Mesh)(a::TextAnnotation) = TextVisual(a.text, Ref(a.position))
-@inline Base.map!(f, m::TextVisual) = m.position[] = f(m.position[])
-
-function plot!(scene::Makie.AbstractScene, m::TextVisual)
-	text!(scene, [m.text]; position=[(m.position[]...,)], align=(:center,:center))
-	return scene
-end
-
-# arrows!(s,[0],[0],[0],[1],[1],[1],color=:truc)
-# ! arrowtail does not seem to work...
-# # abstract type AbstractAnnotation{D} end
-# # 
-# # struct DimensionArrow{D,T} <: AbstractAnnotation{D}
-# # 	center::Vec{D,T}
-# # 	vec::Vec{D,T}
-# # 	label::AbstractString
-# # 	fontsize::Float64
-# # 	offset::Float64
-# # end
-# # """
-# #     DiameterArrow{X}
-# # 
-# # Indicates that a diameter arrow should be drawn for the given object. The
-# # parameter `X` is a type indicating which type of arrow should be drawn.
-# # 
-# #  - `Circle`: parametrized by center (`Vec{2}`) and radius (scalar),
-# #  and possibly preferred orientation (vector if non-zero).
-# # 
-# #  - `Sphere`: parametrized by center (`Vec{3}`) and radius (scalar),
-# #   and possibly preferred orientation.
-# # 
-# #  - `Cylinder`: shows a circle in 3d space, parametrized by center (`Vec{3}`), normal vector (non-zero), radius (scalar), and preferred orientation (vector; should be in the circle plane).
-# # """
-# # struct DiameterArrow{X<:Geometry,T,D,N} <: AbstractAnnotation{D}
-# # 	center::Vec{D,T}
-# # 	radius::T
-# # 	orientation::Vec{D,T}
-# # 	normal::N
-# # 	# inner constructors enforce the correct type for N
-# # 	DiameterArrow{Circle,T}(center, radius, orientation) where{T} =
-# # 		new{Circle, T, 2, Nothing}(center, radius, orientation, nothing)
-# # 	DiameterArrow{Sphere,T}(center, radius, orientation) where{T} =
-# # 		new{Sphere, T, 3, Nothing}(center, radius, orientation, nothing)
-# # 	DiameterArrow{Cylinder,T}(center, radius, orientation, normal) where{T} =
-# # 		new{Cylinder, T, 3, Vec{3,T}}(center, radius, orientation, normal)
-# # end
-# # 
-# # struct Annotate{D,T} <: Geometry{D,T}
-# # 	annotations::Vector{<:AbstractAnnotation{D}}
-# # 	child::Geometry{D,T}
-# # end
-# # # the offset is just a hint; we let the visualizer take care of using
-# # # this
-# # 
-# #
 # Exports ««1
 export square, circle, path, polygon
 export cube, sphere, cylinder, surface

@@ -52,10 +52,10 @@ end#»»
 @inline Base.intersect(m1::TriangleMesh, m2::TriangleMesh) = boolean(1, m1, m2)
 @inline Base.setdiff(m1::TriangleMesh, m2::TriangleMesh) = boolean(2, m1, m2)
 
-@inline Base.union(m1::TriangleMesh, m2::TriangleMesh, m::TriangleMesh...) =
-	union(union(m1, m2), m...)
-@inline Base.intersect(m1::TriangleMesh, m2::TriangleMesh, m::TriangleMesh...)=
-	intersect(intersect(m1, m2), m...)
+# @inline Base.union(m1::TriangleMesh, m2::TriangleMesh, m::TriangleMesh...) =
+# 	union(union(m1, m2), m...)
+# @inline Base.intersect(m1::TriangleMesh, m2::TriangleMesh, m::TriangleMesh...)=
+# 	intersect(intersect(m1, m2), m...)
 
 export TriangleMesh
 end
