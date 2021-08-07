@@ -137,7 +137,12 @@ end
 	f = _CLIPPER_ENUM.fill[fill]
 	return execute(c, _CLIPPER_ENUM.clip[op], f, f)
 end
-@inline function offset(v::AbstractVector{Path{2,T}}, r::Real;
+@inline function offset(v::AbstractVector{<:Path{2}}, r::Real; kwargs...)
+	iszero(r) && return v
+	r < 0 && return reverse.(_offset(reverse.(v), -r; kwargs...))
+	return _offset(v, r; kwargs...)
+end
+@inline function _offset(v::AbstractVector{Path{2,T}}, r::Real;
 		join = :round,
 		ends = :fill,
 		miter_limit = 2.,
@@ -147,18 +152,18 @@ end
 	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
 	return execute(c, r)
 end
-@inline function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
-		join = :round,
-		ends = :fill,
-		miter_limit = 2.,
-		precision = 0.2
-		)::Vector{Vector{Path{2,T}}} where{T}
-	# “Simultaneously” computes offset for several offset values.
-	# Used by path_extrude().
-	c = ClipperOffset(T, miter_limit, precision)
-	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
-	return [ execute(c, ρ) for ρ in r]
-end
+# @inline function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
+# 		join = :round,
+# 		ends = :fill,
+# 		miter_limit = 2.,
+# 		precision = 0.2
+# 		)::Vector{Vector{Path{2,T}}} where{T}
+# 	# “Simultaneously” computes offset for several offset values.
+# 	# Used by path_extrude().
+# 	c = ClipperOffset(T, miter_limit, precision)
+# 	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
+# 	return [ execute(c, ρ) for ρ in r]
+# end
 @inline simplify_paths(p::AbstractVector{Path{2,T}}; fill=:nonzero) where{T} =
 	from_clipper(T,
 		Clipper.simplify_polygons(to_clipper(T, p), _CLIPPER_ENUM.fill[fill]))
@@ -629,13 +634,16 @@ function path_extrude(path, poly;
 	# in kwargs: ends = closed ? :fill : :butt
 	N = length(poly)
 	# offset_path is a vector of vector of paths
-	offset_path = Shapes.offset([path], [pt[1] for pt in poly];
-		join, miter_limit, ends=closed ? :fill : :butt)
+	@assert closed == true "Open-path extrusion is currently not implemented by ClipperLib"
+	offset_path = [ Shapes.offset([path], pt[1];
+		join, miter_limit, ends=closed ? :fill : :single) for pt in poly];
 	new_points = SVector{3,eltype(eltype(eltype(offset_path)))}[]
 	first_face = Int[]; last_ff = 1
 	for (a, paths) in zip(poly, offset_path)
+		println("\e[1ma=$a: path = \e[m")
 		push!(first_face, last_ff)
 		for p in paths
+			println(p)
 			pxyz = [SA[b[1], b[2], a[2]] for b in p]
 			new_points = [new_points; pxyz]
 			last_ff+= length(p)

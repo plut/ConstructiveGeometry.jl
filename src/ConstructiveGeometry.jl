@@ -1150,6 +1150,9 @@ Similar to OpenSCAD's `rotate_extrude` primitive.
 Extrudes the given `shape` by
 1) rotating the unit *y*-vector to the direction *z*, and 
 2) moving it so that the origin follows the `path`.
+
+FIXME: open-path extrusion is broken because `ClipperLib` currently
+does not support the `etOpenSingle` offset style.
 """
 @inline path_extrude(path, s...; kwargs...) =
 	operator(PathExtrude, (path,), s...; kwargs...)

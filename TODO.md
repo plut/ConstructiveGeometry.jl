@@ -14,6 +14,9 @@
    - [x] projection,
    - [x] plane intersection,
    - [x] linear extrusion, rotational extrusion
+   - [x] path extrusion
+   - [ ] path wrapping
+   - [ ] rename `Path` to `Stroke`
    todo: enlarge parameters for rotate_Extrude
   - [x] _Non-geometry transforms_: `set_parameters`, color
   - [ ] _CG operations_:
