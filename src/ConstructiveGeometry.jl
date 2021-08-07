@@ -82,7 +82,7 @@ const _DEFAULT_PARAMETERS = (
 #————————————————————— Geometry —————————————————————————————— ««1
 
 #»»1
-# Angle types««2
+# Angle types««1
 # to keep it simple, angles are just Float64 (in degrees).
 # Just in case we might change this in the future, we define two types:
 # Angle and AnyAngle (= input type).
@@ -93,7 +93,6 @@ const ° = 1.
 @inline radians(x::AnyAngle) = radians(Angle(x))
 @inline degrees(x::Angle) = x
 @inline degrees(x::AnyAngle) = degrees(Angle(x))
-
 # Affine transformations««1
 abstract type AbstractAffineMap end
 struct AffineMap{A,B} <: AbstractAffineMap
@@ -359,6 +358,8 @@ function ladder_triangles(n1, n2, start1, start2)
 	return triangles
 end
 
+@inline norm²(p) = sum(p .* p)
+
 #————————————————————— Objects and meshing —————————————————————————————— ««1
 
 #»»1
@@ -560,7 +561,6 @@ end
 @inline csgunion(m1::Mesh3d{A}, m2::Mesh3d{A}) where{A} =
 	Mesh3d{A}(union(m1.mesh, m2.mesh))
 
-
 # Intersection««2
 struct CSGInter{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
@@ -584,6 +584,9 @@ end
 # TODO
 CSGComplement = constructed_solid_type(:complement, Tuple{<:AbstractGeometry})
 
+# Xor (used by extrusion) ««2
+@inline csgxor(m1::Mesh3d{A}, m2::Mesh3d{A}) where{A} =
+	Mesh3d{A}(xor(m1.mesh, m2.mesh))
 # Empty unions and intersects««2
 """
     EmptyUnion
@@ -831,6 +834,27 @@ function (g::Mesh{T})(s::RotateExtrude) where{T}
 	return triangle_mesh(g, pts3, triangles)
 end
 
+# Path extrusion««2
+struct PathExtrude{T} <: AbstractTransform{3}
+	path::Vector{SVector{2,T}}
+	child::AbstractGeometry{2}
+	closed::Bool
+	join::Symbol
+	miter_limit::Float64
+	@inline PathExtrude(path::AbstractVector{<:AbstractVector{T}}, child;
+		closed=false, join=:round, miter_limit=2.0) where{T} =
+		new{T}(SVector{2,T}.(path), child, closed, join, miter_limit)
+end
+
+function (g::Mesh)(s::PathExtrude)
+	polyxor = g(s.child)
+	rmax = sqrt(maximum(norm².(s.path)))
+	ε = max(get_parameter(g, :accuracy), get_parameter(g, :precision)*rmax)
+	v = [ triangle_mesh(g, Shapes.path_extrude(s.path, p;
+		closed=s.closed, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
+		for p in polyxor.paths ]
+	return reduce(csgxor, v)
+end
 
 # Offset««2
 
@@ -1073,10 +1097,10 @@ struct Transform{S,F}
 	f::F
 	@inline Transform{S}(f) where{S} = new{S,typeof(f)}(f)
 end
-@inline operator(f, x) = Transform{f}(@closure y -> f(x..., y))
-@inline operator(f, x, s) = operator(f, x)*s
-@inline operator(f, x, s::AbstractVector) = operator(f, x, s...)
-@inline operator(f, x, s...) = operator(f, x, union(s...))
+@inline operator(f, x; kw...) = Transform{f}(@closure y -> f(x..., y; kw...))
+@inline operator(f, x, s; kw...) = operator(f, x; kw...)*s
+@inline operator(f, x, s::AbstractVector; kw...) = operator(f, x, s...; kw...)
+@inline operator(f, x, s...;kw...) = operator(f, x, union(s...);kw...)
 @inline Base.:*(u::Transform, s) = u.f(s)
 @inline (u::Transform)(s) = u*s
 @inline Base.:*(u::Transform, v::Transform, s...)= _comp(Val(assoc(u,v)),u,v,s...)
@@ -1111,14 +1135,24 @@ Cone with arbitrary base.
 @inline cone(h::Real, s...) = cone(SA[0,0,h], s...)
 
 """
-    rotate_extrude([angle = 360°], solid...)
-    rotate_extrude([angle = 360°]) * solid
+    rotate_extrude([angle = 360°], shape...)
+    rotate_extrude([angle = 360°]) * shape
 
 Similar to OpenSCAD's `rotate_extrude` primitive.
 """
 @inline rotate_extrude(angle::Real, s...) =
 	operator(RotateExtrude, (angle,), s...)
 @inline rotate_extrude(s...) = rotate_extrude(360, s...)
+
+"""
+    path_extrude(path, shape...)
+
+Extrudes the given `shape` by
+1) rotating the unit *y*-vector to the direction *z*, and 
+2) moving it so that the origin follows the `path`.
+"""
+@inline path_extrude(path, s...; kwargs...) =
+	operator(PathExtrude, (path,), s...; kwargs...)
 
 # offset««2
 """

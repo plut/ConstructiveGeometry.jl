@@ -18,6 +18,8 @@ using DataStructures
 import Clipper
 
 
+norm²(x) = x[1]*x[1]+x[2]*x[2]
+distance²(x,y) = norm²(x-y)
 Path{D,T} = Vector{SVector{D,T}}
 # @inline det(u::StaticVector{2}, v::StaticVector{2}) =
 # 	@inbounds u[1]*v[2]-u[2]*v[1]
@@ -525,6 +527,160 @@ end
 	return clip(:intersection, PolygonXor{coordtype(s)}(c), s)
 end
 
+# Path extrusion««1
+# triangulate_between: triangulate between two parallel paths««2
+"""
+		triangulate_between(poly1, poly2, start1, start2)
+
+Given two polygons `poly1` and `poly2`, both of them represented as a
+vector of paths, and produced as offsets from a common path,
+find a triangulation for the region between the two polygons.
+
+This functions returns a pair `(triangulation, edge)`, where:
+
+ - the triangulation is a vector of triples of integers,
+where each point is represented by its index. Indices in `poly1` start at
+value `start1`, and in `poly2` at `start2`.
+
+ - the edge is a pair `(lastidx1, lastidx2)` corresponding to the last
+	 points visited on each polygon. (this will be useful for closing the
+	 extrusion).
+
+"""
+function triangulate_between(poly1, poly2, start1=1, start2=1)
+	Big = typemax(eltype(eltype(eltype(poly1))))
+	triangles = NTuple{3,Int}[]
+	# head is the marker of current leading edge
+	# headpoint[i] is the point marked to by head[i]
+	# headidx is the new index for this marked point
+	# status[i][j] is the number of last used point in j-th path of i-th poly
+	head = [(1,1), (1,1)]
+	headpoint = [poly1[1][1], poly2[1][1]]
+	headidx = [start1, start2]
+	status = zeros.(Int,length.((poly1, poly2)))
+	# so far we used exactly one point on each side:
+	status[1][1] = status[2][1] = 1
+
+	# we need a way to convert (poly, path, index) to integer index««
+	function first_indices(start::Int, l::Vector{Int})::Vector{Int}
+		f = zeros.(Int, length(l))
+		f[1] = start
+		for i in 1:length(l)-1
+			@inbounds f[i+1] = f[i] + l[i]
+		end
+		f
+	end
+	# firstindex[poly][path] is the first index for this path
+	# firstindex[1][1] = start1
+	# firstindex[1][2] = start1 + len(poly1[1]) etc.
+	firstindex = (first_indices(start1, length.(poly1)),
+								first_indices(start2, length.(poly2)))
+	newindex(poly::Int, path::Int, index::Int)::Int =
+		firstindex[poly][path] + index - 1
+#»»
+	# computing diagonal distances to find the smallest one:««
+	distance(pt, path, i) =
+		i > length(path) ? Big : distance²(pt, path[i])
+
+	closest(pt, poly, status) =
+		findmin([distance(pt, poly[i], status[i]+1) for i in eachindex(poly)])
+#»»
+
+	while true
+		d1, i1 = closest(headpoint[2], poly1, status[1])
+		d2, i2 = closest(headpoint[1], poly2, status[2])
+		# if no more points are left, we return:
+		(d1 == d2 == Big) && break
+
+		if d1 < d2 # we append a point from poly1
+			# add the triangle: head1, head2, newpoint
+			s = status[1][i1] += 1
+			newidx = newindex(1, i1, s)
+			push!(triangles, (headidx[1], headidx[2], newidx))
+			# update head1 to point to new point
+			headidx[1] = newidx
+			head[1] = (i1, s)
+			headpoint[1] = poly1[i1][s]
+		else
+			# add the triangle: head1, head2, newpoint
+			s = status[2][i2] += 1
+			newidx = newindex(2, i2, s)
+			push!(triangles, (headidx[1], headidx[2], newidx))
+			# update head1 to point to new point
+			headidx[2] = newidx
+			head[2] = (i2, s)
+			headpoint[2] = poly2[i2][s]
+		end
+	end
+	(triangles, (headidx[1], headidx[2]))
+end#»»
+# path_extrude««
+"""
+		path_extrude(path, poly, options...)
+
+Extrudes the given polygon (a path of points forming a simple loop)
+along the given path. Both arguments are provided as a
+`Vector{SVector{2}}`.
+
+Returns a `Surface` (defined by points and a triangulation).
+"""
+function path_extrude(path, poly;
+		join=:round, closed=false, miter_limit=2.0, precision=0.2)
+	# in kwargs: ends = closed ? :fill : :butt
+	N = length(poly)
+	# offset_path is a vector of vector of paths
+	offset_path = Shapes.offset([path], [pt[1] for pt in poly];
+		join, miter_limit, ends=closed ? :fill : :butt)
+	new_points = SVector{3,eltype(eltype(eltype(offset_path)))}[]
+	first_face = Int[]; last_ff = 1
+	for (a, paths) in zip(poly, offset_path)
+		push!(first_face, last_ff)
+		for p in paths
+			pxyz = [SA[b[1], b[2], a[2]] for b in p]
+			new_points = [new_points; pxyz]
+			last_ff+= length(p)
+		end
+	end
+	# new_points is a flat list of all 3d points produced
+# 	new_points = [[
+# 		[ SA[[pt[1], pt[2], poly[i][2]]] for pt in [p...;] ]
+# 		for (i, p) in pairs(offset_path)
+# 	]...;]
+
+	# first index for each path
+# 	first_face = cumsum([1; # initial
+# 		map(p->sum(length.(p)), offset_path)])
+# # 	println("first_face=$first_face")
+
+	triangles = map(1:N) do i
+		i1 = mod1(i+1, N)
+		triangulate_between(offset_path[i], offset_path[i1],
+			first_face[i], first_face[i1])
+		# XXX keep the last edge for closing the poly
+	end
+	# this completes the set of triangles for the tube:
+	tube_triangles = vcat([ t[1] for t in triangles ]...)
+	last_face = [ t[2][1] for t in triangles ]
+# 	println("last_face=$last_face")
+	# here we decide if it is closed or open
+	# if open, triangulate the two facets
+	# if closed, join them together
+	if closed
+		more_triangles = vcat(map(1:N) do i
+			j = (i%N)+1
+			[ SA[first_face[i], last_face[i], first_face[j]],
+				SA[first_face[j], last_face[i], last_face[j]] ]
+		end...)
+# 		println("more_triangles=$more_triangles")
+		tube_triangles = [ tube_triangles; more_triangles ]
+	else
+	# TODO: triangulate the surface
+	# or, for now, close with two non-triangular facets...
+		more_triangles = [ reverse(first_face), last_face ]
+# 		println("more_triangles=$more_triangles")
+	end
+	return (new_points, tube_triangles)
+end#»»
 # Exports««1
 
 export Path

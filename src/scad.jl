@@ -99,8 +99,8 @@ function scad(io::IO, m::PolygonXor)
 end
 function scad(io::IO, m::Mesh3d)
 	println(io, "polyhedron(points=",
-		Vector{Float64}.(TriangleMeshes.points(m)), ",")
-	println(io, "  faces=", [collect(f.-1) for f in TriangleMeshes.faces(m)], ");")
+		Vector{Float64}.(points(m)), ",")
+	println(io, "  faces=", [collect(f.-1) for f in faces(m)], ");")
 end
 
 # FIXME: mat44 for 4x4 matrices

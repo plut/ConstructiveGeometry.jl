@@ -51,6 +51,7 @@ end#»»
 @inline Base.union(m1::TriangleMesh, m2::TriangleMesh) = boolean(0, m1, m2)
 @inline Base.intersect(m1::TriangleMesh, m2::TriangleMesh) = boolean(1, m1, m2)
 @inline Base.setdiff(m1::TriangleMesh, m2::TriangleMesh) = boolean(2, m1, m2)
+@inline Base.xor(m1::TriangleMesh, m2::TriangleMesh) = boolean(3, m1, m2)
 
 # @inline Base.union(m1::TriangleMesh, m2::TriangleMesh, m::TriangleMesh...) =
 # 	union(union(m1, m2), m...)
