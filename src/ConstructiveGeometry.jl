@@ -632,7 +632,7 @@ CSGHull = constructed_solid_type(:hull)
 	return polygon_xor(g, convex_hull(v))
 end
 
-@inline vertices3(m::Mesh3d) = TriangleMeshes.points(m)
+@inline vertices3(m::Mesh3d) = points(m)
 @inline vertices3(m::PolygonXor) =
 	(SA[p[1], p[2], 0] for p in Shapes.vertices(m))
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
@@ -1418,45 +1418,37 @@ end
 
 # Annotations ««1
 # Abstract type ««2
-abstract type AbstractAnnotation end
-struct Annotate{D,A<:AbstractAnnotation}<:AbstractTransform{D}
+struct Annotate{D,P,A}<:AbstractTransform{D}
 	annotation::A
+	points::AbstractVector{P}
 	child::AbstractGeometry{D}
 end
+@inline Annotate(ann::A, p::AbstractVector{P}, g::AbstractGeometry{D}
+	) where{D,P,A} = Annotate{D,P,A}(ann, p, g)
 
-struct AnnotatedVisual{A,D} <: AbstractVisual{D}
+struct AnnotatedVisual{A,D,P} <: AbstractVisual{D}
 	annotation::A
+	points::AbstractVector{P}
 	child::AbstractVisual{D}
 end
+
 @inline Base.map!(f, m::AnnotatedVisual) =
-	(map!(f, m.child); map!(f, m.annotation))
-@inline (g::Mesh)(a::Annotate) = AnnotatedVisual(g(a.annotation), g(a.child))
+	(map!(f, m.child); map!(f, m.points, m.points))
+@inline (g::Mesh)(a::Annotate) =
+	AnnotatedVisual(a.annotation, a.points, g(a.child))
 
 function plot!(scene::Makie.AbstractScene, m::AnnotatedVisual)
 	plot!(scene, m.child)
-	plot!(scene, m.annotation)
+	annotate!(scene, m.annotation, m.points)
 	return scene
 end
 
-
 # Text annotation ««2
-struct TextAnnotation{S,P} <:AbstractAnnotation
-	text::S
-	position::P
-end
-
 @inline annotate(s::AbstractString, p::AbstractVector, x...) =
-	operator(Annotate,(TextAnnotation(s,p),), x...)
+	operator(Annotate,(s,[p],), x...)
 
-struct TextVisual{S,P}
-	text::S
-	position::Base.RefValue{P}
-end
-@inline (::Mesh)(a::TextAnnotation) = TextVisual(a.text, Ref(a.position))
-@inline Base.map!(f, m::TextVisual) = m.position[] = f(m.position[])
-
-function plot!(scene::Makie.AbstractScene, m::TextVisual)
-	text!(scene, [m.text]; position=[(m.position[]...,)], align=(:center,:center))
+function annotate!(scene::Makie.AbstractScene, s::AbstractString, points)
+	text!(scene, [s]; position=[(points[1]...,)], align=(:center,:center))
 	return scene
 end
 
