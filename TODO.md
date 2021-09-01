@@ -1,5 +1,17 @@
 `rotate(90)*cube`
-# Split/rewrite of module
+# Misc.
+  - [ ] find a way to fix path extrusion? either
+    - [ ] cut “by hand” the result of a “butt” extrusion;
+    - [ ] intersect the result of a custom “fill” extrusion;
+  - [ ] do something for keyword argument dispatch; e.g. the following should be equivalent:
+    circle(r=1)
+    circle(d=2)
+    circle(radius=1)
+    circle(diameter=2)
+    circle(1)
+  and it should be “open” for adding new keywords, e.g.
+    circle(1, center=[0,0]) # => translate([0,0])* circle(1)
+    square(3, round=1) # => calls rounded_square(3, 1)
  - **2d subsystem**
   - [x] reconstruct polygonal shape by list of segments (for projections)
  - **3d subsystem**
@@ -22,7 +34,7 @@
   - [ ] _CG operations_:
    - [x] union, inter, diff
    - [x] hull
-   - [ ] offset
+   - [ ] 3d offset
    - [ ] minkowski+, minkowski-
  - **Syntactic sugar**
  - **Import/export**
@@ -31,7 +43,7 @@
  - **Visualization** (TODO)
  - [x] **Convex hull** (in its own file)
 # Visualization
- - [ ] Annotations:
+ - [x] Annotations:
     [1,0,0] + annotate("blah", (.5,.5,5))* sphere(3);
     # when meshing, produces
     Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))

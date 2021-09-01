@@ -11,7 +11,7 @@ using FastClosures
 
 import Rotations
 import Colors: Colors, Colorant
-using GLMakie
+using Makie
 
 import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
@@ -1167,7 +1167,7 @@ Offsets by given radius.
     ends=:round|:square|:butt|:loop
     join=:round|:miter|:square
 """
-@inline offset(r::Real, s...; ends=:butt, join=:round, miter_limit=2.) =
+@inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.) =
 	operator(Offset,(r,ends,join,miter_limit),s...)
 
 # set_parameters««2
@@ -1459,7 +1459,7 @@ function plot!(scene::Makie.AbstractScene, m::Mesh3d)
 	end
 	fmat = collect(1:size(vmat, 1))
 	attr = [ attributes(m)[fld1(i,3)] for i in 1:size(vmat, 1)]
-	GLMakie.mesh!(scene, vmat, fmat, color=attr)
+	mesh!(scene, vmat, fmat, color=attr)
 	return scene
 end
 @inline plot(m::AbstractVisual) = plot!(Makie.Scene(), m)
@@ -1569,6 +1569,14 @@ end
 # # # this
 # # 
 # #
+# Convenience functions ««1
+@inline raise(z, x...) = translate(SA[0,0,z], x...)
+@inline lower(z, x...) = raise(-z, x...)
+function rounded_square(dims::AbstractVector, r)
+	iszero(r) && return square(r)
+	return offset(r, [r,r]+square(dims - [2r,2r]))
+end
+@inline rounded_square(s::Real, r) = rounded_square(SA[s,s], r)
 # # Attachments««1
 # # Anchor system««2
 # """

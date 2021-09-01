@@ -24,6 +24,8 @@ int igl_mesh_boolean(
   int nv2, int nf2, double *mv2, int *mf2,
   int *nv3, int *nf3, double **mv3, int **mf3, int **index);
 
+int igl_mesh_is_pwn(int nv, int nf, double *mv, int *mf);
+
 #ifdef __cplusplus
 } // extern
 #endif

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(iglboolean)
+project(iglwrap)
 
 list(PREPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -21,7 +21,7 @@ include(libigl)
 #  add_executable(${PROJECT_NAME} ${SRC_FILES})
 #  target_link_libraries(${PROJECT_NAME} PUBLIC igl::core igl::opengl_glfw)
 #  file(GLOB SRC_FILES *.cpp)
-add_library(${PROJECT_NAME} SHARED iglboolean.cpp)
-set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER iglboolean.h)
+add_library(${PROJECT_NAME} SHARED iglwrap.cpp)
+set_target_properties(${PROJECT_NAME} PROPERTIES PUBLIC_HEADER iglwrap.h)
 target_link_libraries(${PROJECT_NAME} PUBLIC
 	 igl::core igl::cgal ${Boost_LIBRARIES})

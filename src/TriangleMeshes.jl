@@ -1,7 +1,7 @@
 module TriangleMeshes
 using StaticArrays
 
-const libiglboolean_so = joinpath(@__DIR__, "libiglboolean.so")
+const LIBIGLWRAP_SO = joinpath(@__DIR__, "libiglwrap.so")
 # the bits types are hard-coded on the C side:
 const Point=SVector{3,Cdouble}
 const Face=NTuple{3,Cint}
@@ -22,6 +22,8 @@ end
 @inline nvertices(m::TriangleMesh) = size(m.vertices, 1)
 @inline nfaces(m::TriangleMesh) = size(m.faces, 1)
 @inline shift(f::Face, k) = f .+ Face((k,k,k))
+@inline vpointer(m::TriangleMesh) = convert(Ptr{Cdouble}, pointer(m.vertices))
+@inline fpointer(f::TriangleMesh) = convert(Ptr{Cint}, pointer(f))
 
 function boolean(op, m1::TriangleMesh{A}, m2::TriangleMesh{A}) where{A}#««
 	n = nfaces(m1)
@@ -30,9 +32,7 @@ function boolean(op, m1::TriangleMesh{A}, m2::TriangleMesh{A}) where{A}#««
 	v3 = Ref(Ptr{Cdouble}(0))
 	f3 = Ref(Ptr{Cint}(0))
 	j = Ref(Ptr{Cint}(0));
-	@inline vpointer(m) = convert(Ptr{Cdouble}, pointer(m.vertices))
-	@inline fpointer(f) = convert(Ptr{Cint}, pointer(f))
-	r = ccall((:igl_mesh_boolean, libiglboolean_so), Cint,
+	r = ccall((:igl_mesh_boolean, LIBIGLWRAP_SO), Cint,
 		(Cint,
 		Cint, Cint, Ref{Cdouble}, Ref{Cint},
 		Cint, Cint, Ref{Cdouble}, Ref{Cint},
@@ -47,6 +47,14 @@ function boolean(op, m1::TriangleMesh{A}, m2::TriangleMesh{A}) where{A}#««
 	a3 = [ i ≤ n ? m1.attributes[i] : m2.attributes[i-n] for i in index ]
 	return TriangleMesh{A}(rv3, shift.(rf3, 1), a3)
 end#»»
+
+function ispwn(m::TriangleMesh)
+	r = ccall((:igl_mesh_is_pwn, LIBIGLWRAP_SO), Cint,
+		(Cint, Cint, Ref{Cdouble}, Ref{Cint},),
+		nvertices(m), nfaces(m), vpointer(m), fpointer(shift.(m.faces, -1)),
+		)
+	return (r ≠ 0)
+end
 
 @inline Base.union(m1::TriangleMesh, m2::TriangleMesh) = boolean(0, m1, m2)
 @inline Base.intersect(m1::TriangleMesh, m2::TriangleMesh) = boolean(1, m1, m2)

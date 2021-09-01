@@ -2,14 +2,15 @@
 #include <stdlib.h>
 #define BOOST_BIND_GLOBAL_PLACEHOLDERS
 #include <igl/copyleft/cgal/mesh_boolean.h>
-#include "iglboolean.h"
-// #include <boost/bind/bind.hpp>
-// using namespace boost::placeholders;
-
-// typedef Matrix<double,Dynamic,3> VertexMatrix;
-// typedef Matrix<int,Dynamic,3> FaceMatrix;
-
+#include <igl/copyleft/cgal/piecewise_constant_winding_number.h>
+#include "iglwrap.h"
+#include <boost/bind/bind.hpp>
+using namespace boost::placeholders;
 using namespace Eigen;
+
+typedef Matrix<double,Dynamic,3> VertexMatrix;
+typedef Matrix<int,Dynamic,3> FaceMatrix;
+
 typedef Matrix<double, Dynamic, 3, RowMajor> vertices_t;
 typedef Matrix<int, Dynamic, 3, RowMajor> faces_t;
 
@@ -30,6 +31,7 @@ int igl_mesh_boolean(
   igl::copyleft::cgal::mesh_boolean(v1,f1,v2,f2,igl::MeshBooleanType(op),
             v3, f3, j);
 //   std::cout << "done!\n";
+//   std::cout << "f3 = " << f3 << "\n";
 //   std::cout << j << "\n";
   *mv3 = (double *) malloc(3*v3.rows()*sizeof(double));
   if(*mv3 == 0) {
@@ -55,3 +57,8 @@ int igl_mesh_boolean(
   return 0;
 }
 
+int igl_mesh_is_pwn(int nv, int nf, double *mv, int *mf) {
+  Matrix<double, Dynamic, 3> v = Map<vertices_t> (mv, nv, 3);
+  Matrix<int, Dynamic, 3> f = Map<faces_t> (mf, nf, 3);
+  return (int)igl::copyleft::cgal::piecewise_constant_winding_number(v, f);
+}
