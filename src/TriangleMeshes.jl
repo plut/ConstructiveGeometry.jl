@@ -1,7 +1,8 @@
 module TriangleMeshes
 using StaticArrays
+using Libdl
+using IGLWrap_jll
 
-const LIBIGLWRAP_SO = joinpath(@__DIR__, "libiglwrap.so")
 # the bits types are hard-coded on the C side:
 const Point=SVector{3,Cdouble}
 const Face=NTuple{3,Cint}
@@ -11,7 +12,8 @@ struct TriangleMesh{A}
 	vertices::Vector{Point}
 	faces::Vector{Face}
 	attributes::Vector{A}
-	@inline TriangleMesh{A}(v, f, a) where{A} = new{A}(v, _face.(f), a)
+	@inline TriangleMesh{A}(v, f, a) where{A} =
+		new{A}(v, _face.(f), a)
 	@inline TriangleMesh(v, f, a::AbstractVector{A}) where{A} =
 		TriangleMesh{A}(v, f, a)
 end
@@ -23,7 +25,7 @@ end
 @inline nfaces(m::TriangleMesh) = size(m.faces, 1)
 @inline shift(f::Face, k) = f .+ Face((k,k,k))
 @inline vpointer(m::TriangleMesh) = convert(Ptr{Cdouble}, pointer(m.vertices))
-@inline fpointer(f::TriangleMesh) = convert(Ptr{Cint}, pointer(f))
+@inline fpointer(m::TriangleMesh) = convert(Ptr{Cint}, pointer(m.faces))
 
 function boolean(op, m1::TriangleMesh{A}, m2::TriangleMesh{A}) where{A}#««
 	n = nfaces(m1)
@@ -32,26 +34,26 @@ function boolean(op, m1::TriangleMesh{A}, m2::TriangleMesh{A}) where{A}#««
 	v3 = Ref(Ptr{Cdouble}(0))
 	f3 = Ref(Ptr{Cint}(0))
 	j = Ref(Ptr{Cint}(0));
-	r = ccall((:igl_mesh_boolean, LIBIGLWRAP_SO), Cint,
+	r = ccall((:igl_mesh_boolean, libiglwrap), Cint,
 		(Cint,
 		Cint, Cint, Ref{Cdouble}, Ref{Cint},
 		Cint, Cint, Ref{Cdouble}, Ref{Cint},
 		Ref{Cint}, Ref{Cint}, Ref{Ptr{Cdouble}}, Ref{Ptr{Cint}}, Ref{Ptr{Cint}}),
 		op,
-		nvertices(m1), nfaces(m1), vpointer(m1), fpointer(shift.(m1.faces, -1)),
-		nvertices(m2), nfaces(m2), vpointer(m2), fpointer(shift.(m2.faces, -1)),
+		nvertices(m1), nfaces(m1), vpointer(m1), fpointer(m1),
+		nvertices(m2), nfaces(m2), vpointer(m2), fpointer(m2),
 		nv3, nf3, v3, f3, j)
 	rv3 = unsafe_wrap(Array, convert(Ptr{Point},v3[]), Int(nv3[]); own=true)
 	rf3 = unsafe_wrap(Array, convert(Ptr{Face}, f3[]), Int(nf3[]); own=true)
-	index = unsafe_wrap(Array, j[], (Int(nf3[]),); own=true) .+ 1
+	index = unsafe_wrap(Array, j[], (Int(nf3[]),); own=true);
 	a3 = [ i ≤ n ? m1.attributes[i] : m2.attributes[i-n] for i in index ]
-	return TriangleMesh{A}(rv3, shift.(rf3, 1), a3)
+	return TriangleMesh{A}(rv3, rf3, a3)
 end#»»
 
 function ispwn(m::TriangleMesh)
-	r = ccall((:igl_mesh_is_pwn, LIBIGLWRAP_SO), Cint,
+	r = ccall((:igl_mesh_is_pwn, libiglwrap), Cint,
 		(Cint, Cint, Ref{Cdouble}, Ref{Cint},),
-		nvertices(m), nfaces(m), vpointer(m), fpointer(shift.(m.faces, -1)),
+		nvertices(m), nfaces(m), vpointer(m), fpointer(m),
 		)
 	return (r ≠ 0)
 end

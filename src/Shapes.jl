@@ -72,7 +72,7 @@ Converts stuff (numbers, vectors, paths...) to and from `Clipper.jl` types.
 @inline to_clipper(T::Type, v::StaticVector{2,<:Real}) =
 	Clipper.IntPoint(to_clipper(T, v[1]), to_clipper(T, v[2]))
 @inline to_clipper(T, p::AbstractVector{<:StaticVector{2}}) =
-	[to_clipper(T, v) for v in p]
+	Clipper.IntPoint[to_clipper(T, v) for v in p]
 @inline to_clipper(T, p::Vector{<:AbstractVector{<:StaticVector{2}}}) =
 	[to_clipper(T, v) for v in p]
 
