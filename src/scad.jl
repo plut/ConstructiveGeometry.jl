@@ -84,25 +84,25 @@ end
 # 	end
 # end
 
-# SCAD (for mesh types)««1
-function scad(io::IO, m::PolygonXor)
-	t = Shapes.identify_polygons(m)
-	println(io, "difference() { union() { ")
-	for (s, p) in zip(t, Shapes.paths(m)); s > 0 || continue
-		println(io, "polygon(", Vector{Float64}.(p), ");")
-	end
-	println(io, "} union() { ")
-	for (s, p) in zip(t, Shapes.paths(m)); s < 0 || continue
-		println(io, "polygon(", Vector{Float64}.(p), ");")
-	end
-	println(io, "} } ")
-end
-function scad(io::IO, m::Mesh3d)
-	println(io, "polyhedron(points=",
-		Vector{Float64}.(points(m)), ",")
-	println(io, "  faces=", [collect(f.-1) for f in faces(m)], ");")
-end
-
-# FIXME: mat44 for 4x4 matrices
-
-export scad
+# # SCAD (for mesh types)««1
+# function scad(io::IO, m::PolygonXor)
+# 	t = Shapes.identify_polygons(m)
+# 	println(io, "difference() { union() { ")
+# 	for (s, p) in zip(t, Shapes.paths(m)); s > 0 || continue
+# 		println(io, "polygon(", Vector{Float64}.(p), ");")
+# 	end
+# 	println(io, "} union() { ")
+# 	for (s, p) in zip(t, Shapes.paths(m)); s < 0 || continue
+# 		println(io, "polygon(", Vector{Float64}.(p), ");")
+# 	end
+# 	println(io, "} } ")
+# end
+# function scad(io::IO, m::Mesh3d)
+# 	println(io, "polyhedron(points=",
+# 		Vector{Float64}.(points(m)), ",")
+# 	println(io, "  faces=", [collect(f.-1) for f in faces(m)], ");")
+# end
+# 
+# # FIXME: mat44 for 4x4 matrices
+# 
+# export scad

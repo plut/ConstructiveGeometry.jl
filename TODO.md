@@ -1,5 +1,10 @@
 `rotate(90)*cube`
 # Misc.
+  - [ ] decide whether explicit meshes specialize `AbstractGeometry`
+    - in this case, `polyhedron()` and `polygon()` should directly return the meshed objects.
+    - pro: less types
+    - con: `Mesh3d` has per-face attribute, `Surface` doesn't
+    - but `Surface` may still use a `Vector{Nothing}` for attributes
   - [ ] find a way to fix path extrusion? either
     - [ ] cut “by hand” the result of a “butt” extrusion;
     - [ ] intersect the result of a custom “fill” extrusion;
@@ -15,7 +20,7 @@
  - **2d subsystem**
   - [x] reconstruct polygonal shape by list of segments (for projections)
  - **3d subsystem**
-  - [ ] add half-space and
+  - [ ] (re-)add half-space and
   - [ ] plane intersections
  - **Definitions of geometric objects**
   - [x] Some 3d primitives are accessible via extrusion:

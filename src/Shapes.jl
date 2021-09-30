@@ -684,7 +684,7 @@ function path_extrude(path, poly;
 end#»»
 # Exports««1
 
-export Path
-export PolygonXor
+# export Path
+# export PolygonXor
 end
 
