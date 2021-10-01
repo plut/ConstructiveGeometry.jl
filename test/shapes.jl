@@ -11,20 +11,20 @@ r4 = rect(1,1,4,4)
 nva(s::Shapes.PolygonXor) = (length.(s.paths), Shapes.area(s))
 
 @testset "Union" begin#««
-@test nva(union(r1,r2)) == ([6], 3)
-@test nva(union(r1,r3)) == ([4], 9)
-@test nva(union(r1,r4)) == ([4,4], 3)
+@test nva(Shapes.clip(:union,r1,r2)) == ([6], 3)
+@test nva(Shapes.clip(:union,r1,r3)) == ([4], 9)
+@test nva(Shapes.clip(:union,r1,r4)) == ([4,4], 3)
 end#»»
 @testset "Intersection" begin#««
-@test nva(intersect(r1,r2)) == ([4], 1)
-@test nva(intersect(r2,r1)) == ([4], 1)
-@test nva(intersect(r1,r3)) == ([4], 2)
-@test nva(intersect(r3,r1)) == ([4], 2)
-@test nva(intersect(r1,r4)) == ([], 0)
+@test nva(Shapes.clip(:intersection,r1,r2)) == ([4], 1)
+@test nva(Shapes.clip(:intersection,r2,r1)) == ([4], 1)
+@test nva(Shapes.clip(:intersection,r1,r3)) == ([4], 2)
+@test nva(Shapes.clip(:intersection,r3,r1)) == ([4], 2)
+@test nva(Shapes.clip(:intersection,r1,r4)) == ([], 0)
 end#»»
 @testset "Difference" begin#««, 0)
-@test nva(setdiff(r1,r2)) == ([4], 1)
-@test nva(setdiff(r3,r1)) == ([6], 7)
+@test nva(Shapes.clip(:difference,r1,r2)) == ([4], 1)
+@test nva(Shapes.clip(:difference,r3,r1)) == ([6], 7)
 end#»»
 @testset "Convex hull" begin#««
 @test nva(Shapes.convex_hull(r1,r2)) == ([5], 3.5)

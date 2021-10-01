@@ -80,7 +80,6 @@
 |svg        | easy              |                   |easy (`evenodd`)  |
 |openscad   | easy              | just works        | just works       |
 
-
 Convolution: parse polys + holes; add to polys, subtract from holes.
 => must implement Minkowski difference first!
 http://acg.cs.tau.ac.il/copy_of_projects/in-house-projects/exact-and-efficient-construction-of-planar/mink-conv.pdf
@@ -95,7 +94,6 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
     (3) flat xor of polygons]
    - [ ] xor is doable for extrusions but might be harder to convert to
      openscad
-   - [ ] look in `Makie`
    - in `BasicGeometry`: a list of polygons + list of holes
    - this is simplest (it works as a xor polygon, whereas converting any
      xor to this is harder)
@@ -108,15 +106,12 @@ Extrude of ⋃(p+h): triangulate faces and build manually.
  - [ ] `KeywordDispatch.jl` ?
  - [ ] `Reexport.jl` ?
 # Basic types
- - [ ] use abstract types wherever possible
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
    types
     [ ] probably requires making `Vec` a separate type from `SArray`
     (to avoid piracy)
  - [x] add a `symmetry` parameter for circles
    - [ ] (and spheres?)
- - [ ] clarify `Path`: maybe add `points` iterator and `matrix` abstract
-   conversion. Or make `Path` an actual struct type and add accessors.
  - [ ] this needs a plane object type (which could be the image by a 2x3
    multmatrix of `:full`), for intersections etc.
  - [ ] think of using `LabelledArrays.jl` (`SLArray`) as an alternative to
