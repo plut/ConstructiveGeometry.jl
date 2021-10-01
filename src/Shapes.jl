@@ -11,7 +11,7 @@ module Shapes
 
 using LinearAlgebra
 using StaticArrays
-using FixedPointNumbers # for Clipper
+using FixedPointNumbers
 using FastClosures
 using Triangle
 using DataStructures
@@ -30,6 +30,7 @@ Path{D,T} = Vector{SVector{D,T}}
 # default number of bits for Clipper types
 # this *must* be a 64-bit type:
 const _CLIPPER_FIXED = Fixed{Int64,16}
+const _CLIPPER_ONE = FixedPointNumbers.rawone(_CLIPPER_FIXED)
 # constants
 const _CLIPPER_ENUM = (#««
 	clip=(
@@ -58,84 +59,55 @@ const _CLIPPER_ENUM = (#««
 	),
 )#»»
 # conversions««2
-"""
-    to_clipper(OriginalType, ...)
-		from_clipper(OriginalType, ...)
 
-Converts stuff (numbers, vectors, paths...) to and from `Clipper.jl` types.
-"""
-@inline to_clipper(::Type{<:Real}) = _CLIPPER_FIXED
-@inline Base.convert(T::Type{<:FixedPoint}, x::Rational{BigInt}) =
-	convert(T, convert(Float64, x))
-@inline to_clipper(T::Type{<:FixedPoint{<:Int64}}) = T
-@inline to_clipper(T::Type, x::Real) = reinterpret(convert(to_clipper(T), x))
-@inline to_clipper(T::Type, v::StaticVector{2,<:Real}) =
-	Clipper.IntPoint(to_clipper(T, v[1]), to_clipper(T, v[2]))
-@inline to_clipper(T, p::AbstractVector{<:StaticVector{2}}) =
-	Clipper.IntPoint[to_clipper(T, v) for v in p]
-@inline to_clipper(T, p::Vector{<:AbstractVector{<:StaticVector{2}}}) =
-	[to_clipper(T, v) for v in p]
+@inline toc(x::Real) = reinterpret(convert(_CLIPPER_FIXED, x))
+@inline toc(x::StaticVector{2,<:Real}) = Clipper.IntPoint(toc.(x)...)
+@inline toc(x) = toc.(x) # recursively...
 
-# special case: if the data is already compatible, we just wrap it
-@inline to_clipper(::Type{T}, p::Vector{StaticVector{2,T}}
-		) where{T<:FixedPoint{<:Int64}} =
-	GC.@preserve p unsafe_wrap(Array,
-		pointer(reinterpret(Clipper.IntPoint, p)),
-		length(p))
-# FIXME: in the general case, check stride of array
+@inline fromc(x::Int64) = Float64(reinterpret(_CLIPPER_FIXED,x))
+@inline fromc(x::Clipper.IntPoint) = SA[fromc(x.X), fromc(x.Y)]
+@inline fromc(x::StaticVector) = SA[fromc.(x)...]
+@inline fromc(x) = fromc.(x)
 
 # this is a special case; the `delta` parameter wants a Float64,
 # and we *might* use a different type for `delta` than for coordinates:
-@inline to_clipper_float(T::Type{<:Real}, x, n=1)::Float64 =
-	x*FixedPointNumbers.rawone(to_clipper(T))^n
+# @inline to_clipper_float(T::Type{<:Real}, x, n=1)::Float64 = x*_CLIPPER_ONE^n
 
 # numbers...
-@inline from_clipper(T::Type{<:Real}, x::Int64) =
-	convert(T, reinterpret(to_clipper(T), x))
-# points...
-@inline from_clipper(T::Type{<:Real}, p::Clipper.IntPoint) =
-	SA[from_clipper(T, p.X), from_clipper(T, p.Y)]
-# paths...
-@inline from_clipper(T::Type{<:Real}, p::Vector{Clipper.IntPoint}) =
-	[ from_clipper(T, v) for v in p ]
-@inline from_clipper(T::Type{<:Fixed{Int64}}, p::Vector{Clipper.IntPoint}) =
-	reinterpret(Vec{2,T}, p)
-# vectors of paths...
-@inline from_clipper(T, polys::Vector{Vector{Clipper.IntPoint}}) =
-	[ from_clipper(T, p) for p in polys ]
 # Wrappers for Clipper calls««1
 # We wrap all Clipper objects in a NamedTuple with the original type
-struct Marked{T,X}
-	data::X
-	@inline Marked{T}(x::X) where{T,X} = new{T,X}(x)
-end
+# struct Marked{T,X}
+# 	data::X
+# 	@inline Marked{T}(x::X) where{T,X} = new{T,X}(x)
+# end
 
-@inline ClipperClip(T::Type) = Marked{T}(Clipper.Clip())
-@inline ClipperOffset(T::Type, miterLimit::Real, roundPrecision::Real) =
-	Marked{T}(Clipper.ClipperOffset(Float64(miterLimit),
-		to_clipper_float(T, roundPrecision)))
+# @inline ClipperClip(T::Type) = (T, Clipper.Clip())
+# @inline ClipperClip(T::Type) = Marked{T}(Clipper.Clip())
+# @inline ClipperOffset(T::Type, miterLimit::Real, roundPrecision::Real) =
+# 	Marked{T}(Clipper.ClipperOffset(Float64(miterLimit),
+# 		to_clipper_float(T, roundPrecision)))
 
-@inline add_path!(c::Marked{T}, path, args...) where{T} =
-	Clipper.add_path!(c.data, to_clipper(T, path), args...)
-@inline add_paths!(c::Marked{T}, paths, args...) where{T}=
-	Clipper.add_paths!(c.data, [ to_clipper(T, p) for p in paths], args...)
+# @inline add_path!(Type{<:Real}, c, path, args...) =
+# 	Clipper.add_path!(c, to_clipper(T, path), args...)
+# @inline add_paths!(T::Type{<:Real}, c, paths, args...) =
+# 	Clipper.add_paths!(c, to_clipper(T, paths), args...)
 
-@inline execute(c::Marked{T,Clipper.Clip}, args...) where{T} =
-	from_clipper(T, Clipper.execute(c.data, args...)[2])
-@inline execute(c::Marked{T,Clipper.ClipperOffset}, delta::Real) where{T} =
-	from_clipper(T, Clipper.execute(c.data, to_clipper_float(T, delta)))
+# @inline execute(T::Type{<:Real}, c::Clipper.Clip, args...) =
+# 	from_clipper(T, Clipper.execute(c, args...)[2])
+# @inline execute(T::Type{<:Real}, c::Clipper.ClipperOffset, delta::Real) =
+# 	from_clipper(T, Clipper.execute(c, to_clipper_float(T, delta)))
 
 # Clipper calls on Path values««1
 @inline function clip(op::Symbol,
 		v1::AbstractVector{Path{2,T}},
 		v2::AbstractVector{Path{2,T}};
 		fill = :evenodd)::Vector{Path{2,T}} where {T}
-	c = ClipperClip(T)
-	add_paths!(c, v1, Clipper.PolyTypeSubject, true) # closed=true
-	add_paths!(c, v2, Clipper.PolyTypeClip, true)
+	c = Clipper.Clip()
+	Clipper.add_paths!(c, toc(v1), Clipper.PolyTypeSubject, true) # closed=true
+	Clipper.add_paths!(c, toc(v2), Clipper.PolyTypeClip, true)
 
 	f = _CLIPPER_ENUM.fill[fill]
-	return execute(c, _CLIPPER_ENUM.clip[op], f, f)
+	return fromc(Clipper.execute(c, _CLIPPER_ENUM.clip[op], f, f)[2])
 end
 @inline function offset(v::AbstractVector{Path{2,T}}, r::Real;
 		join = :round,
@@ -143,9 +115,9 @@ end
 		miter_limit = 2.,
 		precision = 0.2
 		)::Vector{Path{2,T}} where{T}
-	c = ClipperOffset(T, miter_limit, precision)
-	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
-	return execute(c, r)
+	c = Clipper.ClipperOffset(miter_limit, precision*_CLIPPER_ONE)
+	add_paths!(T, c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
+	return execute(c, r*_CLIPPER_ONE)
 end
 @inline function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
 		join = :round,
@@ -155,9 +127,9 @@ end
 		)::Vector{Vector{Path{2,T}}} where{T}
 	# “Simultaneously” computes offset for several offset values.
 	# Used by path_extrude().
-	c = ClipperOffset(T, miter_limit, precision)
-	add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
-	return [ execute(c, ρ) for ρ in r]
+	c = Clipper.ClipperOffset(miter_limit, precision*_CLIPPER_ONE)
+	add_paths!(T, c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
+	return [ execute(c, ρ*_CLIPPER_ONE) for ρ in r]
 end
 @inline simplify_paths(p::AbstractVector{Path{2,T}}; fill=:nonzero) where{T} =
 	from_clipper(T,
@@ -167,12 +139,8 @@ end
 
 Returns `true` iff p is a direct loop (i.e. if area >= 0).
 """
-@inline function orientation(p::Path{2,T}) where{T}
-	return Clipper.orientation(to_clipper(T, p))
-end
-@inline function area(p::Path{2,T}) where{T}
-	Clipper.area(to_clipper(T, p)) / FixedPointNumbers.rawone(to_clipper(T))^2
-end
+@inline orientation(p::Path{2}) = Clipper.orientation(toc(p))
+@inline area(p::Path{2}) = Clipper.area(toc(p)) / _CLIPPER_ONE^2
 
 """
     point_in_polygon(pt, poly::Path{2})
@@ -182,11 +150,8 @@ given polygon.
 
 Polygon is assumed not self-intersecting.
 """
-@inline function point_in_polygon(point::StaticVector{2,T}, path) where{T}
-	return Clipper.pointinpolygon(to_clipper(T, point), to_clipper(T, path))
-end
-# @inline point_in_polygon(point::StaticVector{2}, path::Path{2}) =
-# 	point_in_polygon(point, vertices(path))
+@inline point_in_polygon(point::StaticVector{2}, path) =
+	Clipper.pointinpolygon(toc(point), toc(path))
 
 # convex hull of 2d points (monotone chain)««1
 # this is the version using MiniQhull: #««

@@ -431,26 +431,15 @@ The exclusive union of a number of simple, closed polygons.
 struct PolygonXor{T} <: AbstractMesh{2,T}
 	# this encapsulates
 	poly::Shapes.PolygonXor{T}
+	@inline PolygonXor(s::Shapes.PolygonXor{T}) where{T} = new{T}(s)
 end
 
 @inline polygon_xor(::Mesh{T}, args...) where{T} =
-	PolygonXor{T}(Shapes.PolygonXor{T}(args...))
-
-# @inline vertices(s::PolygonXor) = Shapes.vertices(s.poly)
-"""
-    Polygon{T}
-
-A simple, closed polygon enclosed by the given vertices.
-`T` is the coordinate type.
-"""
-struct Polygon{T} <: AbstractGeometryCoord{2,T}
-	points::Vector{SVector{2,T}}
-end
-@inline Polygon(points::AbstractVector{<:AbstractVector{<:Real}}) =
-	Polygon{eltype(eltype(points))}(points)
-
-@inline scad_info(s::Polygon) = (:polygon, (points=s.points,))
-@inline (g::Mesh)(s::Polygon) = polygon_xor(g, s.points)
+	PolygonXor(Shapes.PolygonXor{T}(args...))
+@inline poly(s::PolygonXor) = s.poly
+@inline paths(s::PolygonXor) = poly(s).paths
+@inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
+	PolygonXor(Shapes.clip(t, poly.(l)...))
 
 # Square««2
 struct Square{T} <: AbstractGeometryCoord{2,T}
@@ -506,15 +495,15 @@ end
 @inline Surface(points, faces, c::Colorant) =
 	Surface(points, faces, [c for _ in faces])
 
-@inline triangle_mesh(g::Mesh, points, faces) = Surface(points, faces, g.color)
-
-@inline scad_info(s::Surface) =
-	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
-# @inline (g::Mesh)(s::Surface) = triangle_mesh(g, s.points, s.faces)
-@inline (g::Mesh)(s::Surface) = triangle_mesh(g, vertices(s), faces(s))
 @inline vertices(s::Surface) = TriangleMeshes.vertices(s.mesh)
 @inline faces(s::Surface) = TriangleMeshes.faces(s.mesh)
 @inline attributes(s::Surface) = TriangleMeshes.attributes(s.mesh)
+
+@inline triangle_mesh(g::Mesh, points, faces) = Surface(points, faces, g.color)
+@inline (g::Mesh)(s::Surface) = triangle_mesh(g, vertices(s), faces(s))
+
+@inline scad_info(s::Surface) =
+	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
 
 
 # Cube««2
@@ -574,7 +563,7 @@ constructed_solid_type(s::Symbol, T = Vector{<:AbstractGeometry}) =
 struct CSGUnion{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
-@inline (g::Mesh)(s::CSGUnion{2}) = Shapes.clip(:union, g.(s.children)...)
+@inline (g::Mesh)(s::CSGUnion{2}) = clip(:union, g.(s.children)...)
 @inline (g::Mesh)(s::CSGUnion{3}) = reduce(csgunion, g.(s.children))
 @inline csgunion(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
@@ -583,7 +572,7 @@ end
 struct CSGInter{D} <: AbstractGeometry{D}
 	children::Vector{<:AbstractGeometry{D}}
 end
-@inline (g::Mesh)(s::CSGInter{2})= Shapes.clip(:intersection, g.(s.children)...)
+@inline (g::Mesh)(s::CSGInter{2})= clip(:intersection, g.(s.children)...)
 @inline (g::Mesh)(s::CSGInter{3}) = reduce(csginter, g.(s.children))
 @inline csginter(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
@@ -593,7 +582,7 @@ struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
 	children::Tuple{<:AbstractGeometry{D},<:AbstractGeometry{D}}
 end
 @inline (g::Mesh)(s::CSGDiff{2}) =
-	Shapes.clip(:difference, g(s.children[1]), g(s.children[2]))
+	clip(:difference, g(s.children[1]), g(s.children[2]))
 @inline (g::Mesh)(s::CSGDiff{3}) = csgdiff(g(s.children[1]), g(s.children[2]))
 @inline csgdiff(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
@@ -706,7 +695,7 @@ function (g::Mesh)(s::AffineTransform{2})
 	m = g(s.child)
 	d = signdet(s.f)
 	d ≠ 0 || error("Only invertible linear transforms are supported (for now)")
-	for p in m.paths
+	for p in paths(m)
 		p .= s.f.(p)
 		d < 0 && reverse!(p)
 	end
@@ -870,7 +859,7 @@ function (g::Mesh)(s::PathExtrude)
 	ε = max(get_parameter(g, :accuracy), get_parameter(g, :precision)*rmax)
 	v = [ triangle_mesh(g, Shapes.path_extrude(s.path, p;
 		closed=s.closed, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
-		for p in polyxor.paths ]
+		for p in paths(polyxor) ]
 	return reduce(csgxor, v)
 end
 
@@ -887,7 +876,7 @@ end
 function (g::Mesh)(s::Offset)
 	m = g(s.child)
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * s.radius)
-	return PolygonXor(Shapes.offset(Shapes.paths(m), s.radius;
+	return PolygonXor(Shapes.offset(paths(m), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε)...)
 end
 
@@ -960,7 +949,7 @@ Circular cone.
 """
     polygon(path)
 """
-@inline polygon(path) = Polygon(path)
+@inline polygon(path) = PolygonXor([path])
 # Path««2
 """
     path(points, width; kwargs)
@@ -975,7 +964,7 @@ path(points, width; kwargs...) = Path(points, width; kwargs...)
 
 # Surface««2
 function surface(points, faces)
-	# FIXME: triangulate!
+	# TODO: triangulate!
 	return Surface(points, faces)
 end
 
@@ -1436,7 +1425,7 @@ end
 	open(f, "w") do io stl(io, args...; kwargs...) end
 # SVG ««1
 function svg(io::IO, m::PolygonXor)
-	(x,y) = m.paths[1][1]; rect = MVector(x, x, y, y)
+	(x,y) = paths(m)[1][1]; rect = MVector(x, x, y, y)
 	for (x,y) in Shapes.vertices(m)
 		x < rect[1] && (rect[1] = x)
 		x > rect[2] && (rect[2] = x)
@@ -1450,10 +1439,10 @@ function svg(io::IO, m::PolygonXor)
 	println(io, """
 <svg xmlns="http://www.w3.org/2000/svg"
   viewBox="$(viewbox[1]) $(viewbox[2]) $(viewbox[3]) $(viewbox[4])">
-<!-- A shape with $(length(m.paths)) paths and $(length.(m.paths)) vertices -->
+<!-- A shape with $(length(paths(m))) paths and $(length.(paths(m))) vertices -->
 <path fill-rule="evenodd" fill="#999" stroke-width="0"
   d=" """)
-	for p in Shapes.paths(m)
+	for p in paths(m)
 		print(io, "M ", p[1][1], ",", -p[1][2], " ")
 		for q in p[2:end]
 			print(io, "L ", q[1], ",", -q[2], " ")
@@ -1470,58 +1459,68 @@ end
 
 #»»1
 # Viewing««1
-@inline plot(m::AbstractMesh) = plot!(Makie.Scene(), m)
-@inline plot(g::AbstractGeometry) = plot(mesh(g))
+@inline Makie.plot!(scene::Makie.AbstractScene, g::AbstractGeometry, args...; kwargs...) =
+	plot!(scene, mesh(g), args...; kwargs...)
+@inline Makie.plot(g::AbstractGeometry, args...; kwargs...) =
+	plot!(Makie.Scene(), g, args...; kwargs...)
 @inline Base.display(m::AbstractGeometry) = plot(m)
 
-function plot!(scene::Makie.AbstractScene, m::Surface)
+function Makie.plot!(scene::Makie.AbstractScene, m::Surface)
 	vmat = similar(first(vertices(m)), 3*length(faces(m)), 3)
 	for (i, f) in pairs(faces(m)), j in 1:3, k in 1:3
 		vmat[3*i+j-3, k] = vertices(m)[f[j]][k]
 	end
 	fmat = collect(1:size(vmat, 1))
 	attr = [ attributes(m)[fld1(i,3)] for i in 1:size(vmat, 1)]
-	mesh!(scene, vmat, fmat, color=attr)
+	Makie.mesh!(scene, vmat, fmat, color=attr)
+	return scene
+end
+
+function Makie.plot!(scene::Makie.AbstractScene, m::PolygonXor; kwargs...)
+	v = Shapes.vertices(poly(m))
+	tri = Shapes.triangulate(poly(m))
+	m = [ t[j] for t in tri, j in 1:3 ]
+	Makie.mesh!(scene, v, m,
+		specular=Makie.Vec3f0(0,0,0), diffuse=Makie.Vec3f0(0,0,0),
+		color = _DEFAULT_PARAMETERS.color; kwargs...)
 	return scene
 end
 # OpenSCAD output««1
-
 # Annotations ««1
-# # Abstract type ««2
-# struct Annotate{D,P,A}<:AbstractTransform{D}
-# 	annotation::A
-# 	points::AbstractVector{P}
-# 	child::AbstractGeometry{D}
-# @inline Annotate(ann::A, p::AbstractVector{P}, g::AbstractGeometry{D}
-# 	) where{D,P,A} = new{D,P,A}(ann, p, g)
-# end
-# 
-# struct AnnotatedMesh{A,D,P} <: AbstractMesh{D}
-# 	annotation::A
-# 	points::AbstractVector{P}
-# 	child::AbstractMesh{D}
-# end
-# 
-# @inline Base.map!(f, m::AnnotatedMesh) =
-# 	(map!(f, m.child); map!(f, m.points, m.points))
-# @inline (g::Mesh)(a::Annotate) =
-# 	AnnotatedMesh(a.annotation, a.points, g(a.child))
-# 
-# function plot!(scene::Makie.AbstractScene, m::AnnotatedMesh)
-# 	plot!(scene, m.child)
-# 	annotate!(scene, m.annotation, m.points)
-# 	return scene
-# end
-# 
-# # Text annotation ««2
-# @inline annotate(s::AbstractString, p::AbstractVector{<:Real}, x...) =
-# 	operator(Annotate,(s,[p],), x...)
-# 
-# function annotate!(scene::Makie.AbstractScene, s::AbstractString, points)
-# 	text!(scene, [s]; position=[(points[1]...,)], align=(:center,:center))
-# 	return scene
-# end
-# 
+# Abstract type ««2
+struct Annotate{D,P,A}<:AbstractTransform{D}
+	annotation::A
+	points::Vector{P}
+	child::AbstractGeometry{D}
+@inline Annotate(ann::A, p::AbstractVector{P}, g::AbstractGeometry{D}
+	) where{D,P,A} = new{D,P,A}(ann, p, g)
+end
+
+struct AnnotatedMesh{A,D,T,P} <: AbstractMesh{D,T}
+	annotation::A
+	points::Vector{P}
+	child::AbstractMesh{D,T}
+end
+
+@inline Base.map!(f, m::AnnotatedMesh) =
+	(map!(f, m.child); map!(f, m.points, m.points))
+@inline (g::Mesh)(a::Annotate) =
+	AnnotatedMesh(a.annotation, a.points, g(a.child))
+
+function Makie.plot!(scene::Makie.AbstractScene, m::AnnotatedMesh)
+	plot!(scene, m.child)
+	annotate!(scene, m.annotation, m.points)
+	return scene
+end
+
+# Text annotation ««2
+@inline annotate(s::AbstractString, p::AbstractVector{<:Real}, x...) =
+	operator(Annotate,(s,[p],), x...)
+
+function annotate!(scene::Makie.AbstractScene, s::AbstractString, points)
+	text!(scene, [s]; position=[(points[1]...,)], align=(:center,:center))
+	return scene
+end
 # # Arrow annotation ««2
 # struct ArrowAnnotation{S}
 # 	text::S

@@ -6,7 +6,7 @@ using LinearAlgebra
 G = ConstructiveGeometry
 
 @testset "2d" begin#««
-nva(s::G.Shapes.PolygonXor) = (length.(s.paths), G.Shapes.area(s))
+nva(s::G.PolygonXor) = (length.(G.paths(s)), G.Shapes.area(s.poly))
 r1 = G.square(2.,1)
 r2 = G.square(1.,2)
 r3 = G.square(3.,3)
@@ -22,70 +22,24 @@ r4 = [4,4] + G.square(1,1)
 @test nva(mesh(setdiff(r1,r2))) == ([4], 1)
 @test nva(mesh(setdiff(r3,r1))) == ([6], 7)
 end#»»
-@testset "Spatial sorting" begin#««
-include("../src/SpatialSorting.jl")
-# Bounding box««
-struct BoundingBox{N,T}
-	min::SVector{N,T}
-	max::SVector{N,T}
-end
-
-BoundingBox{N}(min::AbstractVector, max::AbstractVector) where{N} =
-	BoundingBox{N,promote_type(eltype(min), eltype(max))}(min, max)
-BoundingBox(min::StaticVector{N}, max::StaticVector{N}) where{N} =
-	BoundingBox{N}(min, max)
-function BoundingBox(min::AbstractVector, max::AbstractVector)
-	length(min) == length(max) || throw(DimensionMismatch(
-	"min and max must have same length ($(length(min)),$(length(max)))"))
-	return BoundingBox{length(min)}(min, max)
-end
-
-@inline Base.merge(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
-	BoundingBox{N}(min.(box1.min, box2.min), max.(box1.max, box2.max))
-@inline Base.:∩(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
-	BoundingBox{N}(max.(box1.min, box2.min), min.(box1.max, box2.max))
-@inline Base.isempty(box::BoundingBox) = any(box.min .> box.max)
-@inline SpatialSorting.position(box::BoundingBox) = box.min + box.max
-
-function rbb(int1, int2, n)
-	v = rand(int1, n)
-	w = rand(int2, n)
-	return BoundingBox(v, v+w)
-end
-boxes=[ rbb(1:500, 1:10, 3) for _ in 1:3000 ]
-
-function validate(boxes)
-	int = extrema.(SpatialSorting.intersections(boxes))
-	for i = 1:length(boxes), j = 1:i-1
-		a = SpatialSorting.intersects(boxes[i], boxes[j])
-		b = (j,i) ∈ int
-		(a ≠ b) && return false
-	end
-	return true
-end
-
-@test validate(boxes)
-
-#»»
-end#»»
-@testset "Cubes" begin#««
-volume(x) = ConstructiveGeometry.CornerTables.volume(x)
-@test volume(mesh(cube(1))) ≈ 1
-@test volume(mesh(union(cube([5,1,1]),cube([1,5,1])))) ≈ 9
-@test volume(mesh(setdiff(cube(2),cube(1)))) ≈ 7
-end#»»
-@testset "Extrusion" begin #««1
-# using ConstructiveGeometry: nvertices, nfaces
-# C = vertices(circle(3.),(precision=.01,accuracy=1,symmetry=1))
-# c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
-# @test (path_extrude(c, C)) != 0
-# 
-d=setdiff(square(15.), translate([1,1])*square(8.))
-# e=linear_extrude(10.)*d
-# m=mesh(e)
-# @test nvertices(m) == 16
-# @test nfaces(m) == 32
-end
+# @testset "Cubes" begin#««
+# volume(x) = ConstructiveGeometry.CornerTables.volume(x)
+# @test volume(mesh(cube(1))) ≈ 1
+# @test volume(mesh(union(cube([5,1,1]),cube([1,5,1])))) ≈ 9
+# @test volume(mesh(setdiff(cube(2),cube(1)))) ≈ 7
+# end#»»
+# @testset "Extrusion" begin #««1
+# # using ConstructiveGeometry: nvertices, nfaces
+# # C = vertices(circle(3.),(precision=.01,accuracy=1,symmetry=1))
+# # c = [Point(20*cos(i),20*sin(i)) for i in 0:.1:π]; c=[c;[Point(0.,-1.)]]
+# # @test (path_extrude(c, C)) != 0
+# # 
+# d=setdiff(square(15.), translate([1,1])*square(8.))
+# # e=linear_extrude(10.)*d
+# # m=mesh(e)
+# # @test nvertices(m) == 16
+# # @test nfaces(m) == 32
+# end
 # @testset "Types" begin #««1
 # @testset "Basic types" begin #««2
 # V = Point(1,2)
@@ -342,3 +296,50 @@ end
 # end
 # #»»1
 # vim: noet ts=2 fmr=««,»»
+
+# @testset "Spatial sorting" begin#««
+# include("../src/SpatialSorting.jl")
+# # Bounding box««
+# struct BoundingBox{N,T}
+# 	min::SVector{N,T}
+# 	max::SVector{N,T}
+# end
+# 
+# BoundingBox{N}(min::AbstractVector, max::AbstractVector) where{N} =
+# 	BoundingBox{N,promote_type(eltype(min), eltype(max))}(min, max)
+# BoundingBox(min::StaticVector{N}, max::StaticVector{N}) where{N} =
+# 	BoundingBox{N}(min, max)
+# function BoundingBox(min::AbstractVector, max::AbstractVector)
+# 	length(min) == length(max) || throw(DimensionMismatch(
+# 	"min and max must have same length ($(length(min)),$(length(max)))"))
+# 	return BoundingBox{length(min)}(min, max)
+# end
+# 
+# @inline Base.merge(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
+# 	BoundingBox{N}(min.(box1.min, box2.min), max.(box1.max, box2.max))
+# @inline Base.:∩(box1::BoundingBox{N}, box2::BoundingBox{N}) where{N} =
+# 	BoundingBox{N}(max.(box1.min, box2.min), min.(box1.max, box2.max))
+# @inline Base.isempty(box::BoundingBox) = any(box.min .> box.max)
+# @inline SpatialSorting.position(box::BoundingBox) = box.min + box.max
+# 
+# function rbb(int1, int2, n)
+# 	v = rand(int1, n)
+# 	w = rand(int2, n)
+# 	return BoundingBox(v, v+w)
+# end
+# boxes=[ rbb(1:500, 1:10, 3) for _ in 1:3000 ]
+# 
+# function validate(boxes)
+# 	int = extrema.(SpatialSorting.intersections(boxes))
+# 	for i = 1:length(boxes), j = 1:i-1
+# 		a = SpatialSorting.intersects(boxes[i], boxes[j])
+# 		b = (j,i) ∈ int
+# 		(a ≠ b) && return false
+# 	end
+# 	return true
+# end
+# 
+# @test validate(boxes)
+# 
+# #»»
+# end#»»

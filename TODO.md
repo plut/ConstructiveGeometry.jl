@@ -1,7 +1,7 @@
 `rotate(90)*cube`
 # Misc.
-  - [ ] decide whether explicit meshes specialize `AbstractGeometry`
-    - in this case, `polyhedron()` and `polygon()` should directly return the meshed objects.
+  - [x] decide whether explicit meshes specialize `AbstractGeometry`
+    - in this case, `surface()` and `polygon()` should directly return the meshed objects.
     - pro: less types
     - con: `Mesh3d` has per-face attribute, `Surface` doesn't
     - but `Surface` may still use a `Vector{Nothing}` for attributes
