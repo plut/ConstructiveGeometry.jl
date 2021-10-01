@@ -1,4 +1,8 @@
 `rotate(90)*cube`
+# FIXME
+ - [x] `Color` works bottom-up, should be top-down
+ - [x] lighting (pick a sensible default)
+ - [ ] fix `constructed_solid`
 # Misc.
   - [x] decide whether explicit meshes specialize `AbstractGeometry`
     - in this case, `surface()` and `polygon()` should directly return the meshed objects.

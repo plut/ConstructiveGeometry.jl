@@ -438,6 +438,7 @@ end
 	PolygonXor(Shapes.PolygonXor{T}(args...))
 @inline poly(s::PolygonXor) = s.poly
 @inline paths(s::PolygonXor) = poly(s).paths
+@inline vertices(s::PolygonXor) = Shapes.vertices(poly(s))
 @inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
 	PolygonXor(Shapes.clip(t, poly.(l)...))
 
@@ -490,7 +491,7 @@ struct Surface{T,A} <: AbstractMesh{3,T}
 		attrs::AbstractVector{A} = Nothing[]) where{T,A} =
 		new{T,A}(TriangleMesh{T,A}(points, faces, attrs))
 end
-@inline Surface(points, faces::AbstractVector{<:AbstractVector}, attrs...) =
+@inline Surface(points, faces, attrs...) =
 	Surface(points, [(f...,) for f in faces], attrs...)
 @inline Surface(points, faces, c::Colorant) =
 	Surface(points, faces, [c for _ in faces])
@@ -541,46 +542,46 @@ end
 # Constructive geometry operations««1
 # https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
 # Type definition««2
-"""
-		ConstructedSolid{D,S}
+abstract type AbstractConstructed{S,D} <: AbstractGeometry{D} end
 
-A type representing CSG operations on solids. `D` is the dimension and
-`S` is a symbol representing the operation (union, intersection etc.)
-"""
-struct ConstructedSolid{S,V,D} <: AbstractGeometry{D}
+# """
+# 		ConstructedSolid{S,V,D}
+# 
+# A type representing CSG operations on solids. `D` is the dimension and
+# `S` is a symbol representing the operation (union, intersection etc.)
+# """
+struct ConstructedSolid{S,V,D} <: AbstractConstructed{S,D}
 	children::V # Vector{<:AbstractGeometry}, or tuple etc.
-	# passing a vector or tuple:
-	@inline ConstructedSolid{S,V,D}(v::V) where{S,V,D} = new{S,V,D}(v)
 end
 
 @inline children(s::ConstructedSolid) = s.children
-@inline scad_info(s::ConstructedSolid{S}) where{S} = (S, ())
+@inline scad_info(::ConstructedSolid{S}) where{S} = (S, ())
+constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
+	ConstructedSolid{S,T(AbstractGeometry{D}),D} where{D}
 
-constructed_solid_type(s::Symbol, T = Vector{<:AbstractGeometry}) =
-	ConstructedSolid{s,T}
+# constructed_solid_type(S::Symbol, T = Vector{<:AbstractGeometry}) =
+# 	ConstructedSolid{S,T}
+
 
 # Union««2
-struct CSGUnion{D} <: AbstractGeometry{D}
-	children::Vector{<:AbstractGeometry{D}}
-end
+CSGUnion = constructed_solid_type(:union)
 @inline (g::Mesh)(s::CSGUnion{2}) = clip(:union, g.(s.children)...)
 @inline (g::Mesh)(s::CSGUnion{3}) = reduce(csgunion, g.(s.children))
 @inline csgunion(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
 
 # Intersection««2
-struct CSGInter{D} <: AbstractGeometry{D}
-	children::Vector{<:AbstractGeometry{D}}
-end
+CSGInter = constructed_solid_type(:intersection)
 @inline (g::Mesh)(s::CSGInter{2})= clip(:intersection, g.(s.children)...)
 @inline (g::Mesh)(s::CSGInter{3}) = reduce(csginter, g.(s.children))
 @inline csginter(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
 
 # Difference««2
-struct CSGDiff{D} <: AbstractGeometry{D} # this is a binary operator:
-	children::Tuple{<:AbstractGeometry{D},<:AbstractGeometry{D}}
-end
+# this is a binary operator:
+CSGDiff{D} = ConstructedSolid{:difference,
+	Tuple{<:AbstractGeometry{D},<:AbstractGeometry{D}},D}
+
 @inline (g::Mesh)(s::CSGDiff{2}) =
 	clip(:difference, g(s.children[1]), g(s.children[2]))
 @inline (g::Mesh)(s::CSGDiff{3}) = csgdiff(g(s.children[1]), g(s.children[2]))
@@ -589,7 +590,7 @@ end
 
 # Complement««2
 # TODO
-CSGComplement = constructed_solid_type(:complement, Tuple{<:AbstractGeometry})
+CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
 
 # Xor (used by extrusion) ««2
 @inline csgxor(s1::S, s2::S) where {S<:Surface} =
@@ -634,24 +635,15 @@ function hull end
 @define_neutral hull EmptyIntersect  absorb
 
 # Convex hull (TODO)««2
-struct CSGHull2
-	children::Vector{AbstractGeometry{2}}
-end
-
-struct CSGHull3
-	children::Vector{AbstractGeometry}
-end
-
 CSGHull = constructed_solid_type(:hull)
 
-@inline function (g::Mesh)(s::CSGHull2)
-	v = reduce(vcat, Shapes.vertices(g(x)) for x in children(s))
-	return polygon_xor(g, convex_hull(v))
-end
+@inline (g::Mesh)(s::CSGHull{2}) =
+	polygon_xor(g, convex_hull(reduce(vcat, vertices.(g.(children(s))))))
 
 @inline vertices3(m::Surface) = vertices(m)
 @inline vertices3(m::PolygonXor) =
 	(SA[p[1], p[2], 0] for p in Shapes.vertices(m))
+
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	v = SVector{3,T}[]
 	for x in children(s); push!(v, vertices3(g(x))...); end
@@ -1093,7 +1085,7 @@ Represents the Minkowski sum of given solids.
 # Transform type««2
 # An operator F may be called in either full or currified form:
 # F(parameters, object) - applied
-# F(parameters) - abstract transform (allows chaining)
+# F(parameters)*object - abstract transform (allows chaining)
 """
     Transform{S,F}
 
@@ -1104,10 +1096,16 @@ struct Transform{S,F}
 	f::F
 	@inline Transform{S}(f) where{S} = new{S,typeof(f)}(f)
 end
-@inline operator(f, x; kw...) = Transform{f}(@closure y -> f(x..., y; kw...))
-@inline operator(f, x, s; kw...) = operator(f, x; kw...)*s
-@inline operator(f, x, s::AbstractVector; kw...) = operator(f, x, s...; kw...)
+# end-case: operator applied on a single geometry object
+@inline operator(f, x, s::AbstractGeometry; kw...) = f(x..., s; kw...)
+
+# other cases reducing to this one:
 @inline operator(f, x, s...;kw...) = operator(f, x, union(s...);kw...)
+@inline operator(f, x, s::AbstractVector; kw...) = operator(f, x, s...; kw...)
+@inline operator(f, x; kw...) =
+	Transform{f}(@closure s -> operator(f, x, s; kw...))
+
+# Multiplicative notation:
 @inline Base.:*(u::Transform, s) = u.f(s)
 @inline (u::Transform)(s) = u*s
 @inline Base.:*(u::Transform, v::Transform, s...)= _comp(Val(assoc(u,v)),u,v,s...)
@@ -1195,11 +1193,21 @@ child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
 
 Colors objects `s...` in the given color.
 """
-@inline color(c::Colorant, s...) = operator(SetParameters, ((color=c,),), s...)
+struct Color{D,C<:Colorant} <: AbstractGeometry{D}
+	color::C
+	child::AbstractGeometry{D}
+end
+@inline color(c::Colorant, s...) = operator(Color, (c,), s...)
+# @inline color(c::Colorant, s...) = operator(SetParameters, ((color=c,),), s...)
 @inline color(c::Union{Symbol,AbstractString}, s...) =
 	color(parse(Colorant, c), s...)
 @inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
+
+@inline (g::Mesh)(c::Color{2}) = g(c.child)
+@inline (g::Mesh)(c::Color{3}) = let m = g(c.child)
+	Surface(vertices(m), faces(m), c.color)
+end
 
 # Affine transformations««1
 # mult_matrix««2
@@ -1459,20 +1467,23 @@ end
 
 #»»1
 # Viewing««1
-@inline Makie.plot!(scene::Makie.AbstractScene, g::AbstractGeometry, args...; kwargs...) =
-	plot!(scene, mesh(g), args...; kwargs...)
-@inline Makie.plot(g::AbstractGeometry, args...; kwargs...) =
-	plot!(Makie.Scene(), g, args...; kwargs...)
 @inline Base.display(m::AbstractGeometry) = plot(m)
 
-function Makie.plot!(scene::Makie.AbstractScene, m::Surface)
+@inline Makie.plot(g::AbstractGeometry; kwargs...) =
+	plot!(Makie.Scene(), g; kwargs...)
+
+@inline Makie.plot!(scene::Makie.AbstractScene, g::AbstractGeometry; kwargs...)=
+	plot!(scene, mesh(g); kwargs...)
+
+function Makie.plot!(scene::Makie.AbstractScene, m::Surface; kwargs...)
 	vmat = similar(first(vertices(m)), 3*length(faces(m)), 3)
 	for (i, f) in pairs(faces(m)), j in 1:3, k in 1:3
 		vmat[3*i+j-3, k] = vertices(m)[f[j]][k]
 	end
 	fmat = collect(1:size(vmat, 1))
 	attr = [ attributes(m)[fld1(i,3)] for i in 1:size(vmat, 1)]
-	Makie.mesh!(scene, vmat, fmat, color=attr)
+	Makie.mesh!(scene, vmat, fmat, color=attr;
+		lightposition=Makie.Vec3f0(5e3,1e3, 10e3), kwargs... )
 	return scene
 end
 

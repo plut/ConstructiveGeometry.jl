@@ -153,75 +153,75 @@ Polygon is assumed not self-intersecting.
 @inline point_in_polygon(point::StaticVector{2}, path) =
 	Clipper.pointinpolygon(toc(point), toc(path))
 
-# convex hull of 2d points (monotone chain)««1
-# this is the version using MiniQhull: #««
-# convex_hull(points::AbstractVector{<:AnyVec(2)}) =
-#		# Delaunay triangulation:
-#		let T = MiniQhull.delaunay([p[i] for i in 1:2, p in points]),
-#				N = length(points),
-#				M = zeros(Bool, N, N) # ⚠ memory O(N²)
-#		# mark all edges:
-#		for (a,b,c) in eachcol(T)
-#			b1 = points[b] - points[a]
-#			c1 = points[c] - points[a]
-#			d = b1[1]*c1[2] - b1[2]*c1[1] # determinant === orientation of triangle
-#			if d < 0
-#				M[a,b] = M[b,c] = M[c,a] = true
-#			else
-#				M[b,a] = M[c,b] = M[a,c] = true
-#			end
-#		end
-#		# list of remaining edges (retrograde oriented)
-#		L= sort([(i,j) for i in 1:N, j in 1:N if M[i,j] && ! M[j,i]], by=v->v[1])
-#		next(i) = L[searchsorted(L, i, by=y->y[1])][1][2]
-#		R = zeros(Int, length(L))
-#		R[1:2] .= L[1] # initialize with first edge
-#		for i in 3:length(R)
-#			R[i] = next(R[i-1])
-#		end
-#		# returns in retrograde ordering (OpenSCAD convention):
-#		points[R]
-# end#»»
-"""
-    convex_hull_list(points)
-
-Returns the convex hull of the points, as a list of indexes (in direct
-order, starting at a reproducible index in the list of points).
-"""
-function convex_hull_list(points::AbstractVector{<:StaticVector{2}})
-	list = Int[]
-	length(points) ≤ 2 && return points
-	p = sortperm(points) # lex by x then y
-	k = 1
-	pdet = @closure (i,j,k) -> begin
-		qi = points[i]; qj = points[j]; qk = points[k]
-		vij = qj-qi; vik = qk-qi
-		return vij[2]*vik[1]-vij[1]*vik[2]
-	end
-	for i in p # lower hull
-		while length(list) ≥ 2 && pdet(list[end-1], list[end], i) ≥ 0
-			pop!(list)
-		end
-		push!(list, i)
-	end
-	t = length(list)
-	for i in reverse(p) # upper hull
-		while length(list) ≥ t+1 && pdet(list[end-1], list[end], i) ≥ 0
-			pop!(list)
-		end
-		push!(list, i)
-	end
-	pop!(list) # remove loop
-	return list
-end
-"""
-    convex_hull([vector of 2d points])
-
-Returns the convex hull (as a vector of 2d points, ordered in direct
-order).
-"""
-@inline convex_hull(points::AbstractVector{<:StaticVector{2}}) =
-	points[convex_hull_list(points)]
+# # convex hull of 2d points (monotone chain)««1
+# # this is the version using MiniQhull: #««
+# # convex_hull(points::AbstractVector{<:AnyVec(2)}) =
+# #		# Delaunay triangulation:
+# #		let T = MiniQhull.delaunay([p[i] for i in 1:2, p in points]),
+# #				N = length(points),
+# #				M = zeros(Bool, N, N) # ⚠ memory O(N²)
+# #		# mark all edges:
+# #		for (a,b,c) in eachcol(T)
+# #			b1 = points[b] - points[a]
+# #			c1 = points[c] - points[a]
+# #			d = b1[1]*c1[2] - b1[2]*c1[1] # determinant === orientation of triangle
+# #			if d < 0
+# #				M[a,b] = M[b,c] = M[c,a] = true
+# #			else
+# #				M[b,a] = M[c,b] = M[a,c] = true
+# #			end
+# #		end
+# #		# list of remaining edges (retrograde oriented)
+# #		L= sort([(i,j) for i in 1:N, j in 1:N if M[i,j] && ! M[j,i]], by=v->v[1])
+# #		next(i) = L[searchsorted(L, i, by=y->y[1])][1][2]
+# #		R = zeros(Int, length(L))
+# #		R[1:2] .= L[1] # initialize with first edge
+# #		for i in 3:length(R)
+# #			R[i] = next(R[i-1])
+# #		end
+# #		# returns in retrograde ordering (OpenSCAD convention):
+# #		points[R]
+# # end#»»
+# """
+#     convex_hull_list(points)
+# 
+# Returns the convex hull of the points, as a list of indexes (in direct
+# order, starting at a reproducible index in the list of points).
+# """
+# function convex_hull_list(points::AbstractVector{<:StaticVector{2}})
+# 	list = Int[]
+# 	length(points) ≤ 2 && return points
+# 	p = sortperm(points) # lex by x then y
+# 	k = 1
+# 	pdet = @closure (i,j,k) -> begin
+# 		qi = points[i]; qj = points[j]; qk = points[k]
+# 		vij = qj-qi; vik = qk-qi
+# 		return vij[2]*vik[1]-vij[1]*vik[2]
+# 	end
+# 	for i in p # lower hull
+# 		while length(list) ≥ 2 && pdet(list[end-1], list[end], i) ≥ 0
+# 			pop!(list)
+# 		end
+# 		push!(list, i)
+# 	end
+# 	t = length(list)
+# 	for i in reverse(p) # upper hull
+# 		while length(list) ≥ t+1 && pdet(list[end-1], list[end], i) ≥ 0
+# 			pop!(list)
+# 		end
+# 		push!(list, i)
+# 	end
+# 	pop!(list) # remove loop
+# 	return list
+# end
+# """
+#     convex_hull([vector of 2d points])
+# 
+# Returns the convex hull (as a vector of 2d points, ordered in direct
+# order).
+# """
+# @inline convex_hull(points::AbstractVector{<:StaticVector{2}}) =
+# 	points[convex_hull_list(points)]
 # Convolution««1
 function convolution(p::Path, q::Path)
 	(np, nq) = (length(p), length(q))

@@ -40,38 +40,23 @@ end#»»
 # # @test nvertices(m) == 16
 # # @test nfaces(m) == 32
 # end
-# @testset "Types" begin #««1
-# @testset "Basic types" begin #««2
-# V = Point(1,2)
-# @test V.coords === SA[1,2]
-# end
-# @testset "Conversion to/from Clipper.jl" begin #««2
-# V = Point(1,2)
-# test_from_to(Int, 3)
-# test_from_to(Int, V)
-# test_from_to(Int, [V, V])
-# test_from_to(_FIXED, 3)
-# test_from_to(_FIXED, Point{2,_FIXED}(1,2))
-# test_from_to(Float64, 3)
-# end
-# end
-# 
-# @testset "Handling of objects" begin #««1
-# s = square(1)
-# @testset "Primitives" begin #««2
-# @test s == square([1,1])
-# end
-# @testset "Operations" begin #««2
-# @test union(s, union()) === s
-# @test length(children(union(s, union(s)))) == 2
-# end
-# @testset "Transforms" begin #««2
-# @test 2s == scale(2, s)
-# @test scale(2)*s == scale(2, s)
-# @test scale(2)*[s] == scale(2, s)
-# @test color("red")*s == color("red", s)
-# end
-# end
+@testset "Handling of objects" begin #««1
+s = square(1)
+@testset "Primitives" begin #««2
+@test s == square([1,1])
+@test s == square(1,1)
+end
+@testset "Operations" begin #««2
+@test union(s, union()) === s
+@test length(G.children(union(s, union(s)))) == 2
+end
+@testset "Transforms" begin #««2
+@test 2s == scale(2, s)
+@test scale(2)*s == scale(2, s)
+@test scale(2)*[s] == scale(2, s)
+@test color("red")*s == color("red", s)
+end
+end
 # @testset "Clipper" begin #««1
 # s = square(1)
 # # FIXME
