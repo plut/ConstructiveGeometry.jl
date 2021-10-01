@@ -579,8 +579,7 @@ CSGInter = constructed_solid_type(:intersection)
 
 # Difference««2
 # this is a binary operator:
-CSGDiff{D} = ConstructedSolid{:difference,
-	Tuple{<:AbstractGeometry{D},<:AbstractGeometry{D}},D}
+CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
 
 @inline (g::Mesh)(s::CSGDiff{2}) =
 	clip(:difference, g(s.children[1]), g(s.children[2]))
@@ -868,8 +867,8 @@ end
 function (g::Mesh)(s::Offset)
 	m = g(s.child)
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * s.radius)
-	return PolygonXor(Shapes.offset(paths(m), s.radius;
-	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε)...)
+	return PolygonXor(Shapes.offset(poly(m), s.radius;
+	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
 end
 
 #————————————————————— Front-end —————————————————————————————— ««1

@@ -116,8 +116,9 @@ end
 		precision = 0.2
 		)::Vector{Path{2,T}} where{T}
 	c = Clipper.ClipperOffset(miter_limit, precision*_CLIPPER_ONE)
-	add_paths!(T, c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
-	return execute(c, r*_CLIPPER_ONE)
+	Clipper.add_paths!(c, toc(v),
+		_CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
+	return fromc(Clipper.execute(c, r*_CLIPPER_ONE))
 end
 @inline function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
 		join = :round,
@@ -128,8 +129,8 @@ end
 	# “Simultaneously” computes offset for several offset values.
 	# Used by path_extrude().
 	c = Clipper.ClipperOffset(miter_limit, precision*_CLIPPER_ONE)
-	add_paths!(T, c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
-	return [ execute(c, ρ*_CLIPPER_ONE) for ρ in r]
+	Clipper.add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
+	return [ fromc(Clipper.execute(c, ρ*_CLIPPER_ONE)) for ρ in r]
 end
 @inline simplify_paths(p::AbstractVector{Path{2,T}}; fill=:nonzero) where{T} =
 	from_clipper(T,
@@ -367,6 +368,9 @@ end
 
 @inline clip(op, s::PolygonXor{T}...) where{T} =
 	reduce((p,q)->PolygonXor{T}(clip(op, paths(p), paths(q), fill=:evenodd)), s)
+
+@inline offset(s::PolygonXor{T}, r; kwargs...) where{T} =
+	PolygonXor{T}(offset(paths(s), r; kwargs...))
 
 # @inline Base.union(s::PolygonXor...) = clip(:union, s...)
 # @inline Base.intersect(s::PolygonXor...) = clip(:intersection, s...)

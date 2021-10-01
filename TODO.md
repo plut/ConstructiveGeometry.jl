@@ -1,14 +1,5 @@
 `rotate(90)*cube`
-# FIXME
- - [x] `Color` works bottom-up, should be top-down
- - [x] lighting (pick a sensible default)
- - [ ] fix `constructed_solid`
 # Misc.
-  - [x] decide whether explicit meshes specialize `AbstractGeometry`
-    - in this case, `surface()` and `polygon()` should directly return the meshed objects.
-    - pro: less types
-    - con: `Mesh3d` has per-face attribute, `Surface` doesn't
-    - but `Surface` may still use a `Vector{Nothing}` for attributes
   - [ ] find a way to fix path extrusion? either
     - [ ] cut “by hand” the result of a “butt” extrusion;
     - [ ] intersect the result of a custom “fill” extrusion;
@@ -23,6 +14,8 @@
     square(3, round=1) # => calls rounded_square(3, 1)
  - **2d subsystem**
   - [x] reconstruct polygonal shape by list of segments (for projections)
+ - [ ] Minkowski sum in 2d
+   - [ ] and Minkowski difference
  - **3d subsystem**
   - [ ] (re-)add half-space and
   - [ ] plane intersections
@@ -61,15 +54,6 @@
    - [x] add some per-face visualization data (colors?).
  - [ ] 2d with `polygon`
 # For version 0.2 (performance update)
- - [ ] allow exact (rational) arithmetic
- - [?] split in several packages:
-  - [ ] `AbstractGeometry`: remove stale `Meshes` dependency
-  - [x] `StrongIndices` -> `StrongArrays`, not used (for now at least)
-  - [x] `AABBTree` -> `SpatialSorting` + `TriangleIntersections`
-  - [x] `Meshing` -> `CornerTables`
- - [ ] intersection with half-plane and half-space
- - [ ] Minkowski sum in 2d
-   - [ ] and Minkowski difference
  - [x] what to do for polygons with holes? find a representation that
    must be useable for extrusion + (makie) drawing + Clipper + openscad conversion
    possibilities include:
