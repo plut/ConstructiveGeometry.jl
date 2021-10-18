@@ -1,5 +1,8 @@
 `rotate(90)*cube`
 # Misc.
+ - Minkowski sum for holed polygons: slice a connected, holed polygon
+   as an almost-simple loop (by connecting outer + inner paths)
+   and call binary Minkowski sum
   - [ ] find a way to fix path extrusion? either
     - [ ] cut “by hand” the result of a “butt” extrusion;
     - [ ] intersect the result of a custom “fill” extrusion;

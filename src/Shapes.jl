@@ -308,7 +308,7 @@ struct PolygonXor{T}
 # 		new{T}(Vector{SVector{2,T}}.(paths))
 	@inline PolygonXor{T}(paths::AbstractVector) where{T} = new{T}(paths)
 	@inline PolygonXor(paths::AbstractVector) =
-		PolygonXor{eltype(eltype(paths))}(paths)
+		PolygonXor{eltype(eltype(eltype(paths)))}(paths)
 end
 @inline PolygonXor{T}(paths::AbstractVector{<:StaticVector{2,<:Real}}...
 	) where{T} = PolygonXor{T}([paths...])
@@ -372,15 +372,84 @@ end
 @inline offset(s::PolygonXor{T}, r; kwargs...) where{T} =
 	PolygonXor{T}(offset(paths(s), r; kwargs...))
 
-# @inline Base.union(s::PolygonXor...) = clip(:union, s...)
-# @inline Base.intersect(s::PolygonXor...) = clip(:intersection, s...)
-# @inline Base.setdiff(s1::PolygonXor, s2::PolygonXor) = clip(:difference, s1, s2)
-
 @inline area(shape::PolygonXor) = sum(area.(paths(shape)))
 @inline convex_hull(shape::PolygonXor{T}...) where{T} =
 	PolygonXor{T}(convex_hull([vertices.(shape)...;]))
 
-# Minkowski sum of polygons and their unions ««2
+# Minkowski sum of polygons and their unions ««1
+"""
+    segment_xray(p, a, b)
+
+Returns intersection abscissa for segments (p, p+(∞,0)) and (a,b),
+or `nothing`.
+"""
+function segment_xray(p,a,b)
+	(a[2] > b[2]) && ((a,b) = (b,a)) # guarantees yb ≥ ya
+	(x,y) = p; (xa,ya) = a; (xb,yb) = b
+	(ya > y) && return nothing
+	(yb < y) && return nothing # now ya ≤ y ≤ yb
+	if ya == yb # both are == y
+		(u,v) = minmax(xa,xb)
+		return (v < x) ? nothing : max(u,x)
+	end
+	# ya < y < yb
+	xc =  (xa*(yb-y)+xb*(y-ya))/(yb-ya)
+	return (xc ≥ x) ? xc : nothing
+end
+"""
+    polygon_xray(point, loop)
+
+Returns the segment in `loop` intersecting the ray originating
+from `point` in the ``(+∞,0)`` direction. The segment is returned as
+a pair (destination point, x).
+"""
+function polygon_xray(point, loop)
+	x = nothing; k = nothing
+	b = last(loop)
+	for (i, a) in pairs(loop)
+		v = segment_xray(point, a, b)
+		v == nothing && @goto next
+		x == nothing && @goto found
+		x < v && @goto next
+		@label found
+		x = v; k = i
+		@label next
+		b = a
+	end
+	return (k, x)
+end
+
+"""
+    connect_holes(s::PolygonXor)
+
+Returns a representation of `s` as a disjoint union of pseudo-simple loops
+(the holes of each polygon being joined to its perimeter via a short “cut”).
+"""
+function connect_holes(s::PolygonXor)
+	poly_id = identify_polygons(s); n = length(poly_id)
+	loops = [ [i] for (i,a) in pairs(poly_id) if a > 0 ]
+	for (i, a) in pairs(poly_id); a < 0 && push!(loops[-a], i); end
+	# loops[i] is (perimeter, hole1, hole2, ...)
+	
+	newpaths = [ copy(paths(s)[first(l)]) for l in loops ]
+	for ((_, holes...), newpath) in zip(loops, newpaths)
+		xmax = [ findmax(paths(s)[h]) for h in holes ]
+		for i in sort(eachindex(holes); by=i->xmax[i][1], rev=true)
+			h = holes[i]; hole = paths(s)[h]
+			(p, j) = xmax[i] # j = index, p = xmax point
+			(k, x) = polygon_xray(p, newpath)
+			q = (x, p[2])
+			(q ≠ newpath[k]) && insert!(newpath, k, q)
+			# the hole path starts at point #j, so j:end followed by start:j
+			splice!(newpath, k+1:k, [hole[j:end];hole[1:j];[q]])
+		end
+# 		println("# newpath ($(length(newpath))):")
+# 		for p in newpath; println("$(p[1]+.2rand())\t$(p[2]+.2rand())"); end
+	end
+	# this is *not* a PolygonXor, because of all the degeneracies
+	# rather, it must be converted back to that format with a Clipper call
+	return newpaths
+end
 # function minkowski(vp::AbstractVector{<:AbstractVector{<:StaticVector{2}}},
 # 		vq::AbstractVector{<:AbstractVector{<:StaticVector{2}}}; fill=:nonzero)
 # 	vr = vec([(convolution(p, q)) for p in vp, q in vq])
@@ -396,15 +465,38 @@ end
 # end
 
 # Triangulation and reconstruction from triangle««1
+"""
+    point_in_polygon(poly; orientation=orientation(poly))
+Returns one point in the given `poly` (given as a list of points).
+"""
+function point_in_polygon(poly; orientation=orientation(poly))#««
+	@assert length(poly) ≥ 3
+	a,b,c = poly # first three points
+	ac = c-a
+	# compute min (squared) distance from b to other sides of the polygon:
+	q = poly[end]; qa = a-q
+	h2 = cross(qa,(a-b))^2 / dot(qa,qa)
+	for i in 3:length(poly)-1
+		p = poly[i]; q = poly[i+1]; pq = q-p
+		h2 = min(h2, cross(pq, (p-b))^2 / dot(pq, pq))
+	end
+
+	# vector pointing inside the polygon:
+	v = SA[-ac[2], ac[1]]
+	t = √(h2/4/dot(ac,ac))
+	return orientation ? b + t*v : b - t*v
+end#»»
 function triangulate(m::PolygonXor)#««
 	v = vertices(m)
 	id = identify_polygons(m)
 	peri = perimeters(m)
-	is_hole = falses(length(v))
 	edges = Matrix{Int}(undef, sum(length.(peri)), 2)
+	# find an inner point for each hole:
+	holes = [ point_in_polygon(p; orientation=false)
+		for (i, p) in pairs(paths(m)) if id[i] < 0 ]
+	# todo: the `perimeters` function is quite obsolete
 	c = 0
 	for (k, p) in pairs(peri)
-		id[k] < 0 && (is_hole[p] .= true)
 		n = length(p)
 		for i in 1:n, j in 1:2
 			edges[c+i,j] = p[mod1(i+j-1,n)]
@@ -413,10 +505,10 @@ function triangulate(m::PolygonXor)#««
 	end
 	tri = constrained_triangulation(
 		Matrix{Float64}([transpose.(v)...;]),
-		collect(1:length(v)), edges)
-	# remove triangle made entirely of hole vertices
-	return [ (t[1], t[2], t[3]) for t in tri if !all(is_hole[t]) ]
-# 	return tri[[!all(is_hole[t]) for t in tri]]
+		collect(1:length(v)), edges, fill(true, size(edges,1)),
+		[ p[i] for p in holes, i in 1:2 ]
+		)
+	return [ (t[1], t[2], t[3]) for t in tri ]
 end#»»
 # reconstruction from triangles
 # this is used by 3d->2d projection:
