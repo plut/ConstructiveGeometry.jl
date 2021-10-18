@@ -132,9 +132,8 @@ end
 	Clipper.add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
 	return [ fromc(Clipper.execute(c, ρ*_CLIPPER_ONE)) for ρ in r]
 end
-@inline simplify_paths(p::AbstractVector{Path{2,T}}; fill=:nonzero) where{T} =
-	from_clipper(T,
-		Clipper.simplify_polygons(to_clipper(T, p), _CLIPPER_ENUM.fill[fill]))
+@inline simplify_paths(p::AbstractVector{<:Path{2}}; fill=:nonzero) =
+	fromc(Clipper.simplify_polygons(toc(p), _CLIPPER_ENUM.fill[fill]))
 """
     orientation(p::Path{2})
 
@@ -223,55 +222,6 @@ Polygon is assumed not self-intersecting.
 # """
 # @inline convex_hull(points::AbstractVector{<:StaticVector{2}}) =
 # 	points[convex_hull_list(points)]
-# Convolution««1
-function convolution(p::Path, q::Path)
-	(np, nq) = (length(p), length(q))
-	ep = [p[cyclindex(i, p)]-p[i] for i in eachindex(p)] # edges of p
-	eq = [q[cyclindex(i, q)]-q[i] for i in eachindex(q)]
-	j0 = 0
-	newpoly = similar(p, 0)
-	for ip in eachindex(p)
-		for iq in eachindex(q)
-			iq0 = cyclindex(iq, q, -1)
-			if circularcmp(eq[iq0], ep[ip], eq[iq], Val(:offset))
-				push!(newpoly, p[ip]+q[iq])
-				push!(newpoly, p[cyclindex(ip, p)]+q[iq])
-			end
-		end
-	end
-	newpoly
-end
-p⋆q = convolution(p, q)
-# Minkowski sum#««1
-# function minkowski(p, q; fill=:nonzero)
-# 	r = convolution(p, q)
-# 	return simplify_paths([r]; fill)
-# end
-# # Convolution of polygons««2
-# # http://acg.cs.tau.ac.il/tau-members-area/general%20publications/m.sc.-theses/thesis-lienchapter.pdf
-# """
-#     circularcmp(v1, v2, v3, [Val(:offset)])
-# 
-# Circular comparison predicate; returns true iff directions of vectors
-# `v1`, `v2`, `v3` are arranged in a trigonometric ordering along the unit
-# circle.
-# 
-# If `Val(:offset)` is passed then `v1`, `v3` are infinitesimally rotated
-# in the positive direction compared to `v2`.
-# """
-# function circularcmp(v1, v2, v3)
-# 	d1 = v2[1]*v3[2] ≥ v2[2]*v3[1]
-# 	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
-# 	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
-# 	return (d1+d2+d3) ≥ 2
-# end
-# function circularcmp(v1, v2, v3, ::Val{:offset})
-# 	d1 = v2[1]*v3[2] > v2[2]*v3[1]
-# 	d2 = v3[1]*v1[2] ≥ v3[2]*v1[1]
-# 	d3 = v1[1]*v2[2] ≥ v1[2]*v2[1]
-# 	return (d1+d2+d3) ≥ 2
-# end
-# 
 # Draw path««1
 # # """
 # #     draw(path, width; kwargs...)
@@ -318,23 +268,6 @@ end
 @inline paths(p::PolygonXor) = p.paths
 @inline vertices(p::PolygonXor) = reduce(vcat, paths(p))
 
-"""
-    perimeters(::PolygonXor)
-
-Returns a list of perimeters and holes for this region.
-Perimeters are oriented ↺ and holes ↻.
-"""
-function perimeters(p::PolygonXor)
-	firstindex = zeros(Int, length(p.paths))
-	firstindex[1] = 0
-	for i in 1:length(p.paths)-1
-		firstindex[i+1] = firstindex[i] + length(p.paths[i])
-	end
-	return [[firstindex[i]+1 : firstindex[i] + length(p.paths[i]);]
-		for i in eachindex(p.paths)]
-end
-
-# Identify holes of PolygonXor
 """
     identify_polygons(s::PolygonXor)
 
@@ -383,7 +316,7 @@ end
 Returns intersection abscissa for segments (p, p+(∞,0)) and (a,b),
 or `nothing`.
 """
-function segment_xray(p,a,b)
+function segment_xray(p,a,b)#««
 	(a[2] > b[2]) && ((a,b) = (b,a)) # guarantees yb ≥ ya
 	(x,y) = p; (xa,ya) = a; (xb,yb) = b
 	(ya > y) && return nothing
@@ -395,7 +328,7 @@ function segment_xray(p,a,b)
 	# ya < y < yb
 	xc =  (xa*(yb-y)+xb*(y-ya))/(yb-ya)
 	return (xc ≥ x) ? xc : nothing
-end
+end#»»
 """
     polygon_xray(point, loop)
 
@@ -403,7 +336,7 @@ Returns the segment in `loop` intersecting the ray originating
 from `point` in the ``(+∞,0)`` direction. The segment is returned as
 a pair (destination point, x).
 """
-function polygon_xray(point, loop)
+function polygon_xray(point, loop)#««
 	x = nothing; k = nothing
 	b = last(loop)
 	for (i, a) in pairs(loop)
@@ -417,7 +350,7 @@ function polygon_xray(point, loop)
 		b = a
 	end
 	return (k, x)
-end
+end#»»
 
 """
     connect_holes(s::PolygonXor)
@@ -425,7 +358,7 @@ end
 Returns a representation of `s` as a disjoint union of pseudo-simple loops
 (the holes of each polygon being joined to its perimeter via a short “cut”).
 """
-function connect_holes(s::PolygonXor)
+function connect_holes(s::PolygonXor)#««
 	poly_id = identify_polygons(s); n = length(poly_id)
 	loops = [ [i] for (i,a) in pairs(poly_id) if a > 0 ]
 	for (i, a) in pairs(poly_id); a < 0 && push!(loops[-a], i); end
@@ -449,20 +382,26 @@ function connect_holes(s::PolygonXor)
 	# this is *not* a PolygonXor, because of all the degeneracies
 	# rather, it must be converted back to that format with a Clipper call
 	return newpaths
-end
-# function minkowski(vp::AbstractVector{<:AbstractVector{<:StaticVector{2}}},
-# 		vq::AbstractVector{<:AbstractVector{<:StaticVector{2}}}; fill=:nonzero)
-# 	vr = vec([(convolution(p, q)) for p in vp, q in vq])
-# 	return simplify_paths(vr; fill)
-# end
-# function minkowski(p, q)
-# 	return PolygonXor(minkowski(p, q; fill=:evenodd)...)
-# end
-# function minkowski(p::PolygonXor, q::PolygonXor)
-# 	cp = [ coordinates.(vertices(x)) for x in paths(p) ]
-# 	cq = [ coordinates.(vertices(y)) for y in paths(q) ]
-# 	return PolygonXor(minkowski(cp, cq, fill=:evenodd)...)
-# end
+end#»»
+
+function minkowski_sum(m1::PolygonXor, m2::PolygonXor)#««
+	m1c = connect_holes(m1) # vector of Paths
+	m2c = connect_holes(m2) # idem
+	result = nothing
+	for p1 in m1c, p2 in m2c
+		# vector of paths
+		s = fromc(Clipper.minkowski_sum(toc(p1), toc(p2)))
+		s = PolygonXor(simplify_paths(s; fill=:evenodd))
+		result = (result == nothing) ? s : clip(:union, result, s);
+
+		# fill holes:
+		a1 = first(p1); a2 = first(p2)
+		result = clip(:union, result,
+			PolygonXor([b1+a2 for b1 in p1]),
+			PolygonXor([b2+a1 for b2 in p2]))
+	end
+	return result
+end#»»
 
 # Triangulation and reconstruction from triangle««1
 """
@@ -489,25 +428,23 @@ end#»»
 function triangulate(m::PolygonXor)#««
 	v = vertices(m)
 	id = identify_polygons(m)
-	peri = perimeters(m)
-	edges = Matrix{Int}(undef, sum(length.(peri)), 2)
+	edges = Matrix{Int}(undef, sum(length.(paths(m))), 2)
 	# find an inner point for each hole:
 	holes = [ point_in_polygon(p; orientation=false)
 		for (i, p) in pairs(paths(m)) if id[i] < 0 ]
-	# todo: the `perimeters` function is quite obsolete
 	c = 0
-	for (k, p) in pairs(peri)
+	for p in paths(m)
 		n = length(p)
-		for i in 1:n, j in 1:2
-			edges[c+i,j] = p[mod1(i+j-1,n)]
+		for i in 1:n-1
+			edges[c+i,:] = [c+i,c+i+1]
 		end
+		edges[c+n,:] = [c+n,c+1]
 		c+= n
 	end
 	tri = constrained_triangulation(
 		Matrix{Float64}([transpose.(v)...;]),
 		collect(1:length(v)), edges, fill(true, size(edges,1)),
-		[ p[i] for p in holes, i in 1:2 ]
-		)
+		[ p[i] for p in holes, i in 1:2 ])
 	return [ (t[1], t[2], t[3]) for t in tri ]
 end#»»
 # reconstruction from triangles
@@ -545,7 +482,6 @@ function glue_segments(points::AbstractVector, segments)
 	end
 	return PolygonXor{eltype(eltype(points))}(loops)
 end
-
 
 # Intersections (2d)««1
 

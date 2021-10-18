@@ -665,6 +665,8 @@ end
 
 # Minkowski sum and difference (TODO)««2
 CSGMinkowski = constructed_solid_type(:minkowski)
+@inline (g::Mesh)(s::CSGMinkowski{2}) =
+	PolygonXor(reduce(Shapes.minkowski_sum, poly.(g.(s.children))))
 # Transformations««1
 abstract type AbstractTransform{D} <: AbstractGeometry{D} end
 # AffineTransform««2
@@ -1076,9 +1078,8 @@ end
 
 Represents the Minkowski sum of given solids.
 """
-@inline minkowski(a1::AbstractGeometry, a2::AbstractGeometry) =
-	CSGMinkowski{maximum(embeddim.((a1,a2)))}(unroll2(a1, a2, Val(:minkowski)))
-
+@inline minkowski(a1::AbstractGeometry{2}, a2::AbstractGeometry{2}) =
+	CSGMinkowski{2}(unroll2(a1, a2, Val(:minkowski)))
 
 # Transformations««1
 # Transform type««2
