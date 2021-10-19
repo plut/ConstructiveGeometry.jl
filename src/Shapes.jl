@@ -269,6 +269,22 @@ end
 @inline vertices(p::PolygonXor) = reduce(vcat, paths(p))
 
 """
+    perimeters(::PolygonXor)
+
+Returns a list of perimeters and holes for this region.
+Perimeters are oriented ↺ and holes ↻.
+"""
+function perimeters(p::PolygonXor)
+	firstindex = zeros(Int, length(p.paths))
+	firstindex[1] = 0
+	for i in 1:length(p.paths)-1
+		firstindex[i+1] = firstindex[i] + length(p.paths[i])
+	end
+	return [[firstindex[i]+1 : firstindex[i] + length(p.paths[i]);]
+		for i in eachindex(p.paths)]
+end
+
+"""
     identify_polygons(s::PolygonXor)
 
 Given a `PolygonXor` defined as the exclusive union of polygons and holes,

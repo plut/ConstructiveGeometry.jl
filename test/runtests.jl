@@ -22,12 +22,6 @@ r4 = [4,4] + G.square(1,1)
 @test nva(mesh(setdiff(r1,r2))) == ([4], 1)
 @test nva(mesh(setdiff(r3,r1))) == ([6], 7)
 end#»»
-# @testset "Cubes" begin#««
-# volume(x) = ConstructiveGeometry.CornerTables.volume(x)
-# @test volume(mesh(cube(1))) ≈ 1
-# @test volume(mesh(union(cube([5,1,1]),cube([1,5,1])))) ≈ 9
-# @test volume(mesh(setdiff(cube(2),cube(1)))) ≈ 7
-# end#»»
 # @testset "Extrusion" begin #««1
 # # using ConstructiveGeometry: nvertices, nfaces
 # # C = vertices(circle(3.),(precision=.01,accuracy=1,symmetry=1))
@@ -40,7 +34,7 @@ end#»»
 # # @test nvertices(m) == 16
 # # @test nfaces(m) == 32
 # end
-@testset "Handling of objects" begin #««1
+@testset "Elementary operations on objects" begin #««1
 s = square(1)
 @testset "Primitives" begin #««2
 @test s == square([1,1])
@@ -57,10 +51,6 @@ end
 @test color("red")*s == color("red", s)
 end
 end
-# @testset "Clipper" begin #««1
-# s = square(1)
-# # FIXME
-# end
 # @testset "Convex hull" begin #««1
 # using ConstructiveGeometry: convex_hull, convex_hull_list
 # P(x...) = Point(Float64.(x)...)

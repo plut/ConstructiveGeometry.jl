@@ -314,7 +314,7 @@ function _rotate_extrude(p::StaticVector{2,T}, angle, parameters) where{T}
 	@assert p[1] ≥ 0
 	# special case: point is on the y-axis; returns a single point:
 	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
-	n = cld(sides(p[1], parameters) * angle, 360)
+	n = Int(cld(sides(p[1], parameters) * angle, 360))
 
 	ω = Complex{T}(cosd(angle/n), sind(angle/n))
 	z = Vector{Complex{T}}(undef, n+1)
@@ -785,7 +785,7 @@ end
 function (g::Mesh{T})(s::RotateExtrude) where{T}
 	# right half of child:
 	m0 = g(s.child)::PolygonXor{T}
-	m = intersect(Shapes.HalfPlane(SA[1,0],0), m0)
+	m = intersect(Shapes.HalfPlane(SA[1,0],0), m0.poly)
 	pts2 = Shapes.vertices(m)
 	tri = Shapes.triangulate(m)
 	peri = Shapes.perimeters(m) # oriented ↺
