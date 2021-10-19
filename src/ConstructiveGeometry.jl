@@ -544,6 +544,10 @@ end
 # Type definition««2
 abstract type AbstractConstructed{S,D} <: AbstractGeometry{D} end
 
+# default interface:
+@inline children(s::AbstractConstructed) = s.children
+@inline scad_info(::AbstractConstructed{S}) where{S} = (S, ())
+
 # """
 # 		ConstructedSolid{S,V,D}
 # 
@@ -554,14 +558,8 @@ struct ConstructedSolid{S,V,D} <: AbstractConstructed{S,D}
 	children::V # Vector{<:AbstractGeometry}, or tuple etc.
 end
 
-@inline children(s::ConstructedSolid) = s.children
-@inline scad_info(::ConstructedSolid{S}) where{S} = (S, ())
 constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
 	ConstructedSolid{S,T(AbstractGeometry{D}),D} where{D}
-
-# constructed_solid_type(S::Symbol, T = Vector{<:AbstractGeometry}) =
-# 	ConstructedSolid{S,T}
-
 
 # Union««2
 CSGUnion = constructed_solid_type(:union)
@@ -634,14 +632,17 @@ function hull end
 @define_neutral hull EmptyIntersect  absorb
 
 # Convex hull (TODO)««2
-CSGHull = constructed_solid_type(:hull)
+struct CSGHull{D} <: AbstractConstructed{:hull,D}
+	children::Vector{<:AbstractGeometry}
+end
+# CSGHull = constructed_solid_type(:hull)
 
 @inline (g::Mesh)(s::CSGHull{2}) =
 	polygon_xor(g, convex_hull(reduce(vcat, vertices.(g.(children(s))))))
 
 @inline vertices3(m::Surface) = vertices(m)
 @inline vertices3(m::PolygonXor) =
-	(SA[p[1], p[2], 0] for p in Shapes.vertices(m))
+	(SA[p[1], p[2], 0] for p in Shapes.vertices(m.poly))
 
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	v = SVector{3,T}[]
