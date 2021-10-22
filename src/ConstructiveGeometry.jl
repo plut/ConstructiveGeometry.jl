@@ -426,7 +426,7 @@ function (g::Mesh{T})(s::Stroke) where{T}
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
 end
 # 3d primitives««1
-# Explicit case: Surface««2
+# Surface««2
 """
     Surface{T}
 
@@ -818,6 +818,17 @@ function (g::Mesh)(s::Offset)
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
 end
 
+# Decimate««2
+struct Decimate <: AbstractGeometry{3}
+	max_faces::Int
+	child::AbstractGeometry{3}
+end
+
+function (g::Mesh)(s::Decimate)
+	m = g(s.child)
+	return Surface(TriangleMeshes.decimate(m.mesh, s.max_faces))
+end
+
 #————————————————————— Front-end —————————————————————————————— ««1
 
 # Constructors««1
@@ -860,7 +871,17 @@ An axis-parallel cube (or sett) with given `size`
 @inline cube(a::AbstractVector; kwargs...) = cube(a...; kwargs...)
 
 # Circles and spheres««2
+"""
+    circle(r::Real)
+
+A circle with diameter `r`.
+"""
 @inline circle(a::Real) = Circle(a)
+"""
+    sphere(r::Real)
+
+A sphere with diameter `r`.
+"""
 @inline sphere(a::Real) = Sphere(a)
 
 # Cylinders and cones««2
@@ -901,6 +922,13 @@ stroke(points, width; kwargs...) = Stroke(points, width; kwargs...)
 
 
 # Surface««2
+"""
+    surface(vertices, faces)
+
+Produces a surface with the given vertices.
+`faces` is a list of n-uples of indices into `vertices`.
+Non-triangular faces are allowed; these will be triangulated on construction.
+"""
 function surface(points, faces)
 	# TODO: triangulate!
 	return Surface(points, faces)
@@ -944,11 +972,13 @@ symbols `sym1`, `sym2`..., `children(x)`.
 
 Computes the union of several solids. The dimensions must match.
 """
+@inline union(a::AbstractGeometry, b::AbstractGeometry) =
+	throw(DimensionMismatch("union of 2d and 3d objects not allowed"))
 @inline union(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGUnion{D}(unroll2(a, b, Val(:union)))
 
 """
-    intersect(a::AbstractGeometry, b::AbstractGeometry...)
+    intersect(a::AbstractGeometry{D}...)
 
 Computes the intersection of several solids.
 Mismatched dimensions are allowed; 3d solids will be intersected
@@ -977,6 +1007,8 @@ Shorthand for `setdiff(union(a...), union(b...))`.
 	CSGDiff{D}((a,b))
 @inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
 	setdiff(a, slice(b))
+@inline setdiff(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
+	throw(DimensionMismatch("difference (3d) - (2d) not allowed"))
 
 # added interface: setdiff([x...], [y...])
 @inline setdiff(x::AbstractVector{<:AbstractGeometry},
@@ -985,7 +1017,7 @@ Shorthand for `setdiff(union(a...), union(b...))`.
 # Convex hull««2
 """
     hull(s::AbstractGeometry...)
-		hull(s::AbstractGeometry{2} | StaticVector{2}...)
+    hull(s::AbstractGeometry{2} | StaticVector{2}...)
 
 Represents the convex hull of given solids (and, possibly, points).
 """
@@ -1022,6 +1054,7 @@ end
     minkowski(s::AbstractGeometry...)
 
 Represents the Minkowski sum of given solids.
+This is currently implemented only for 2d objects.
 """
 @inline minkowski(a1::AbstractGeometry{2}, a2::AbstractGeometry{2}) =
 	CSGMinkowski{2}(unroll2(a1, a2, Val(:minkowski)))
@@ -1119,8 +1152,27 @@ Offsets by given radius.
 """
 @inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.) =
 	operator(Offset,(r,ends,join,miter_limit),s...)
+"""
+    opening(r, shape...)
+
+Morphological opening: offset(-r) followed by offset(r).
+Removes small appendages and rounds convex corners.
+"""
 @inline opening(r::Real, s...) = offset(r)*offset(-r, s...)
+"""
+    closing(r, shape...)
+
+Morphological closing: offset(r) followed by offset(-r).
+Removes small holes and rounds concave corners.
+"""
 @inline closing(r::Real, s...) = offset(-r)*offset(r, s...)
+
+"""
+    decimate(n, shape...)
+
+Decimates a 3d surface to at most `n` triangular faces.
+"""
+@inline decimate(n::Integer, s...) = operator(Decimate, (n,), s...)
 
 # set_parameters««2
 """
@@ -1132,6 +1184,10 @@ child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
 @inline set_parameters(s...; parameters...) =
 	operator(SetParameters, (parameters.data,), s...)
 
+struct Color{D,C<:Colorant} <: AbstractGeometry{D}
+	color::C
+	child::AbstractGeometry{D}
+end
 """
     color(c::Colorant, s...)
     color(c::AbstractString, s...)
@@ -1140,10 +1196,6 @@ child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
 
 Colors objects `s...` in the given color.
 """
-struct Color{D,C<:Colorant} <: AbstractGeometry{D}
-	color::C
-	child::AbstractGeometry{D}
-end
 @inline color(c::Colorant, s...) = operator(Color, (c,), s...)
 @inline color(c::Union{Symbol,AbstractString}, s...) =
 	color(parse(ColorType, c), s...)
@@ -1172,8 +1224,7 @@ Represents the affine operation `x -> a*x + b`.
     on purpose; for instance, `a` can be a scalar (for a scaling).
     Any types so that `a * Vector + b` is defined will be accepted.
 
-    Conversion to a matrix will be done when converting to OpenSCAD
-    format.
+    Conversion to a matrix will be done when meshing.
 
 !!! note "Matrix multiplication"
 
@@ -1192,6 +1243,18 @@ Represents the affine operation `x -> a*x + b`.
 Translates solids `s...` by vector `v`.
 """
 @inline translate(a,s...)= operator(AffineTransform,(TranslationMap(a),), s...)
+"""
+    raise(z, s...)
+
+Equivalent to `translate([0,0,z], s...)`.
+"""
+@inline raise(z, x...) = translate(SA[0,0,z], x...)
+"""
+    lower(z, s...)
+
+Equivalent to `translate([0,0,-z], s...)`.
+"""
+@inline lower(z, x...) = raise(-z, x...)
 
 # scale««2
 # `scale` is really the same as one of the forms of `mult_matrix`:
@@ -1422,6 +1485,11 @@ function svg(io::IO, m::PolygonXor)
 end
 @inline svg(io::IO, m::AbstractGeometry{2}; kwargs...) =
 	svg(io, mesh(m; kwargs...))
+"""
+    svg(file, shape)
+
+Exports 2d `shape` as an SVG file.
+"""
 @inline svg(f::AbstractString, args...; kwargs...) =
 	open(f, "w") do io svg(io, args...; kwargs...) end
 #————————————————————— Extra tools —————————————————————————————— ««1
@@ -1560,8 +1628,6 @@ end
 # # 
 # #
 # Convenience functions ««1
-@inline raise(z, x...) = translate(SA[0,0,z], x...)
-@inline lower(z, x...) = raise(-z, x...)
 # function rounded_square(dims::AbstractVector, r)
 # 	iszero(r) && return square(r)
 # 	return offset(r, [r,r]+square(dims - [2r,2r]))

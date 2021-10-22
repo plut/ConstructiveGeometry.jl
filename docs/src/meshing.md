@@ -5,8 +5,7 @@
 `mesh(object, parameters...)`
 
 The meshing of objects is governed by a few parameters:
- - `accuracy` and `precision` determine the number of faces inserted in the
-	 mesh;
+ - `accuracy` and `precision` determine the number of faces inserted in the mesh;
  - `symmetry` allows to impose a given rotational symmetry to circles;
  - `type` dictates the coordinate type of the returned mesh (e.g.
 	 `Float64` or `Rational{Int}`);
@@ -36,7 +35,7 @@ When meshing an object, the minimum value will be used
 between those given by these two definitions.
 This means that `precision` gives an absolute maximum
 on the number of vertices for large objects,
-while `accuracy` governs 
+while `accuracy` governs the number of vertices for small objects.
 
 ### Default values
 
@@ -74,6 +73,18 @@ with the default values ``\texttt{\textdollar fa}=12``
 and ``\texttt{\textdollar fs=2}``, this gives
 ``n ≈ \min(π r, 30)``.
 
+### Spheres
+
+Spheres are rendered as [Fibonacci
+spheres](http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/).
+This produces a more regular mesh than latitude-longitude grids.
+
+```@docs
+ConstructiveGeometry.sphere_nvertices
+```
+
+
+
 ## Symmetry
 
 In addition to `accuracy` and `precision`,
@@ -88,21 +99,5 @@ of simple-loop polygons.
 
 # Mesh type for 3d objects
 
-3d objects are represented as a triangulated mesh
-stored in a [corner table](https://www.cc.gatech.edu/~jarek/papers/CornerTableSMI.pdf).
-Since the mesh becomes (temporarily) non-manifold during
-computation of CSG operations,
-the structure actually implemented in this module
-is an extension of the basic corner table mesh,
-allowing representation of arbitrary non-manifold meshes.
-The details are inspired by [Shin et al
-2004](https://www.researchgate.net/profile/Hayong_Shin/publication/4070748_Efficient_topology_construction_from_triangle_soup/links/55efd5b408ae199d47c02cd2.pdf).
-
-The information stored in this structure is accessible via the following
-functions:
-
- - `points(m)`: returns a vector of points. The type used for points is
-   a parameter of the `CornerTable` type. For objects built by
-   `ConstructiveGeometry.jl`, this will be a `SVector{3,<:Real}`.
- - `faces(m)`: returns a vector of faces,
-   represented as `NTUple{3,Int}` of indices of points.
+3d objects are represented as a triangle mesh,
+in a way compatible with LibIGL's functions.

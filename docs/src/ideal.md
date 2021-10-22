@@ -5,14 +5,20 @@ CurrentModule = ConstructiveGeometry
 
 ## Primitive solids
 
+### 2d
 ```@docs
 ConstructiveGeometry.square
 ConstructiveGeometry.circle
+ConstructiveGeometry.stroke
+ConstructiveGeometry.polygon
+```
+
+### 3d
+```@docs
 ConstructiveGeometry.cube
 ConstructiveGeometry.cone
 ConstructiveGeometry.cylinder
 ConstructiveGeometry.sphere
-ConstructiveGeometry.polygon
 ConstructiveGeometry.surface
 ```
 
@@ -40,17 +46,25 @@ ConstructiveGeometry.translate
 ConstructiveGeometry.scale
 ConstructiveGeometry.rotate
 ConstructiveGeometry.mirror
-```
-
-```
-ConstructiveGeometry.slice
-ConstructiveGeometry.project
+ConstructiveGeometry.raise
+ConstructiveGeometry.lower
 ```
 
 ### 2d drawing
 ```@docs
 ConstructiveGeometry.offset
-ConstructiveGeometry.stroke
+ConstructiveGeometry.opening
+ConstructiveGeometry.closing
+```
+## Operations
+
+### CSG operations
+```@docs
+union(::AbstractGeometry,::AbstractGeometry)
+intersect(::AbstractGeometry{D},::AbstractGeometry{D}) where{D}
+setdiff(::AbstractGeometry{D},::AbstractGeometry{D}) where{D}
+ConstructiveGeometry.hull
+ConstructiveGeometry.minkowski
 ```
 
 ### Extrusion
@@ -58,6 +72,17 @@ ConstructiveGeometry.stroke
 ConstructiveGeometry.linear_extrude
 ConstructiveGeometry.rotate_extrude
 ConstructiveGeometry.path_extrude
+```
+### Slicing
+```@docs
+ConstructiveGeometry.slice
+ConstructiveGeometry.project
+ConstructiveGeometry.half_space
+```
+
+### Decimation
+```@docs
+decimate
 ```
 
 ### Inserting metadata
@@ -79,11 +104,3 @@ for an user to recover these metadata while meshing an object).
 
 ### Defining a custom transformation
 
-## Operations
-```@docs
-union(::AbstractGeometry,::AbstractGeometry)
-intersect(::AbstractGeometry,::AbstractGeometry)
-setdiff(::AbstractGeometry,::AbstractGeometry)
-ConstructiveGeometry.hull
-ConstructiveGeometry.minkowski
-```
