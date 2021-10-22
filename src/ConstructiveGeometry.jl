@@ -5,6 +5,7 @@ module ConstructiveGeometry
 # Module imports««1
 # using Printf
 using LinearAlgebra
+import LinearAlgebra: det
 using StaticArrays
 using FixedPointNumbers
 using FastClosures
@@ -37,26 +38,6 @@ Base.getindex(c::Consecutives, i::Integer) =
 Base.size(c::Consecutives) = size(c.parent)
 
 @inline one_half(x::Real) = x/2
-# small determinants««2
-
-# 2-dimensional determinant, useful for computing orientation
-# @inline det2(v1, v2) = v1[1]*v2[2] - v1[2]*v2[1]
-@inline det2(pt1, pt2, pt3) = det2(pt2-pt1, pt3-pt1)
-
-# 3-dimensional determinant
-# @inline det3(v1::Vec{3}, v2::Vec{3}, v3::Vec{3}) = det([v1 v2 v3])
-# @inline det3(p1::Point{3}, p2::Point{3}, p3::Point{3}, p4::Point{3}) =
-# 	det3(p2-p1, p3-p1, p4-p1)
-# @inline det3(v1, v2, v3) = det([v1 v2 v3])
-# @inline det3(p1, p2, p3, p4) = det3(p2-p1, p3-p1, p4-p1)
-# Rows view««2
-struct RowsView{T,M<:AbstractMatrix{T}} <:
-		AbstractVector{SubArray{T,1,M,Tuple{T,Base.Slice{Base.OneTo{T}}},true}}
-	source::M
-	RowsView(m::AbstractMatrix) = new{eltype(m), typeof(m)}(m)
-end
-Base.size(r::RowsView) = (size(r.source,1),)
-Base.getindex(r::RowsView, i::Integer) = view(r.source, i, :)
 
 # Parameters««1
 # Definitions««2
@@ -69,11 +50,12 @@ Base.getindex(r::RowsView, i::Integer) = view(r.source, i, :)
 #
 # ε = “thickness” of points, edges etc. for computing intersections:
 
+const ColorType = Colors.RGBA{N0f8}
 const _DEFAULT_PARAMETERS = (
 	accuracy = 0.1, precision = .005, symmetry = 1,
 	type = Float64, ε=1/65536,
 # 	type = Rational{BigInt}, ε = 0,
-	color = Colors.RGBA{N0f8}(.5,.5,.5,1.), # gray
+	color = ColorType(.5,.5,.5,1.), # gray
 )
 
 @inline get_parameter(parameters, name) =
@@ -120,40 +102,6 @@ end
 @inline signdet(f::AbstractAffineMap) = signdet(f.a)
 @inline signdet(f::TranslationMap) = +1
 @inline det(::Rotations.Rotation{D,T}) where{D,T} = one(T)
-
-# @inline (f::Affine)(p::Point) = Point(f.a * coordinates(p) + f.b)
-# function (f::Affine)(p::Polygon)
-# 	if sign(f) > 0
-# 		return Polygon(f.(vertices(p)))
-# 	else
-# 		return Polygon(reverse(f.(vertices(p))))
-# 	end
-# end
-# (f::Affine)(p::nolygonXor) = PolygonXor(f.(paths(p)))
-
-# 	[apply(f, p) for p in points]
-
-# @inline Base.sign(f::Affine{<:Number}) = sign(f.a)
-# @inline Base.sign(f::Affine{<:AbstractMatrix}) = sign(det(f.a))
-
-# # I/O: ««3
-# # OpenSCAD only uses 4×4 matrices for transformations;
-# # we pad the matrix to this size if needed:
-# function scad_parameters(io::IO, f::Affine)
-# 	m = [ mat33(f.a) vec3(f.b); 0 0 0 1 ]
-# 	print(io, "[")
-# 	join(io, map(i->Float64.(view(m,i,:)),1:size(m,1)),",")
-# 	print(io, "]")
-# end
-# 
-# @inline mat33(a::AbstractMatrix) = [ get(a, (i,j), i==j) for i=1:3, j=1:3 ]
-# @inline mat33(a::Diagonal) = Diagonal(vec3(diag(a)))
-# @inline mat33(a::Real) = SDiagonal(a,a,a)
-# @inline mat33(::Val{b}) where{b} = mat33(b)
-# 
-# @inline vec3(b::AbstractVector) = SVector{3}(get(b, i, 0) for i in 1:3)
-# @inline vec3(::Val{b}) where{b} = SA[b, b, b]
-
 
 # Reflection matrices««1
 """
@@ -460,18 +408,18 @@ end
 @inline (g::Mesh{T})(s::Circle) where{T} =
 	polygon_xor(g, unit_n_gon(T(s.radius), g.parameters))
 
-# Path ««2
-struct Path{T} <: AbstractGeometryCoord{2,T}
+# Stroke ««2
+struct Stroke{T} <: AbstractGeometryCoord{2,T}
 	points::Vector{SVector{2,T}}
 	width::Float64
 	ends::Symbol
 	join::Symbol
 	miter_limit::Float64
 end
-Path(points, width; ends=:round, join=:round, miter_limit=2.) =
-	Path{eltype(eltype(points))}(points, width, ends, join, miter_limit)
+Stroke(points, width; ends=:round, join=:round, miter_limit=2.) =
+	Stroke{Float64}(points, width, ends, join, miter_limit)
 
-function (g::Mesh{T})(s::Path) where{T}
+function (g::Mesh{T})(s::Stroke) where{T}
 	r = one_half(T(s.width))
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * r)
 	return polygon_xor(g, Shapes.offset([s.points], r;
@@ -590,7 +538,7 @@ CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
 CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
 
 # Xor (used by extrusion) ««2
-@inline csgxor(s1::S, s2::S) where {S<:Surface} =
+@inline symdiff(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(3, s1.mesh, s2.mesh))
 # Empty unions and intersects««2
 """
@@ -635,7 +583,6 @@ function hull end
 struct CSGHull{D} <: AbstractConstructed{:hull,D}
 	children::Vector{<:AbstractGeometry}
 end
-# CSGHull = constructed_solid_type(:hull)
 
 @inline (g::Mesh)(s::CSGHull{2}) =
 	polygon_xor(g, convex_hull(reduce(vcat, vertices.(g.(children(s))))))
@@ -650,19 +597,6 @@ function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	(p, f) = convex_hull(v)
 	return triangle_mesh(g, p, f)
 end
-# # # Convex hull««2
-# # # """
-# # # 		convex_hull(x::Geometry{2}...)
-# # # 
-# # # Returns the convex hull of the union of all the given solids, as a
-# # # `PolyUnion` structure.
-# # # """
-# # @inline convex_hull(x::Geometry{2}...) =
-# # 	convex_hull(PolyUnion(union(x...)))
-# # 
-# # @inline convex_hull(u::PolyUnion) = convex_hull(Vec{2}.(vertices(u)))
-# # 
-# 
 
 # Minkowski sum and difference (TODO)««2
 CSGMinkowski = constructed_solid_type(:minkowski)
@@ -696,26 +630,36 @@ function (g::Mesh)(s::AffineTransform{2})
 	return m
 end
 
-# Project and cut (TODO)««2
+# Project and slice (TODO)««2
 struct Project <: AbstractGeometry{2}
 	child::AbstractGeometry{3}
 end
 
 function (g::Mesh)(s::Project)
 	m = g(s.child)
-	p = TriangleMeshes.vertices(m)
-	f = TriangleMeshes.faces(m)
-	return PolygonXor([SA[x[1], x[2]] for x in p], f)
+	p = TriangleMeshes.vertices(m.mesh)
+	f = TriangleMeshes.faces(m.mesh)
+	return polygon_xor(g, [SA[x[1], x[2]] for x in p], f)
 end
 
-struct Cut <: AbstractGeometry{2}
+struct Slice <: AbstractGeometry{2}
 	child::AbstractGeometry{3}
 end
 
-function (g::Mesh)(s::Cut)
-	(pts, seg) = CornerTables.plane_cut(g(s.child), get_parameter(g, :ε))
-	return Shapes.glue_segments(pts, seg)
+function (g::Mesh)(s::Slice)
+	(pts, seg) = TriangleMeshes.plane_slice(g(s.child).mesh)
+	return PolygonXor(Shapes.glue_segments(pts, seg))
 end
+
+struct Halfspace <: AbstractGeometry{3}
+	direction::SVector{3}
+	origin::SVector{3}
+	child::AbstractGeometry{3}
+end
+
+(g::Mesh)(s::Halfspace) = Surface(TriangleMeshes.halfspace(
+	s.direction, s.origin, g(s.child).mesh,g.color))
+
 # SetParameters««2
 # (including colors)
 struct SetParameters{D} <: AbstractTransform{D}
@@ -854,7 +798,7 @@ function (g::Mesh)(s::PathExtrude)
 	v = [ triangle_mesh(g, Shapes.path_extrude(s.path, p;
 		closed=s.closed, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
 		for p in paths(polyxor) ]
-	return reduce(csgxor, v)
+	return reduce(symdiff, v)
 end
 
 # Offset««2
@@ -919,7 +863,7 @@ An axis-parallel cube (or sett) with given `size`
 @inline circle(a::Real) = Circle(a)
 @inline sphere(a::Real) = Sphere(a)
 
-# TODO: cylinders and cones««2
+# Cylinders and cones««2
 """
     cylinder(h, r1, r2 [, center=false])
     cylinder(h, (r1, r2) [, center=false])
@@ -944,16 +888,16 @@ Circular cone.
     polygon(path)
 """
 @inline polygon(path) = PolygonXor([path])
-# Path««2
+# Stroke««2
 """
-    path(points, width; kwargs)
+    stroke(points, width; kwargs)
     ends = :loop|:butt|:square|:round
     join = :square|:round|:miter
     miter_limit = 2.0
 
 Draws a path of given width.
 """
-path(points, width; kwargs...) = Path(points, width; kwargs...)
+stroke(points, width; kwargs...) = Stroke(points, width; kwargs...)
 
 
 # Surface««2
@@ -1008,14 +952,14 @@ Computes the union of several solids. The dimensions must match.
 
 Computes the intersection of several solids.
 Mismatched dimensions are allowed; 3d solids will be intersected
-with the (z=0) plane via the `cut()` operation.
+with the (z=0) plane via the `slice()` operation.
 """
 @inline intersect(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGInter{D}(unroll2(a, b, Val(:intersection)))
 @inline Base.intersect(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
-	intersect(cut(a), b)
+	intersect(slice(a), b)
 @inline Base.intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
-	intersect(a, cut(b))
+	intersect(a, slice(b))
 
 """
     setdiff(a::AbstractGeometry, b::AbstractGeometry)
@@ -1023,7 +967,7 @@ with the (z=0) plane via the `cut()` operation.
 Computes the difference of two solids.
 The following dimensions are allowed: (2,2), (3,3), and (2,3)
 (in the last case, the 3d object will be intersected with the (z=0)
-plane via the `cut()` operation).
+plane via the `slice()` operation).
 
     setdiff([a...], [b...])
 
@@ -1032,7 +976,7 @@ Shorthand for `setdiff(union(a...), union(b...))`.
 @inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGDiff{D}((a,b))
 @inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
-	setdiff(a, cut(b))
+	setdiff(a, slice(b))
 
 # added interface: setdiff([x...], [y...])
 @inline setdiff(x::AbstractVector{<:AbstractGeometry},
@@ -1175,6 +1119,8 @@ Offsets by given radius.
 """
 @inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.) =
 	operator(Offset,(r,ends,join,miter_limit),s...)
+@inline opening(r::Real, s...) = offset(r)*offset(-r, s...)
+@inline closing(r::Real, s...) = offset(-r)*offset(r, s...)
 
 # set_parameters««2
 """
@@ -1199,9 +1145,8 @@ struct Color{D,C<:Colorant} <: AbstractGeometry{D}
 	child::AbstractGeometry{D}
 end
 @inline color(c::Colorant, s...) = operator(Color, (c,), s...)
-# @inline color(c::Colorant, s...) = operator(SetParameters, ((color=c,),), s...)
 @inline color(c::Union{Symbol,AbstractString}, s...) =
-	color(parse(Colorant, c), s...)
+	color(parse(ColorType, c), s...)
 @inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
 
@@ -1239,8 +1184,6 @@ Represents the affine operation `x -> a*x + b`.
 """
 @inline mult_matrix(a, s...; center=nothing) =
 	operator(AffineTransform, (_affine_map_center(a, center),), s...)
-# @inline affine(a, b::AbstractVector, s...) =
-# 	operator(AffineTransform, (AffineMap(a, b),), s...)
 # translate ««2
 """
     translate(v, s...)
@@ -1297,7 +1240,7 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 @inline rotate(angles, s...; kwargs...) =
 	mult_matrix(Rotations.RotZYX(radians.(angles)...), s...; kwargs...)
 
-# project and cut««2
+# project and slice««2
 """
     project(s...)
 
@@ -1305,11 +1248,24 @@ Computes the (3d to 2d) projection of a shape on the (z=0) plane.
 """
 @inline project(s...) = operator(Project, (), s...)
 """
-    cut(s...)
+    slice(s...)
 
 Computes the (3d to 2d) intersection of a shape and the (z=0) plane.
 """
-@inline cut(s...) = operator(Cut, (), s...)
+@inline slice(s...) = operator(Slice, (), s...)
+# TODO: slice at different z value
+
+"""
+    half_space(direction, origin, s...)
+"""
+@inline half_space(direction, origin, s...) =
+	operator(Halfspace, (-direction, origin), s...)
+@inline left_half(s...) = halfspace(SA[-1,0,0],SA[0,0,0], s...)
+@inline right_half(s...) = halfspace(SA[1,0,0],SA[0,0,0], s...)
+@inline top_half(s...) = halfspace(SA[0,0,1],SA[0,0,0], s...)
+@inline bottom_half(s...) = halfspace(SA[0,0,-1],SA[0,0,0], s...)
+@inline front_half(s...) = halfspace(SA[0,-1,0],SA[0,0,0], s...)
+@inline back_half(s...) = halfspace(SA[0,1,0],SA[0,0,0], s...)
 
 # overloading Julia operators««1
 # backslash replaces U+2216 ∖ SET MINUS, which is not an allowed Julia operator
@@ -1324,10 +1280,14 @@ Computes the (3d to 2d) intersection of a shape and the (z=0) plane.
 
 @inline Base.:+(v::AbstractVector, x::AbstractGeometry) = translate(v, x)
 @inline Base.:+(x::AbstractGeometry, v::AbstractVector) = translate(v, x)
+@inline Base.:+(x::AbstractGeometry, y::AbstractGeometry) = minkowski(x,y)
 @inline Base.:-(x::AbstractGeometry, v::AbstractVector) = translate(-v, x)
 
 @inline Base.:*(c::Real, x::AbstractGeometry) = scale(c, x)
 @inline Base.:*(c::AbstractVector, x::AbstractGeometry) = scale(c, x)
+@inline Base.:*(a::AbstractMatrix, x::AbstractGeometry) = mult_matrix(a, x)
+@inline Base.:*(z::Complex, x::AbstractGeometry) =
+	[real(z) -imag(z); imag(z) real(z)]*x
 
 @inline Base.:*(c::Symbol, x::AbstractGeometry) = color(String(c), x)
 
@@ -1602,11 +1562,11 @@ end
 # Convenience functions ««1
 @inline raise(z, x...) = translate(SA[0,0,z], x...)
 @inline lower(z, x...) = raise(-z, x...)
-function rounded_square(dims::AbstractVector, r)
-	iszero(r) && return square(r)
-	return offset(r, [r,r]+square(dims - [2r,2r]))
-end
-@inline rounded_square(s::Real, r) = rounded_square(SA[s,s], r)
+# function rounded_square(dims::AbstractVector, r)
+# 	iszero(r) && return square(r)
+# 	return offset(r, [r,r]+square(dims - [2r,2r]))
+# end
+# @inline rounded_square(s::Real, r) = rounded_square(SA[s,s], r)
 # # Attachments««1
 # # Anchor system««2
 # """
@@ -1868,7 +1828,7 @@ end
 export square, circle, path, polygon
 export cube, sphere, cylinder, surface
 export offset, hull, minkowski
-export mult_matrix, translate, scale, rotate, mirror, project, cut
+export mult_matrix, translate, scale, rotate, mirror, project, slice
 export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
 export mesh, stl, svg

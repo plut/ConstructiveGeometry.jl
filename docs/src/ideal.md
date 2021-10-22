@@ -43,14 +43,14 @@ ConstructiveGeometry.mirror
 ```
 
 ```
-ConstructiveGeometry.cut
+ConstructiveGeometry.slice
 ConstructiveGeometry.project
 ```
 
 ### 2d drawing
 ```@docs
 ConstructiveGeometry.offset
-ConstructiveGeometry.draw
+ConstructiveGeometry.stroke
 ```
 
 ### Extrusion

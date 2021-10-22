@@ -465,7 +465,7 @@ function triangulate(m::PolygonXor)#««
 end#»»
 # reconstruction from triangles
 # this is used by 3d->2d projection:
-function PolygonXor(points::AbstractVector{SVector{2,T}},
+function PolygonXor{T}(points::AbstractVector{<:SVector{2}},
 	faces::AbstractVector{<:Tuple{<:Integer,<:Integer,<:Integer}}) where{T}
 	v=[PolygonXor{T}([points[f[1]], points[f[2]], points[f[3]]]) for f in faces ]
 	return clip(:union, v...)
