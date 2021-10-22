@@ -12,7 +12,7 @@ using FastClosures
 
 import Rotations
 import Colors: Colors, Colorant
-using Makie
+import Makie: Makie, surface
 
 import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
@@ -23,7 +23,6 @@ include("ConvexHull.jl")
 using .ConvexHull
 include("Shapes.jl")
 using .Shapes
-
 include("TriangleMeshes.jl")
 using .TriangleMeshes
 
@@ -55,7 +54,7 @@ const _DEFAULT_PARAMETERS = (
 	accuracy = 0.1, precision = .005, symmetry = 1,
 	type = Float64, ε=1/65536,
 # 	type = Rational{BigInt}, ε = 0,
-	color = ColorType(.5,.5,.5,1.), # gray
+	color = ColorType(.5,.5,.5), # gray
 )
 
 @inline get_parameter(parameters, name) =
@@ -615,8 +614,11 @@ function (g::Mesh)(s::AffineTransform{3})
 	# FIXME what to do if signdet(s.f) == 0 ?
 	m = g(s.child)
 	map!(s.f, m)
-# 	m.points .= s.f.(m.points)
-	return signdet(s.f) > 0 ? m : reverse(m)
+	if signdet(s.f) < 0
+		f = TriangleMeshes.faces(m.mesh)
+		f .= reverse.(f)
+	end
+	return m
 end
 
 function (g::Mesh)(s::AffineTransform{2})
@@ -709,13 +711,13 @@ struct Cone{T} <: AbstractTransform{3}
 end
 
 function (g::Mesh{T})(s::Cone) where{T}
-	m = g(s.child)
-	@assert m isa PolygonXor
+	m = g(s.child).poly
 	pts2 = Shapes.vertices(m)
 	tri = Shapes.triangulate(m)
 	peri = Shapes.perimeters(m)
 	n = length(pts2)
-	pts3 = [SVector{3,T}[p[1],p[2], 0] for p in pts2]
+	println("pts2 = $pts2")
+	pts3 = [SA[p[1],p[2], 0] for p in pts2]
 	push!(pts3, SVector{3,T}(s.apex))
 	faces = [ tri;
 		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
@@ -836,6 +838,7 @@ end
 # TODO: add syntactic sugar (origin, center, etc.) here:
 """
     square(size; origin, center=false)
+    square(width, height; origin, center=false)
 
 An axis-parallel square or rectangle  with given `size`
 (scalar or vector of length 2).
@@ -853,9 +856,13 @@ An axis-parallel square or rectangle  with given `size`
 
 """
     cube(size; origin, center=false)
+    cube(size_x, size_y, size_z; origin, center=false)
 
 An axis-parallel cube (or sett) with given `size`
 (scalar or vector of length 3).
+
+The first vertex is at the origin and all vertices have positive coordinates.
+If `center` is `true` then the cube is centered.
 """
 @inline cube(a::Real, b::Real, c::Real; center=nothing, anchor=nothing) =
 	_cube(a, b, c, center, anchor)
@@ -874,13 +881,13 @@ An axis-parallel cube (or sett) with given `size`
 """
     circle(r::Real)
 
-A circle with diameter `r`.
+A circle with diameter `r`, centered at the origin.
 """
 @inline circle(a::Real) = Circle(a)
 """
     sphere(r::Real)
 
-A sphere with diameter `r`.
+A sphere with diameter `r`, centered at the origin.
 """
 @inline sphere(a::Real) = Sphere(a)
 
@@ -890,30 +897,44 @@ A sphere with diameter `r`.
     cylinder(h, (r1, r2) [, center=false])
     cylinder(h, r [, center=false])
 
+A cylinder (or cone frustum)
+with basis centered at the origin, lower radius `r1`, upper radius `r2`,
+and height `h`.
+
 **Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
 not `(h,r,0)` as in OpenSCAD.
+
 """
 @inline cylinder(h::Real, r::Real) = linear_extrude(h)*circle(r)
 
 """
     cone(h, r)
+
+Circular right cone with basis centered at the origin,
+radius `r`, and height `h`.
+
     cone(apex, r)
 
-Circular cone.
+Circular, possibly oblique, cone with given apex point
+and radius `r` around the origin.
 """
 @inline cone(v::AbstractVector, r::Real) = Cone(v, circle(r))
-@inline cone(h::Real, r::Real) = cone(SA[0,0,v], r)
+@inline cone(h::Real, r::Real) = cone(SA[0,0,h], r)
 
 # Polygon««2
 """
     polygon(path)
+
+Filled polygon delimitated by the given vertices.
+
+TODO: allow several paths and simplify crossing paths.
 """
-@inline polygon(path) = PolygonXor([path])
+@inline polygon(path) = PolygonXor(Shapes.PolygonXor([path]))
 # Stroke««2
 """
     stroke(points, width; kwargs)
     ends = :loop|:butt|:square|:round
-    join = :square|:round|:miter
+    join = :round|:square|:miter
     miter_limit = 2.0
 
 Draws a path of given width.
@@ -927,11 +948,12 @@ stroke(points, width; kwargs...) = Stroke(points, width; kwargs...)
 
 Produces a surface with the given vertices.
 `faces` is a list of n-uples of indices into `vertices`.
-Non-triangular faces are allowed; these will be triangulated on construction.
+Only triangular faces are allowed now
+(non-triangular faces will be triangulated in a future release).
 """
-function surface(points, faces)
+function surface(vertices, faces)
 	# TODO: triangulate!
-	return Surface(points, faces)
+	return Surface(vertices, faces, fill(_DEFAULT_PARAMETERS.color, size(faces)))
 end
 
 # CSG operations««1
@@ -1146,6 +1168,7 @@ does not support the `etOpenSingle` offset style.
     offset(r; kwargs...) * solid
 
 Offsets by given radius.
+Positive radius is outside the shape, negative radius is inside.
 
     ends=:round|:square|:butt|:loop
     join=:round|:miter|:square
@@ -1155,7 +1178,8 @@ Offsets by given radius.
 """
     opening(r, shape...)
 
-Morphological opening: offset(-r) followed by offset(r).
+[Morphological opening](https://en.wikipedia.org/wiki/Opening_(morphology)):
+offset(-r) followed by offset(r).
 Removes small appendages and rounds convex corners.
 """
 @inline opening(r::Real, s...) = offset(r)*offset(-r, s...)
@@ -1239,6 +1263,7 @@ Represents the affine operation `x -> a*x + b`.
 """
     translate(v, s...)
     translate(v) * s
+    v + s
 
 Translates solids `s...` by vector `v`.
 """
@@ -1261,6 +1286,7 @@ Equivalent to `translate([0,0,-z], s...)`.
 """
     scale(a, s...; center=0)
     scale(a; center=0) * s
+		a * s
 Scales solids `s` by factor `a`. If `center` is given then this will be
 the invariant point.
 
@@ -1496,13 +1522,13 @@ Exports 2d `shape` as an SVG file.
 
 #»»1
 # Viewing««1
-@inline Base.display(m::AbstractGeometry) = plot(m)
+@inline Base.display(m::AbstractGeometry) = Makie.plot(m)
 
 @inline Makie.plot(g::AbstractGeometry; kwargs...) =
-	plot!(Makie.Scene(), g; kwargs...)
+	Makie.plot!(Makie.Scene(), g; kwargs...)
 
 @inline Makie.plot!(scene::Makie.AbstractScene, g::AbstractGeometry; kwargs...)=
-	plot!(scene, mesh(g); kwargs...)
+	Makie.plot!(scene, mesh(g); kwargs...)
 
 function Makie.plot!(scene::Makie.AbstractScene, m::Surface; kwargs...)
 	vmat = similar(first(vertices(m)), 3*length(faces(m)), 3)
@@ -1891,10 +1917,11 @@ end
 # end
 # 
 # Exports ««1
-export square, circle, path, polygon
-export cube, sphere, cylinder, surface
-export offset, hull, minkowski
-export mult_matrix, translate, scale, rotate, mirror, project, slice
+export square, circle, stroke, polygon
+export cube, sphere, cylinder, cone, surface
+export offset, opening, closing, hull, minkowski
+export mult_matrix, translate, scale, rotate, mirror, raise, lower
+export project, slice
 export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
 export mesh, stl, svg

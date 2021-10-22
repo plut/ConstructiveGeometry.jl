@@ -9,11 +9,13 @@
   - [ ] overload `left_half` etc. for 2d children
  - [x] plane intersection: `slice`
  - [x] projection
+ - [ ] add examples (with images) in documentation
  - [ ] get a better syntax for transforms, e.g.
  `symmetrize = transform(axis,s->s ∪ mirror(axis,s))` ??
  - [ ] libigl contains `minkowki_sum`
  - [ ] and even `convex_hull`
  - [ ] 2d Minkowski difference
+ - [ ] `linear_extrude` with twist and scale
  - [ ] find a way to fix path extrusion? either
    - [ ] cut “by hand” the result of a “butt” extrusion;
    - [ ] intersect the result of a custom “fill” extrusion;

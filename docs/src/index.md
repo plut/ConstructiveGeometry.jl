@@ -1,18 +1,8 @@
 # `ConstructiveGeometry.jl` Documentation
 
-!!! warning
-
-    This package is very much a work-in-progress. Right now only very basic
-    functionality is available (describing geometries, and some cases for
-    meshing).
-    Neither interface nor code are stable for now.
-    Any contributions are welcome!
-
-
-This package provides tools for describing 3d objects
-in Julia.
-This includes both geometry functions
-and a syntax describing constructive geometry.
+This package provides tools for describing 3d objects in Julia.
+This includes mainly a syntax for building a CSG tree
+and functions for representing the objects.
 This syntax is inspired by OpenSCAD, but is actual Julia code:
 ```julia
 using ConstructiveGeometry
@@ -28,20 +18,6 @@ linear_extrude(30) * [
 ]
 
 ```
-
-The package is made of two parts:
-
- - a system for describing geometric objects;
- - back-ends for converting these objects to useful formats.
-
-As of 2021-01, most object may either be:
- - converted to OpenSCAD format, or
- - explicited as (2d or 3d) meshes.
-
-Near-future plans include:
- - graphical representation of objects using one of the Julia plotting
-   packages;
- - direct export as a 2d (`.svg`) or 3d file (`.stl` or `.ply`).
 
 # Quick-start
 
@@ -61,11 +37,4 @@ s1 = union(
 )
 
 mesh(s1)
-```
-
-## I/O
-
-```@docs
-ConstructiveGeometry.include
-ConstructiveGeometry.scad
 ```
