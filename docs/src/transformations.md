@@ -106,6 +106,9 @@ half_space
 ```@docs
 decimate
 ```
+```@docs
+loop_subdivide
+```
 
 ## Inserting metadata
 

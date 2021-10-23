@@ -545,6 +545,9 @@ CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
 
 A convenience type representing the union of nothing.
 This is removed whenever it is `union()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `union()` (which is generally undefined) to this.
 """
 struct EmptyUnion end
 """
@@ -552,6 +555,9 @@ struct EmptyUnion end
 
 A convenience type representing the intersection of nothing.
 This is removed whenever it is `intersect()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `intersect()` (which is generally undefined) to this.
 """
 struct EmptyIntersect end
 
@@ -826,10 +832,16 @@ struct Decimate <: AbstractGeometry{3}
 	child::AbstractGeometry{3}
 end
 
-function (g::Mesh)(s::Decimate)
-	m = g(s.child)
-	return Surface(TriangleMeshes.decimate(m.mesh, s.max_faces))
+@inline (g::Mesh)(s::Decimate) =
+	Surface(TriangleMeshes.decimate(g(s.child).mesh, s.max_faces))
+
+struct LoopSubdivide <: AbstractGeometry{3}
+	count::Int
+	child::AbstractGeometry{3}
 end
+
+@inline (g::Mesh)(s::LoopSubdivide) =
+	Surface(TriangleMeshes.loop(g(s.child).mesh, s.count))
 
 #————————————————————— Front-end —————————————————————————————— ««1
 
@@ -1192,11 +1204,18 @@ Removes small holes and rounds concave corners.
 @inline closing(r::Real, s...) = offset(-r)*offset(r, s...)
 
 """
-    decimate(n, shape...)
+    decimate(n, surface...)
 
 Decimates a 3d surface to at most `n` triangular faces.
 """
 @inline decimate(n::Integer, s...) = operator(Decimate, (n,), s...)
+
+"""
+    loop_subdivide(n, shape...)
+
+Applies `n` iterations of loop subdivision to the solid.
+"""
+@inline loop_subdivide(n::Integer, s...) = operator(LoopSubdivide, (n,), s...)
 
 # set_parameters««2
 """

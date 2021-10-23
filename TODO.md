@@ -1,4 +1,9 @@
 # By order of priority
+ - [ ] update `iglwrap` and use latest version
+   - [ ] loop
+   - [ ] upsample (only useful once we have deformations)
+   - [ ] swept_volume
+   - [ ] minkowski_sum (might need tetrahedralize)
  - [x] Minkowski sum for holed polygons: slice a connected, holed polygon
    as an almost-simple loop (by connecting outer + inner paths)
    and call binary Minkowski sum
@@ -10,9 +15,12 @@
  - [x] plane intersection: `slice`
  - [x] projection
  - [ ] add examples (with images) in documentation
+ - [ ] swept surfaces
+ - [ ] swung surfaces (`path_extrude`)
+ - [ ] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
  - [ ] get a better syntax for transforms, e.g.
  `symmetrize = transform(axis,s->s ∪ mirror(axis,s))` ??
- - [ ] libigl contains `minkowki_sum`
+ - [x] libigl contains `minkowki_sum`
  - [ ] and even `convex_hull`
  - [ ] 2d Minkowski difference
  - [ ] `linear_extrude` with twist and scale
