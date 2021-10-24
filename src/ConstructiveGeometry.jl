@@ -604,9 +604,18 @@ function (g::Mesh{T})(s::CSGHull{3}) where{T}
 end
 
 # Minkowski sum and difference (TODO)««2
-CSGMinkowski = constructed_solid_type(:minkowski)
-@inline (g::Mesh)(s::CSGMinkowski{2}) =
-	PolygonXor(reduce(Shapes.minkowski_sum, poly.(g.(s.children))))
+# Minkowski sum in unequal dimensions is allowed;
+# we place the higher-dimensional summand first,
+# and its dimension is equal to the dimension of the sum:
+struct Minkowski{D,D2} <: AbstractGeometry{D}
+	first::AbstractGeometry{D}
+	second::AbstractGeometry{D2}
+end
+
+@inline (g::Mesh)(s::Minkowski{2,2}) =
+	PolygonXor(Shapes.minkowski_sum(g(s.first).poly, g(s.second).poly))
+@inline (g::Mesh)(s::Minkowski{3,3}) =
+	Surface(TriangleMeshes.minkowski_sum(g(s.first).mesh, g(s.second).mesh))
 # Transformations««1
 abstract type AbstractTransform{D} <: AbstractGeometry{D} end
 # AffineTransform««2
@@ -811,20 +820,30 @@ end
 
 # Offset««2
 
-struct Offset <: AbstractTransform{2}
+struct Offset{D} <: AbstractTransform{D}
 	radius::Float64
+	# these values are used only for 2d children:
 	ends::Symbol
 	join::Symbol
 	miter_limit::Float64
-	child::AbstractGeometry{2}
+	# this value is used only for 3d children:
+	npoints::Int
+	# and the child:
+	child::AbstractGeometry{D}
+	@inline Offset(radius::Real, ends::Symbol, join::Symbol, miter_limit::Real,
+		npoints::Integer, child::AbstractGeometry{D}) where{D} =
+		new{D}(radius, ends, join, miter_limit, npoints, child)
 end
 
-function (g::Mesh)(s::Offset)
+function (g::Mesh)(s::Offset{2})
 	m = g(s.child)
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * s.radius)
 	return PolygonXor(Shapes.offset(poly(m), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
 end
+
+@inline (g::Mesh)(s::Offset{3}) =
+	Surface(TriangleMeshes.offset(g(s.child).mesh, s.radius, s.npoints))
 
 # Decimate««2
 struct Decimate <: AbstractGeometry{3}
@@ -1090,8 +1109,10 @@ end
 Represents the Minkowski sum of given solids.
 This is currently implemented only for 2d objects.
 """
-@inline minkowski(a1::AbstractGeometry{2}, a2::AbstractGeometry{2}) =
-	CSGMinkowski{2}(unroll2(a1, a2, Val(:minkowski)))
+@inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{2}) =
+	Minkowski{2,2}(a, b)
+@inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{3}) =
+	Minkowski{3,3}(a, b)
 
 # Transformations««1
 # Transform type««2
@@ -1182,11 +1203,18 @@ does not support the `etOpenSingle` offset style.
 Offsets by given radius.
 Positive radius is outside the shape, negative radius is inside.
 
+Parameters for 2d shapes:
     ends=:round|:square|:butt|:loop
     join=:round|:miter|:square
+    miter_limit=2.0
+
+Parameter for 3d solids:
+    npoints = 10 # how to subdivide segments
 """
-@inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.) =
-	operator(Offset,(r,ends,join,miter_limit),s...)
+@inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.,
+	npoints = 10) =
+	operator(Offset,(r,ends,join,miter_limit, npoints),s...)
+
 """
     opening(r, shape...)
 
