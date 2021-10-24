@@ -12,7 +12,7 @@ makedocs(
 	],
 # 	modules = [ConstructiveGeometry],
 	sitename="ConstructiveGeometry.jl",
-	format=Documenter.HTML(prettyurls=get(ENV,"CI",false)),
+	format=Documenter.HTML(prettyurls=get(ENV,"CI",nothing) !=nothing),
 )
 
 # deploydocs(
