@@ -54,7 +54,7 @@ const _DEFAULT_PARAMETERS = (
 	accuracy = 0.1, precision = .005, symmetry = 1,
 	type = Float64, ε=1/65536,
 # 	type = Rational{BigInt}, ε = 0,
-	color = ColorType(.5,.5,.5), # gray
+	color = ColorType(.3,.4,.5), # bluish gray
 )
 
 @inline get_parameter(parameters, name) =
@@ -389,6 +389,10 @@ end
 @inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
 	PolygonXor(Shapes.clip(t, poly.(l)...))
 
+@inline function (g::Mesh)(m::PolygonXor)
+	polygon_xor(g, paths(m)...)
+end
+
 # Square««2
 struct Square{T} <: AbstractGeometryCoord{2,T}
 	size::SVector{2,T}
@@ -627,24 +631,20 @@ end
 
 function (g::Mesh)(s::AffineTransform{3})
 	# FIXME what to do if signdet(s.f) == 0 ?
+	d = signdet(s.f)
+	iszero(d)&&error("Only invertible linear transforms are supported (for now)")
 	m = g(s.child)
-	map!(s.f, m)
-	if signdet(s.f) < 0
-		f = TriangleMeshes.faces(m.mesh)
-		f .= reverse.(f)
-	end
-	return m
+	return Surface(s.f.(vertices(m)),
+		d > 0 ? faces(m) : reverse.(faces(m)),
+		attributes(m))
 end
 
 function (g::Mesh)(s::AffineTransform{2})
-	m = g(s.child)
 	d = signdet(s.f)
-	d ≠ 0 || error("Only invertible linear transforms are supported (for now)")
-	for p in paths(m)
-		p .= s.f.(p)
-		d < 0 && reverse!(p)
-	end
-	return m
+	iszero(d)&&error("Only invertible linear transforms are supported (for now)")
+	m = g(s.child)
+	return polygon_xor(g,
+		[ d > 0 ? reverse(s.f.(p)) : s.f.(p) for p in paths(m) ])
 end
 
 # Project and slice (TODO)««2
@@ -653,18 +653,26 @@ struct Project <: AbstractGeometry{2}
 end
 
 function (g::Mesh)(s::Project)
-	m = g(s.child)
-	p = TriangleMeshes.vertices(m.mesh)
-	f = TriangleMeshes.faces(m.mesh)
-	return polygon_xor(g, [SA[x[1], x[2]] for x in p], f)
+	triangles = TriangleMeshes.project(g(s.child).mesh)
+	# FIXME: strangely, this makes some tiny “holes”
+	# (projection should be exact?!).
+	c = (Shapes.clip(:union,
+		[Shapes.PolygonXor([t]) for t in triangles]...))
+	filter!(p->abs(Shapes.area(p)) > 1e-9, c.paths)
+	return PolygonXor(c)
+# 	m = g(s.child)
+# 	p = TriangleMeshes.vertices(m.mesh)
+# 	f = TriangleMeshes.faces(m.mesh)
+# 	return polygon_xor(g, [SA[x[1], x[2]] for x in p], f)
 end
 
-struct Slice <: AbstractGeometry{2}
+struct Slice{T} <: AbstractGeometry{2}
+	z::T
 	child::AbstractGeometry{3}
 end
 
 function (g::Mesh)(s::Slice)
-	(pts, seg) = TriangleMeshes.plane_slice(g(s.child).mesh)
+	(pts, seg) = TriangleMeshes.plane_slice(s.z, g(s.child).mesh)
 	return PolygonXor(Shapes.glue_segments(pts, seg))
 end
 
@@ -1242,6 +1250,8 @@ Decimates a 3d surface to at most `n` triangular faces.
     loop_subdivide(n, shape...)
 
 Applies `n` iterations of loop subdivision to the solid.
+This does not preserve shape;
+instead, it tends to “round out” the solid.
 """
 @inline loop_subdivide(n::Integer, s...) = operator(LoopSubdivide, (n,), s...)
 
@@ -1380,19 +1390,28 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 """
     project(s...)
 
-Computes the (3d to 2d) projection of a shape on the (z=0) plane.
+Computes the (3d to 2d) projection of a shape on the horizontal plane.
 """
 @inline project(s...) = operator(Project, (), s...)
 """
+    slize(z, s...)
     slice(s...)
 
-Computes the (3d to 2d) intersection of a shape and the (z=0) plane.
+Computes the (3d to 2d) intersection of a shape and the given horizontal plane
+(at `z=0` if not precised).
 """
-@inline slice(s...) = operator(Slice, (), s...)
+@inline slice(z::Real, s...) = operator(Slice, (z,), s...)
+@inline slice(s...) = operator(Slice, (0,), s...)
+
 # TODO: slice at different z value
 
 """
     half_space(direction, origin, s...)
+
+Keeps only the part of 3d objects `s` lying in the halfspace
+with given `direction` and `origin`.
+
+TODO: more flexible syntax
 """
 @inline half_space(direction, origin, s...) =
 	operator(Halfspace, (-direction, origin), s...)
@@ -1422,8 +1441,10 @@ Computes the (3d to 2d) intersection of a shape and the (z=0) plane.
 @inline Base.:*(c::Real, x::AbstractGeometry) = scale(c, x)
 @inline Base.:*(c::AbstractVector, x::AbstractGeometry) = scale(c, x)
 @inline Base.:*(a::AbstractMatrix, x::AbstractGeometry) = mult_matrix(a, x)
-@inline Base.:*(z::Complex, x::AbstractGeometry) =
-	[real(z) -imag(z); imag(z) real(z)]*x
+@inline _to_matrix(z::Complex) = [real(z) -imag(z); imag(z) real(z)]
+@inline Base.:*(z::Complex, x::AbstractGeometry) = _to_matrix(z)*x
+@inline Base.:*(a::Transform,b::Real) = a*scale(b)
+@inline Base.:*(a::Transform,z::Complex) = a*mult_matrix(_to_matrix(z))
 
 @inline Base.:*(c::Symbol, x::AbstractGeometry) = color(String(c), x)
 
@@ -1968,7 +1989,8 @@ export square, circle, stroke, polygon
 export cube, sphere, cylinder, cone, surface
 export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, mirror, raise, lower
-export project, slice
+export project, slice, half_space
+export decimate, loop_subdivide
 export linear_extrude, rotate_extrude, path_extrude
 export color, set_parameters
 export mesh, stl, svg

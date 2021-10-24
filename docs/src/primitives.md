@@ -1,4 +1,4 @@
-# Primitive solids
+# [Primitive solids](@id primitives)
 ```@meta
 CurrentModule = ConstructiveGeometry
 ```

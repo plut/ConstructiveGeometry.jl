@@ -1,12 +1,17 @@
 # By order of priority
- - [ ] update `iglwrap` and use latest version
-   - [ ] loop
-   - [ ] upsample (only useful once we have deformations)
-   - [ ] swept_volume
-   - [ ] minkowski_sum (might need tetrahedralize)
+ - [x] make a nice logo (threaded bolt? some variant of Julia logo?)
+ - [ ] Minkowski sum in mixed dimensions
+ - [x] update `iglwrap` and use latest version
+   - [x] `loop`
+   - [x] `minkowski_sum` (might need tetrahedralize)
+   - [ ] `upsample` (only useful once we have deformations)
+   - [ ] `swept_volume`
  - [x] Minkowski sum for holed polygons: slice a connected, holed polygon
    as an almost-simple loop (by connecting outer + inner paths)
    and call binary Minkowski sum
+ - [ ] `TriangleMeshes`: have a way to detect non-pwm meshes *and explain
+   why*
+   - [ ] in particular, `linear_extrude` seems bugged (again)
  - [x] libigl contains `offset_surface`
  - [x] `intersect_with_half_space`
  - [x] half-space intersection
@@ -14,9 +19,18 @@
   - [ ] overload `left_half` etc. for 2d children
  - [x] plane intersection: `slice`
  - [x] projection
- - [ ] add examples (with images) in documentation
+ - [ ] overload `color*object`
+ - [x] add examples (with images) in documentation
+ - [x] clarify priority: `linear_extrude(8)*(5*object)`
+ - [ ] add some way of marking individual objects
+   - [ ] this requires expanding the mesh types to include marked objects
+   - [ ] as well as new syntax, e.g. `!object` or `mark()*object`
+ - [ ] `text`
+ - [ ] move doc examples to `WGLMakie`
  - [ ] swept surfaces
  - [ ] swung surfaces (`path_extrude`)
+ - [ ] projection of hollow sphere does not work: replace the temporary
+   fix by something better
  - [ ] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
  - [ ] get a better syntax for transforms, e.g.
  `symmetrize = transform(axis,s->s ∪ mirror(axis,s))` ??
@@ -43,9 +57,6 @@
     # when meshing, produces
     Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))
  - [ ] import `.stl` and `.ply`
- - [ ] (libigl) swept volume
- - [ ] (libigl) tetrahedralize
- - [ ] (libigl) loop subdivision (igl::loop)
 # Basic types
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
    types
@@ -67,6 +78,7 @@
  - [ ] add convenience constructors for rounded square, cone, …
  - [ ] simple syntax for making conditionals (⇒ use those empty objects)
    - [ ] or also allow `Nothing` in vectors of objects
+   - [ ] even better, `EmptyUnion`
 # Syntax
  - [ ] using `:` for transforms is very tempting:
 ```
@@ -118,10 +130,10 @@
    terribly useful (in particular with angles in radians).
 # Packaging
  - [?] write a full doc about how to define a new transform
- - [x] write another package with `BinaryBuilder.jl` for IGL wrapper(s)
  - [ ] complete the list of exports
  - [x] write a minimal regression test
- - [x] make this a proper package
+   - [ ] the doc is the test
+   - [ ] add some more complicated examples in the doc to expand the tests
  - [ ] distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
  - [?] [https://www.researchgate.net/publication/220184531_Efficient_Clipping_of_Arbitrary_Polygons/link/0912f510a5ac9191e9000000/download]()
@@ -129,10 +141,6 @@
  - [ ] splines (and enclosed area)
  - [ ] NURBS
 # Extras
- - [?] [surface decimation](https://caffeineviking.net/papers/stima.pdf)
- - [ ] decimation (`igl::decimate`)
- - [ ] [Loop subdivision](https://github.com/cmu462/Scotty3D/wiki/Loop-Subdivision)
-   - [ ] `igl::upsample`, `igl::loop`
  - [ ] deformation https://libigl.github.io/tutorial/#chapter-4-shape-deformation
  - [ ] https://student.cs.uwaterloo.ca/~cs779/Gallery/Winter2018/anietoro/doc/
  - [ ] add a display method that shows the tree

@@ -3,9 +3,10 @@ using StaticArrays
 using FastClosures
 using IGLWrap_jll
 
-# IGL interface ««1
+# Data type ««1
+@inline det(a::SVector{2}, b::SVector{2}) = a[1]*b[2]-a[2]*b[1]
+@inline det(a::SVector{2}, b::SVector{2}, c::SVector{2}) = det(a-c, b-c)
 
-# libiglwrap="../iglwrap/local/libiglwrap.so"
 # the bits types are hard-coded on the C side:
 const Point=SVector{3,Cdouble}
 const Face=NTuple{3,Cint}
@@ -29,10 +30,13 @@ const CTriangleMesh = TriangleMesh{Cdouble}
 @inline nvertices(m::TriangleMesh) = size(m.vertices, 1)
 @inline nfaces(m::TriangleMesh) = size(m.faces, 1)
 @inline shift(f::Face, k) = f .+ Face((k,k,k))
+
+# IGL interface ««1
+
+# libiglwrap="../iglwrap/local/libiglwrap.so"
 @inline vpointer(m::TriangleMesh{Cdouble}) =
 	convert(Ptr{Cdouble}, pointer(m.vertices))
 @inline fpointer(m::TriangleMesh) = convert(Ptr{Cint}, pointer(m.faces))
-
 function boolean(op, m1::CTriangleMesh{A}, m2::CTriangleMesh{A}) where{A}#««
 	n = nfaces(m1)
 	nvo = Ref(Cint(0))
@@ -180,7 +184,7 @@ Returns the set of all edges formed by this mesh ∩ the horizontal plane,
 as `(vertices, edges)`, where `vertices` are 2d points,
 and `edges` are indices into `vertices`.
 """
-function plane_slice(m::TriangleMesh)
+function plane_slice(z::Real, m::TriangleMesh)
 	# build a list of intersection points + connectivity
 	# each intersection point is either:
 	#  - a vertex v, represented as (v, 0)
@@ -192,38 +196,39 @@ function plane_slice(m::TriangleMesh)
 	# build list of all edges:
 	for (i1, i2, i3) in faces(m)
 		(v1, v2, v3) = vertices(m)[[i1,i2,i3]]
-		if v1[3] == 0#««
-			if v2[3] == 0
-				v3[3] == 0 && continue # 000: ignore horizontal triangle
+		(z1, z2, z3) = (v1[3], v2[3], v3[3]) .- z
+		if z1 == 0#««
+			if z2 == 0
+				z3 == 0 && continue # 000: ignore horizontal triangle
 				edge!(i1=>0,i2=>0) # 00+, 00-
-			elseif v2[3] > 0
-				v3[3] == 0 && edge!(i1=>0,i3=>0)
-				v3[3] < 0 && edge!(i1=>0,i2=>i3)
-			else # v2[3] < 0
-				v3[3] == 0 && edge!(i1=>0,i3=>0)
-				v3[3] > 0 && edge!(i1=>0,i2=>i3)
+			elseif z2 > 0
+				z3 == 0 && edge!(i1=>0,i3=>0)
+				z3 < 0 && edge!(i1=>0,i2=>i3)
+			else # z2 < 0
+				z3 == 0 && edge!(i1=>0,i3=>0)
+				z3 > 0 && edge!(i1=>0,i2=>i3)
 			end
-		elseif v1[3] > 0
-			if v2[3] == 0
-				v3[3] == 0 && edge!(i2=>0,i3=>0) # +00
-				v3[3] < 0 && edge!(i2=>0,i1=>i3) # +0-
-			elseif v2[3] > 0
-				v3[3] < 0 && edge!(i1=>i3,i2=>i3) # ++-
-			else # v2[3] < 0
-				v3[3] == 0 && edge!(i3=>0,i1=>i2)
-				v3[3] > 0 && edge!(i1=>i2,i2=>i3)#+-+
-				v3[3] < 0 && edge!(i1=>i2,i1=>i3)#+--
+		elseif z1 > 0
+			if z2 == 0
+				z3 == 0 && edge!(i2=>0,i3=>0) # +00
+				z3 < 0 && edge!(i2=>0,i1=>i3) # +0-
+			elseif z2 > 0
+				z3 < 0 && edge!(i1=>i3,i2=>i3) # ++-
+			else # z2 < 0
+				z3 == 0 && edge!(i3=>0,i1=>i2)
+				z3 > 0 && edge!(i1=>i2,i2=>i3)#+-+
+				z3 < 0 && edge!(i1=>i2,i1=>i3)#+--
 			end
-		else # v1[3] < 0
-			if v2[3] == 0
-				v3[3] == 0 && edge!(i2=>0,i3=>0) # -00
-				v3[3] > 0 && edge!(i2=>0,i1=>i3) # -0+
-			elseif v2[3] > 0
-				v3[3] == 0 && edge!(i3=>0,i1=>i2)
-				v3[3] > 0 && edge!(i1=>i2,i1=>i3)#-++
-				v3[3] < 0 && edge!(i1=>i2,i2=>i3)#-+-
-			else # v2[3] < 0
-				v3[3] > 0 && edge!(i1=>i3,i2=>i3) # --+
+		else # z1 < 0
+			if z2 == 0
+				z3 == 0 && edge!(i2=>0,i3=>0) # -00
+				z3 > 0 && edge!(i2=>0,i1=>i3) # -0+
+			elseif z2 > 0
+				z3 == 0 && edge!(i3=>0,i1=>i2)
+				z3 > 0 && edge!(i1=>i2,i1=>i3)#-++
+				z3 < 0 && edge!(i1=>i2,i2=>i3)#-+-
+			else # z2 < 0
+				z3 > 0 && edge!(i1=>i3,i2=>i3) # --+
 			end
 		end#»»
 	end
@@ -234,7 +239,7 @@ function plane_slice(m::TriangleMesh)
 			vlist[j] = SA[v[1],v[2]]
 		else
 			(v1,v2) = vertices(m)[[i1,i2]]
-			(z1,z2) = (v1[3],v2[3]); f = 1/(z2-z1)
+			(z1,z2) = (v1[3]-z,v2[3]-z); f = 1/(z2-z1)
 			# (z2 v1 - z1 v2)/(z2-z1)
 			vlist[j] = SA[f*(z2*v1[1]-z1*v2[1]), f*(z2*v1[2]-z1*v2[2])]
 		end
@@ -242,6 +247,24 @@ function plane_slice(m::TriangleMesh)
 	return (vlist, unique!(sort!(elist)))
 end
 
+
+# project««
+"""
+    project(mesh)
+
+Returns the list of triangles produced as the 2d projection of `mesh`.
+"""
+function project(m::TriangleMesh{T}) where{T}
+	triangles = SVector{3,SVector{2,T}}[]
+	for (i,j,k) in faces(m)
+		a,b,c = vertices(m)[SA[i,j,k]]
+		a1,b1,c1 = (SA[a[1],a[2]], SA[b[1],b[2]], SA[c[1],c[2]])
+		d = det(a1,b1,c1)
+		iszero(d) && continue
+		push!(triangles, d > 0 ? SA[a1,b1,c1] : SA[a1,c1,b1])
+	end
+	return triangles
+end#»»
 
 #  »»1
 

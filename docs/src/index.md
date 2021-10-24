@@ -5,36 +5,37 @@ This includes mainly a syntax for building a CSG tree
 and functions for representing the objects.
 This syntax is inspired by OpenSCAD, but is actual Julia code:
 ```julia
+# code for building the logo of this package
 using ConstructiveGeometry
 
-square(20)
+hexagon = polygon([[cos(π*t/3),sin(π*t/3)] for t in 0:5])
+c1, c2, c3 = ("#cb3c33", "#9558b2", "#389826")
 
-linear_extrude(30) * [
-  intersection(
-    translate([10,0]) * circle(3),
-    translate([13,0]) * circle(3),
-  ),
-  color("pink") * scale(2) * square(1),
-]
+bolt = linear_extrude(5)*(8*hexagon) ∪ cylinder(15,4)
+
+union(
+  color(c1)*bolt,
+  [20,0,0]+color(c2)*bolt,
+  [10,17,0]+color(c3)*bolt)
 
 ```
 
 # Quick-start
 
-## Basic example
-```julia
-using ConstructiveGeometry
+This package defines three kinds of abstract geometric objects
+(in either two or three dimensions):
 
-s1 = union(
-  color("pink")*
-  translate([3,0])*
-  scale([2,1])*
-  circle(3),
+ - [primitive geometric objects](@ref primitives), such as cubes,
+   spheres, etc.;
+ - [geometric transformations](@ref transformations) acting on one
+   object, such as (invertible) affine transformations, extrusions,
+   projections, color-change, etc.;
+ - [CSG operations](@ref operations) combining several objects,
+   such as boolean operations or Minkowski sum.
 
-  color("cyan")*
-  translate([0,5])*
-  square([2,3])
-)
+Any geometric object defined in this way may then be instantiated as an
+explicit mesh. The mesh can be visualized directly within Julia (using
+`Makie`) or exported as an STL (for 3d objects) or SVG (for 2d objects)
+file.
 
-mesh(s1)
 ```

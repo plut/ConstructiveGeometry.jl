@@ -1,4 +1,4 @@
-# Transformations
+# [Transformations](@id transformations)
 ```@meta
 CurrentModule = ConstructiveGeometry
 ```
@@ -54,6 +54,15 @@ mirror
 raise
 lower
 ```
+## Overloaded operators
+
+The following operators are overloaded.
+
+ - `vector + solid` is a translation.
+ - `real * solid` is a scaling.
+ - `complex * 2dshape` is a similitude.
+ - `matrix * solid` is a linear transformation.
+ - `vector * solid` is a multiplication by a diagonal matrix.
 
 ## Two-dimensional drawing
 ```@docs
@@ -82,12 +91,23 @@ png("closing", s); # hide
 ![example: the closing of the L-shape](closing.png)
 
 ## Extrusion
+### Linear extrusion
 ```@docs
 linear_extrude
 ```
+```@repl 0
+s = linear_extrude(10)*[square(10,5), square(5,15)]
+png("linear_extrude", s); # hide
+```
+![example: linear extrusion of a L-shape](linear_extrude.png)
 ```@docs
 rotate_extrude
 ```
+```@repl 0
+s = rotate_extrude(245)*[square(10,5), square(5,15)]
+png("rotate_extrude", s); # hide
+```
+![example: rotation extrusion of a L-shape](rotate_extrude.png)
 ```@docs
 path_extrude
 ```
@@ -95,12 +115,27 @@ path_extrude
 ```@docs
 slice
 ```
+```@repl 0
+s = slice()*setdiff(sphere(20),sphere(18));
+png("slice", s); # hide
+```
+![example: slicing a hollow sphere](slice.png)
 ```@docs
 project
 ```
+```@repl 0
+s = project()*setdiff(sphere(20),sphere(18));
+png("project", s); # hide
+```
+![example: projecting a hollow sphere](project.png)
 ```@docs
 half_space
 ```
+```@repl 0
+s = half_space([0,0,-1],[0,0,0])*setdiff(sphere(20),sphere(18));
+png("halfspace", s); # hide
+```
+![example: one half of a hollow sphere](halfspace.png)
 
 ## Decimation
 ```@docs
@@ -109,6 +144,11 @@ decimate
 ```@docs
 loop_subdivide
 ```
+```@repl 0
+s = loop_subdivide(4)*cube(20);
+png("loop_subdivide", s); # hide
+```
+![example: loop subdivision of a cube](loop_subdivide.png)
 
 ## Inserting metadata
 
@@ -120,6 +160,8 @@ or as a product `transform(parameters) * s`.
 
 ```@docs
 color
+```
+```@docs
 set_parameters
 ```
 
