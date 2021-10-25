@@ -1,24 +1,15 @@
 # `ConstructiveGeometry.jl` Documentation
 
 This package provides tools for describing 3d objects in Julia.
-This includes mainly a syntax for building a CSG tree
-and functions for representing the objects.
-This syntax is inspired by OpenSCAD, but is actual Julia code:
+For example, this is the Julia code used to draw the logo of this
+package:
+````@eval
+Markdown.parse("""
 ```julia
-# code for building the logo of this package
-using ConstructiveGeometry
-
-hexagon = polygon([[cos(π*t/3),sin(π*t/3)] for t in 0:5])
-c1, c2, c3 = ("#cb3c33", "#9558b2", "#389826")
-
-bolt = linear_extrude(5)*(8*hexagon) ∪ cylinder(15,4)
-
-union(
-  color(c1)*bolt,
-  [20,0,0]+color(c2)*bolt,
-  [10,17,0]+color(c3)*bolt)
-
+$(readstring("../logo.jl"))
 ```
+""")
+````
 
 # Quick-start
 
@@ -37,5 +28,3 @@ Any geometric object defined in this way may then be instantiated as an
 explicit mesh. The mesh can be visualized directly within Julia (using
 `Makie`) or exported as an STL (for 3d objects) or SVG (for 2d objects)
 file.
-
-```

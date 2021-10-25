@@ -27,6 +27,63 @@ The following features should be mostly working now:
  - 2d Minkowski sum and offset;
  - 3d offset (partly) and surface decimation.
 
+## Global philosophy
+
+This package defines both a structure for abstract­geometric objects
+and a way to convert such “perfect” object to concrete meshes.
+This conversion is implemented as triangulated surfaces
+using the IGL graphics library.
+
+## Why write this when OpenSCAD exists?
+
+Our goal is to replicate what OpenSCAD proved works well
+(a simple syntax for script-based CAD),
+while fixing some of the less-fun parts.
+
+We believe that using Julia could provide following advantages:
+ - a more complete (and easier to use) programming language
+   (e.g. a language which natively contains linear algebra is easier to
+   use for constraint-based design);
+ - the ability to link external libraries (e.g. defining surfaces as
+   solutions of differential equations);
+ - giving the user access to the internal representation of all 3d models
+   (whereas OpenSCAD's modules are closed) for e.g. implementing custom
+   deformations;
+ - ease of extending the basic functions of the library (e.g. ultimately
+   implementing Minkowski difference or swung volumes should not be too
+   hard, and some form of splines should be possible too), whereas such
+   attempts in OpenSCAD often lead to “rewriting OpenSCAD in OpenSCAD”;
+ - file I/O is easier to implement (and in more formats);
+ - IGL's triangulated surfaces are likely faster than CGAL's Nef
+   polyedra, although this package has not reached the “speed benchmarks”
+   phase yet.
+
+On the other hand, one notable drawback of Julia (in particular with many
+dependencies) is the long “time-to-first-plot”. Once everything is loaded
+howerver, the second, third plots etc. are much faster.
+
+
+Reaching feature-parity (at least for static designs)
+is one of the first goals of this package.
+The next few steps in this direction include:
+ - include the missing primitives: `import`, `text`;
+ - include some way of highlighting parts of the design
+   (OpenSCAD's `#` and `!` operators)
+
+
+## Future goals
+
+Once this feature parity is achieved, we plan to move on to
+include more content (e.g. some of what is usually implemented
+library-side in OpenSCAD), such as:
+ - I/O to more file formats (e.g. `png`, `ply`, etc.);
+ - clarify swung surfaces/path extrusion;
+ - add an annotation system to ease the design of complex models;
+ - add an anchor system.
+
+In the more remote future, we plan to examine whether it would be
+possible to replace polygons by e.g. NURBs to add even more features.
+
 ## Libraries used
 
 Currently (as of 2021-08), `ConstructiveGeometry.jl` happily uses
@@ -38,24 +95,6 @@ the following libraries:
  - [`Polyhedra`](https://github.com/JuliaPolyhedra/Polyhedra.jl) and [`GLPK`](https://github.com/jump-dev/GLPK.jl) for convex hull.
 
 
-The roadmap now includes at least the following:
- - `.stl` file import, and I/O to more formats;
-   path extrusion; `text()`;
- - add an annotation system to ease the design of complex models;
- - add an anchor system.
+## Contributions
 
-## Why write this when OpenSCAD exists?
-
-Our goal is to replicate what OpenSCAD proved works well
-(a simple syntax for script-based CAD),
-while fixing some less-fun parts
-(which include at least the esoteric programming language and the
-“opaque” data types for geometric objects).
-
-One of the main differences (and, we believe, advantages) this has over
-OpenSCAD is that all meshes are accessible to the end-user,
-thus making 
-
-
-
-Any contributions are welcome!
+This project is open to contributions.

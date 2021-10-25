@@ -11,7 +11,9 @@
    and call binary Minkowski sum
  - [ ] `TriangleMeshes`: have a way to detect non-pwm meshes *and explain
    why*
-   - [ ] in particular, `linear_extrude` seems bugged (again)
+   - [ ] fix meshes on stl import
+   - [ ] triangulate faces of `Surface`
+ - [ ] also in 2d, regularize polygons (e.g. one backwards loop)
  - [x] libigl contains `offset_surface`
  - [x] `intersect_with_half_space`
  - [x] half-space intersection
@@ -19,7 +21,7 @@
   - [ ] overload `left_half` etc. for 2d children
  - [x] plane intersection: `slice`
  - [x] projection
- - [ ] overload `color*object`
+ - [ ] overload `color*object` for `color::Colorant`
  - [x] add examples (with images) in documentation
  - [x] clarify priority: `linear_extrude(8)*(5*object)`
  - [ ] add some way of marking individual objects
@@ -41,6 +43,9 @@
  - [ ] find a way to fix path extrusion? either
    - [ ] cut “by hand” the result of a “butt” extrusion;
    - [ ] intersect the result of a custom “fill” extrusion;
+ - [ ] bring back some `Angle` types (with degrees) to allow overloading
+   of `extrude`, e.g. `extrude(90°)`; likewise, use `cospi` and `sinpi`
+   - [ ] `using Unitful.°` is probably (almost) enough
   - [ ] do something for keyword argument dispatch; e.g. the following should be equivalent:
     circle(r=1)
     circle(d=2)
