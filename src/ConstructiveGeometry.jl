@@ -644,7 +644,7 @@ function (g::Mesh)(s::AffineTransform{2})
 	iszero(d)&&error("Only invertible linear transforms are supported (for now)")
 	m = g(s.child)
 	return polygon_xor(g,
-		[ d > 0 ? reverse(s.f.(p)) : s.f.(p) for p in paths(m) ])
+		[ d > 0 ? s.f.(p) : reverse(s.f.(p)) for p in paths(m) ])
 end
 
 # Project and slice (TODO)««2
@@ -739,7 +739,6 @@ function (g::Mesh{T})(s::Cone) where{T}
 	tri = Shapes.triangulate(m)
 	peri = Shapes.perimeters(m)
 	n = length(pts2)
-	println("pts2 = $pts2")
 	pts3 = [SA[p[1],p[2], 0] for p in pts2]
 	push!(pts3, SVector{3,T}(s.apex))
 	faces = [ tri;
