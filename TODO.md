@@ -31,6 +31,7 @@
  - [ ] move doc examples to `WGLMakie`
  - [ ] swept surfaces
  - [ ] swung surfaces (`path_extrude`)
+ - [ ] wrapped volumes
  - [ ] projection of hollow sphere does not work: replace the temporary
    fix by something better
  - [ ] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
@@ -46,6 +47,11 @@
  - [ ] bring back some `Angle` types (with degrees) to allow overloading
    of `extrude`, e.g. `extrude(90°)`; likewise, use `cospi` and `sinpi`
    - [ ] `using Unitful.°` is probably (almost) enough
+ - [ ] compute center of gravity (and use it for scaling etc.)
+ - [ ] find some way of referencing parts of objects,
+ e.g. `cylinder().edge(:top)` references the top edge,
+ and have it accessible through CSG hierarchy
+ (thus, maybe later providing a way to e.g. fillet it?)
   - [ ] do something for keyword argument dispatch; e.g. the following should be equivalent:
     circle(r=1)
     circle(d=2)

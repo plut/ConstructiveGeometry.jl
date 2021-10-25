@@ -25,7 +25,7 @@ The following features should be mostly working now:
  - 2d->3d extrusions (linear, revolution, curvilinear);
  - 3d->2d projection and slicing;
  - 2d Minkowski sum and offset;
- - 3d offset (partly) and surface decimation.
+ - 3d offset, Minkowski sum (partly) and surface decimation.
 
 ## Global philosophy
 
@@ -45,7 +45,7 @@ We believe that using Julia could provide following advantages:
    (e.g. a language which natively contains linear algebra is easier to
    use for constraint-based design);
  - the ability to link external libraries (e.g. defining surfaces as
-   solutions of differential equations);
+   solutions of differential equations or least-square fits);
  - giving the user access to the internal representation of all 3d models
    (whereas OpenSCAD's modules are closed) for e.g. implementing custom
    deformations;
@@ -77,7 +77,7 @@ Once this feature parity is achieved, we plan to move on to
 include more content (e.g. some of what is usually implemented
 library-side in OpenSCAD), such as:
  - I/O to more file formats (e.g. `png`, `ply`, etc.);
- - clarify swung surfaces/path extrusion;
+ - add more ways to generate surfaces (e.g. swung/swept surfaces);
  - add an annotation system to ease the design of complex models;
  - add an anchor system.
 
