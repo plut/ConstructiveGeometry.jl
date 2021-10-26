@@ -441,6 +441,14 @@ function point_in_polygon(poly; orientation=orientation(poly))#««
 	t = √(h2/4/dot(ac,ac))
 	return orientation ? b + t*v : b - t*v
 end#»»
+# triangulates a simple loop
+function triangulate(v::AbstractVector{<:SVector{2,<:Real}})
+	tri = basic_triangulation(
+		Matrix{Float64}([transpose.(v)...;]),
+		collect(1:length(v)))
+	return orientation(v) ? [ (t[1], t[2], t[3]) for t in tri ] :
+	 [(t[1], t[3], t[2]) for t in tri ]
+end
 function triangulate(m::PolygonXor)#««
 	v = vertices(m)
 	id = identify_polygons(m)

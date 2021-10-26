@@ -986,12 +986,31 @@ stroke(points, width; kwargs...) = Stroke(points, width; kwargs...)
 
 Produces a surface with the given vertices.
 `faces` is a list of n-uples of indices into `vertices`.
-Only triangular faces are allowed now
-(non-triangular faces will be triangulated in a future release).
+
+Non-triangular faces are triangulated
+(by being first projected on the least-square fit plane).
 """
 function surface(vertices, faces)
-	# TODO: triangulate!
-	return Surface(vertices, faces, fill(_DEFAULT_PARAMETERS.color, size(faces)))
+	triangles = sizehint!(NTuple{3,Int}[], length(faces))
+	for f in faces
+		length(f) == 3 && (push!(triangles, (f[1], f[2], f[3])); continue)
+		# to triangulate, we project onto the least-squares fit plane:
+		a = float.(sum(vertices[i]*vertices[i]' for i in f))
+		# The first eigenvector corresponds to the smallest eigenvalue:
+		# (and has approximately unit norm)
+		w = SVector{3}(eigvecs(a)[:,1])
+		v = abs(w[1]) < abs(w[2]) ?
+			(abs(w[1]) < abs(w[3]) ? SA[0,w[3],-w[2]] : SA[w[2],-w[1],0]) :
+			(abs(w[2]) < abs(w[3]) ? SA[w[3],0,-w[1]] : SA[w[2],-w[1],0])
+		u = cross(v, w)
+		v = cross(w, u)
+		# orientation-preserving triangulation:
+		tri = Shapes.triangulate([
+			SA[dot(u,vertices[i]), dot(v,vertices[i])] for i in f ])
+		push!(triangles, tri...)
+	end
+	return Surface(vertices, triangles,
+		fill(_DEFAULT_PARAMETERS.color, size(faces)))
 end
 
 # CSG operations««1
@@ -1077,9 +1096,13 @@ Shorthand for `setdiff(union(a...), union(b...))`.
 # Convex hull««2
 """
     hull(s::AbstractGeometry...)
-    hull(s::AbstractGeometry{2} | StaticVector{2}...)
+    hull(s::AbstractGeometry | StaticVector...)
 
-Represents the convex hull of given solids (and, possibly, points).
+Represents the convex hull of given solids (and, possibly, individual
+points).
+Mixing dimensions (and points) is allowed.
+
+TODO: for this operation in particular, applying a 2d->3d transform to 2d objects should be possible
 """
 @inline hull(s::AbstractGeometry{2}...) =
 	CSGHull{2}([unroll(t, Val.((:hull, :union))...) for t in s])

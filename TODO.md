@@ -1,6 +1,8 @@
 # By order of priority
  - [x] make a nice logo (threaded bolt? some variant of Julia logo?)
  - [ ] Minkowski sum in mixed dimensions
+ - [ ] triangulate faces of `Surface`
+   - [ ] detect non-planar faces
  - [x] update `iglwrap` and use latest version
    - [x] `loop`
    - [x] `minkowski_sum` (might need tetrahedralize)
@@ -12,7 +14,6 @@
  - [ ] `TriangleMeshes`: have a way to detect non-pwm meshes *and explain
    why*
    - [ ] fix meshes on stl import
-   - [ ] triangulate faces of `Surface`
  - [ ] also in 2d, regularize polygons (e.g. one backwards loop)
  - [x] libigl contains `offset_surface`
  - [x] `intersect_with_half_space`
@@ -28,6 +29,7 @@
    - [ ] this requires expanding the mesh types to include marked objects
    - [ ] as well as new syntax, e.g. `!object` or `mark()*object`
  - [ ] `text`
+   - [ ] use `Pango` for text and `FreeType` for fonts
  - [ ] move doc examples to `WGLMakie`
  - [ ] swept surfaces
  - [ ] swung surfaces (`path_extrude`)
