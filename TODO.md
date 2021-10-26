@@ -1,8 +1,13 @@
 # By order of priority
  - [x] make a nice logo (threaded bolt? some variant of Julia logo?)
+ - [x] allow 2d->3d transforms (and take account of these for Minkowski,
+   convex hull)
+ - [ ] add a parameter to circles, spheres and cylinders to mesh them as
+   circumscribed
+ - [ ] allow complement (for intersection)
+ - [ ] allow self-union (for fixing meshes)
  - [ ] Minkowski sum in mixed dimensions
- - [ ] triangulate faces of `Surface`
-   - [ ] detect non-planar faces
+ - [x] triangulate faces of `Surface`
  - [x] update `iglwrap` and use latest version
    - [x] `loop`
    - [x] `minkowski_sum` (might need tetrahedralize)
@@ -35,7 +40,7 @@
  - [ ] swung surfaces (`path_extrude`)
  - [ ] wrapped volumes
  - [ ] projection of hollow sphere does not work: replace the temporary
-   fix by something better
+   fix by something better (but this is likely Clipper's fault)
  - [ ] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
  - [ ] get a better syntax for transforms, e.g.
  `symmetrize = transform(axis,s->s ∪ mirror(axis,s))` ??

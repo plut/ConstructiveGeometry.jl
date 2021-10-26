@@ -48,7 +48,7 @@ that large circles have 32 sides (see below).
 
 ### Circles
 
-A circle of radius ``r`` is replaced by an inscribed ``n``-gon.
+A circle of radius ``r`` is approximated by an inscribed ``n``-gon.
 The deviation between the ideal circle and the ``n``-gon
 is the sagitta of the [circular
 segment](https://en.wikipedia.org/wiki/Circular_segment)
@@ -77,12 +77,27 @@ and ``\texttt{\textdollar fs=2}``, this gives
 
 Spheres are rendered as [Fibonacci
 spheres](http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/).
-This produces a more regular mesh than latitude-longitude grids.
+This produces a more regular mesh than latitude-longitude grids
+(in particular, the grid does not have singularities at the poles).
 
-```@docs
-ConstructiveGeometry.sphere_nvertices
-```
 
+A sphere is approximated by an inscribed polyhedron with ``n`` vertices.
+Such a polyhedron has ``2n-4`` triangular faces;
+the average area of a face is ``\frac{4π r^2}{2n-4} = \frac{2π r^2}{n-2}``,
+thus the average (squared) edge length is
+``d² ≈ (8π/√3) \frac{r^2}{n-2}``
+(according to the unit equilateral triangle area ``√3/4``).
+
+The sagitta for a chord of length ``d`` is given by
+``s/r = 1 - √{1-d^2/4r^2} ≈ (1-(1-d^2/8 r^2)) ≈ (π/√3)/(n-2)``.
+Hence we find
+
+``n ≈ 2 + (π/√3)/(\textt{max}(\texttt{precision},\textt{accuracy}/r))``.
+
+With the default values for `accuracy` and `precision`:
+ - small spheres have approximately ``2+18r`` vertices
+ (and always at least 6 vertices);
+ - large spheres have 365 vertices.
 
 
 ## Symmetry
@@ -92,12 +107,18 @@ the `symmetry` parameter allows forcing the number of vertices
 of a circle to be a multiple of a defined value
 (by rounding up, if needed, to a multiple of `symmetry`).
 
-# Mesh type for 2d objects
+# Mesh types and orientation
 
-2d objects are represented as the exclusive union (XOR)
-of simple-loop polygons.
+## Two-dimensional shapes
 
-# Mesh type for 3d objects
+Two-dimensional objects are represented as the exclusive union (XOR)
+of simple-loop polygons (using even-odd rule).
+Internally, direct loops (counter-clockwise) represent polygons,
+and retrograde loops (clockwise) represent holes.
 
-3d objects are represented as a triangle mesh,
+## Three-dimensional volumes
+
+Three-dimensional objects are represented as a triangle mesh,
 in a way compatible with LibIGL's functions.
+The triangles are oriented so that their normal vector points outside the
+volume of the object.

@@ -33,6 +33,30 @@ s = mult_matrix([1 0 0;0 1 0;0 .5 1])*cube(10);
 png("mult_matrix1", s); # hide
 ```
 ![a skewed cube](mult_matrix1.png)
+
+Only invertible affine transformations are supported.
+Transformations with a negative determinant will reverse the object
+(reverse the polygons, or reverse the faces of meshes)
+to preserve orientation.
+
+For non-invertible transformations, see [`project`](@ref).
+
+### Three-dimensional embeddings of two-dimensional objects
+As an exception, it is allowed to apply a (2d -> 3d) transformation
+to any three-dimensional object.
+The result of such a transformation is still two-dimensional
+(and will accordingly be rendered as a polygon),
+but the information about the embedding will be used when computing
+convex hull or Minkowski sum with a three-dimensional object.
+
+```@repl 0
+s = hull([30,0,0]+[1 0;0 1;.5 0]*circle(20), [0,0,30]);
+png("embed_2d_3d", s); # hide
+```
+![convex hull of a non-canonically embedded circle and a point](embed_2d_3d.png)
+
+
+
 ```@docs
 translate
 ```
@@ -111,7 +135,18 @@ png("rotate_extrude", s); # hide
 ```@docs
 path_extrude
 ```
-## Slicing
+## 3d → 2d transformations: slicing and projection
+
+Slicing and projection convert a volume to a shape.
+These transformations are only defined with respect to horizontal planes,
+since these are the only planes in which canonical `(x,y)` coordinates
+are defined.
+
+To use another plane, say the image of the horizontal plane by a rotation
+`R`, apply the inverse rotation of `R` to the object to bring the
+situation back to the horizontal plane.
+
+### `slice`
 ```@docs
 slice
 ```
@@ -120,6 +155,8 @@ s = slice()*setdiff(sphere(20),sphere(18));
 png("slice", s); # hide
 ```
 ![example: slicing a hollow sphere](slice.png)
+
+### `project`
 ```@docs
 project
 ```
@@ -138,6 +175,10 @@ png("halfspace", s); # hide
 ![example: one half of a hollow sphere](halfspace.png)
 
 ## Decimation
+
+These operations either reduce or increase the number of faces in
+a three-dimensional object.
+
 ```@docs
 decimate
 ```

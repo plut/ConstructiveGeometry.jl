@@ -9,6 +9,9 @@ using CairoMakie
 png(name, s) = save(name*".png", Makie.plot(s));
 ```
 
+`ConstructiveGeometry.jl` supports two basic families of objects:
+two-dimensional shapes and three-dimensional volumes.
+
 ## Two-dimensional objects
 ### Square
 ```@docs

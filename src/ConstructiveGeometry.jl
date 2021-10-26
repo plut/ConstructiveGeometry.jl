@@ -89,17 +89,30 @@ end
 @inline AffineMap(a; center=nothing) = _affine_map_center(a, center)
 @inline _affine_map_center(a, ::Nothing) = LinearMap(a)
 @inline _affine_map_center(a, c) = AffineMap(a, a*c-c)
-@inline linear(f::AbstractAffineMap, x) = f.a*x
-@inline linear(f::TranslationMap, x) = x
-@inline translate(f::AbstractAffineMap, x) = x+f.b
+
+@inline linearpart(f::AbstractAffineMap) = f.a
+@inline linearpart(f::TranslationMap) = true
+@inline translate(f::AbstractAffineMap, x) = x + f.b
 @inline translate(f::LinearMap, x) = x
-@inline affine(f::AbstractAffineMap, x) = translate(f, linear(f, x))
+
+@inline affine(f::AbstractAffineMap, x) = translate(f, linearpart(f)*x)
+@inline compose(f::AbstractAffineMap, g::AbstractAffineMap) =
+	AffineMap(linearpart(f)*linearpart(g), translate(f, linearpart(f)*g.b))
+@inline compose(f::AbstractAffineMap, g::LinearMap) =
+	AffineMap(linearpart(f)*linearpart(g), f.b)
+@inline compose(f::LinearMap, g::LinearMap) =
+	LinearMap(linearpart(f)*linearpart(g))
 @inline (f::AbstractAffineMap)(x) = affine(f,x)
 
+@inline is2d(f::AbstractAffineMap) =
+	size(linearpart(f)) == (2,2) ||
+	(size(linearpart(f)) == () && size(f.b) == (2,))
+@inline is2d(f::LinearMap) =
+	size(linearpart(f)) == (2,2) || size(linearpart(f)) == ()
+@inline Base.size(f::AbstractAffineMap) = size(linearpart(f))
 @inline signdet(a::Number) = sign(a)
 @inline signdet(a::AbstractMatrix) = sign(det(a))
-@inline signdet(f::AbstractAffineMap) = signdet(f.a)
-@inline signdet(f::TranslationMap) = +1
+@inline signdet(f::AbstractAffineMap) = signdet(linearpart(f))
 @inline det(::Rotations.Rotation{D,T}) where{D,T} = one(T)
 
 # Reflection matrices««1
@@ -172,7 +185,7 @@ as points with coordinates of type `T`, while avoiding using too many
 trigonometric computations.
 """
 function unit_n_gon(r::T, n::Int) where{T<:Real}
-	ω = cis(2π/n) # exp(2iπ/n)
+	ω = cispi(2/n) # exp(2iπ/n)
 	z = Vector{Complex{T}}(undef, n)
 	z[1] = one(T)
 	# TODO: use 2-fold, 4-fold symmetry if present
@@ -201,18 +214,6 @@ end
 
 Returns the number `n` of points on a sphere according to these
 parameters.
-
-This produces n points on the sphere, hence 2n-4 triangular faces
-(genus 0). Average area of a triangular face is 4πr²/(2n-4)=2πr²/(n-2),
-hence square of edge length is d²≈ (8π/√3) r²/(n-2).
-(unit equilateral triangle area: A=√3d²/4, i.e. d²=(4/√3)A).
-
-Sagitta is given by
-s/r = 1-√{1-d²/4r²}
-≈ 1-(1-d²/8 r²)
-≈ 1-(1-(π/√3)/(n-2))
-≈ (π/√3)/(n-2).
-Hence n ≈ 2 + (π/√3)/(precision).
 
 """
 function sphere_nvertices(r::Real, parameters)
@@ -370,21 +371,29 @@ abstract type AbstractMesh{D,T} <: AbstractGeometryCoord{D,T} end
 include("scad.jl")
 # 2d primitives««1
 # Explicit case: PolygonXor««2
+struct StandardPosition end
+# standard 2d → 3d injection:
+@inline affine(::StandardPosition,v::SVector{2}) = SA[v[1],v[2],0]
+@inline compose(f, ::StandardPosition) = f
+
 """
     PolygonXor{T}
 
 The exclusive union of a number of simple, closed polygons.
 """
-struct PolygonXor{T} <: AbstractMesh{2,T}
-	# this encapsulates
+struct PolygonXor{T,P} <: AbstractMesh{2,T}
+	# encapsulates the following as an AbstractGeometry object:
 	poly::Shapes.PolygonXor{T}
-	@inline PolygonXor(s::Shapes.PolygonXor{T}) where{T} = new{T}(s)
+	# plus a 2d -> 3d transform:
+	position::P
+	@inline PolygonXor(s::Shapes.PolygonXor{T}, f::A=StandardPosition()) where{T,A} = new{T,A}(s, f)
 end
 
 @inline polygon_xor(::Mesh{T}, args...) where{T} =
 	PolygonXor(Shapes.PolygonXor{T}(args...))
 @inline poly(s::PolygonXor) = s.poly
 @inline paths(s::PolygonXor) = poly(s).paths
+@inline position(s::PolygonXor) = s.position
 @inline vertices(s::PolygonXor) = Shapes.vertices(poly(s))
 @inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
 	PolygonXor(Shapes.clip(t, poly.(l)...))
@@ -597,8 +606,7 @@ end
 	polygon_xor(g, convex_hull(reduce(vcat, vertices.(g.(children(s))))))
 
 @inline vertices3(m::Surface) = vertices(m)
-@inline vertices3(m::PolygonXor) =
-	(SA[p[1], p[2], 0] for p in Shapes.vertices(m.poly))
+@inline vertices3(s::PolygonXor) = (affine(position(s), v) for v in vertices(s))
 
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	v = SVector{3,T}[]
@@ -632,7 +640,7 @@ end
 function (g::Mesh)(s::AffineTransform{3})
 	# FIXME what to do if signdet(s.f) == 0 ?
 	d = signdet(s.f)
-	iszero(d)&&error("Only invertible linear transforms are supported (for now)")
+	iszero(d) && throw(SingularException(3))
 	m = g(s.child)
 	return Surface(s.f.(vertices(m)),
 		d > 0 ? faces(m) : reverse.(faces(m)),
@@ -640,11 +648,16 @@ function (g::Mesh)(s::AffineTransform{3})
 end
 
 function (g::Mesh)(s::AffineTransform{2})
-	d = signdet(s.f)
-	iszero(d)&&error("Only invertible linear transforms are supported (for now)")
-	m = g(s.child)
-	return polygon_xor(g,
-		[ d > 0 ? s.f.(p) : reverse(s.f.(p)) for p in paths(m) ])
+	if is2d(s.f)
+		d = signdet(s.f)
+		iszero(d)&& throw(SingularException(2))
+		m = g(s.child)
+		return polygon_xor(g,
+			[ d > 0 ? s.f.(p) : reverse(s.f.(p)) for p in paths(m) ])
+	else
+		m = g(s.child)
+		return PolygonXor(poly(m), compose(s.f, position(m)))
+	end
 end
 
 # Project and slice (TODO)««2
