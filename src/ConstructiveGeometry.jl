@@ -944,8 +944,8 @@ A sphere with diameter `r`, centered at the origin.
 
 # Cylinders and cones««2
 """
-    cylinder(h, r1, r2 [, center=false])
-    cylinder(h, (r1, r2) [, center=false])
+#     cylinder(h, r1, r2 [, center=false])
+#     cylinder(h, (r1, r2) [, center=false])
     cylinder(h, r [, center=false])
 
 A cylinder (or cone frustum)
@@ -953,8 +953,9 @@ with basis centered at the origin, lower radius `r1`, upper radius `r2`,
 and height `h`.
 
 **Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
-not `(h,r,0)` as in OpenSCAD.
+not `(h,r,0)` as in OpenSCAD. For a cone, using `(cone(h,r))` instead is recommended.
 
+FIXME: currently only `cylinder(h,r)` works (the general case needs scaled extrusion).
 """
 @inline cylinder(h::Real, r::Real) = linear_extrude(h)*circle(r)
 
@@ -1023,7 +1024,7 @@ function surface(vertices, faces)
 		push!(triangles, tri...)
 	end
 	return Surface(vertices, triangles,
-		fill(_DEFAULT_PARAMETERS.color, size(faces)))
+		fill(_DEFAULT_PARAMETERS.color, size(triangles)))
 end
 
 # CSG operations««1

@@ -20,7 +20,7 @@ m = union(
 save("logo.png", Makie.plot(m))
 ```
 
-# Quick-start
+# Overview
 
 This package defines three kinds of abstract geometric objects
 (in either two or three dimensions):

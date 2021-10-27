@@ -102,9 +102,9 @@ png("sphere", s); # hide
 surface(::Any,::Any)
 ```
 ```@repl 0
-s = surface([[0,0,0],[10,0,0],[10,10,0],[0,10,0],[5,5,5]],
-  [(1,2,5),(2,3,5),(3,4,5),(4,1,5),(2,1,3),(4,3,1)]);
+s = surface([[0,0,0],[10,0,0],[10,10,0],[0,10,0],[5,5,2]],
+  [(1,2,5),(2,3,5),(3,4,5),(4,1,5),(4,3,2,1)]);
 png("surface",s); # hide
 ```
-![example: a surface](surface.png)
+![example: a pyramidal surface](surface.png)
 

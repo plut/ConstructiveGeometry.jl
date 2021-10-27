@@ -91,12 +91,10 @@ thus the average (squared) edge length is
 The sagitta for a chord of length ``d`` is given by
 ``s/r = 1 - √{1-d^2/4r^2} ≈ (1-(1-d^2/8 r^2)) ≈ (π/√3)/(n-2)``.
 Hence we find
-
 ``n ≈ 2 + (π/√3)/(\textt{max}(\texttt{precision},\textt{accuracy}/r))``.
 
 With the default values for `accuracy` and `precision`:
- - small spheres have approximately ``2+18r`` vertices
- (and always at least 6 vertices);
+ - small spheres have approximately ``2+18r`` vertices (and always at least 6 vertices);
  - large spheres have 365 vertices.
 
 
