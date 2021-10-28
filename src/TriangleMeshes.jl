@@ -2,6 +2,7 @@ module TriangleMeshes
 using StaticArrays
 using FastClosures
 using IGLWrap_jll
+libiglwrap="/home/jerome/src/iglwrap/local/libiglwrap.so"
 
 # Data type ««1
 @inline det(a::SVector{2}, b::SVector{2}) = a[1]*b[2]-a[2]*b[1]
@@ -33,7 +34,6 @@ const CTriangleMesh = TriangleMesh{Cdouble}
 
 # IGL interface ««1
 
-# libiglwrap="../iglwrap/local/libiglwrap.so"
 @inline vpointer(m::TriangleMesh{Cdouble}) =
 	convert(Ptr{Cdouble}, pointer(m.vertices))
 @inline fpointer(m::TriangleMesh) = convert(Ptr{Cint}, pointer(m.faces))
@@ -71,7 +71,31 @@ function minkowski_sum(m1::CTriangleMesh{A}, m2::CTriangleMesh{A}) where{A}#««
 		vpointer(m2)::Ref{Cdouble}, fpointer(m2)::Ref{Cint}, 3::Cint,
 		nvo::Ref{Cint}, nfo::Ref{Cint},
 		vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}}, j::Ref{Ptr{Cint}})::Cint
-	println((nvo[], nfo[]))
+	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
+	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
+	index = unsafe_wrap(Array, j[], (Int(nfo[]),2); own=true);
+	ao = fill(first(attributes(m1)), size(index))
+# 	return (rvo, rfo, index)
+	return CTriangleMesh{A}(rvo, rfo, fill(first(m1.attributes), length(rfo)))
+# 	ao = [ i ≤ n ? m1.attributes[i] : m2.attributes[i-n] for i in index ]
+# 	return (CTriangleMesh{A}(rvo, rfo, ao), index)
+end#»»
+function minkowski_sum(m1::CTriangleMesh{A}, v2::Vector{Point},
+		e2::Vector{NTuple{2,Cint}}) where{A}#««
+	n = nfaces(m1)
+	nvo = Ref(Cint(0))
+	nfo = Ref(Cint(0))
+	vo = Ref(Ptr{Cdouble}(0))
+	fo = Ref(Ptr{Cint}(0))
+	j = Ref(Ptr{Cint}(0));
+	r = @ccall libiglwrap.minkowski_sum(
+		nvertices(m1)::Cint, nfaces(m1)::Cint,
+		vpointer(m1)::Ref{Cdouble}, fpointer(m1)::Ref{Cint},
+		length(v2)::Cint, length(e2)::Cint,
+		pointer(v2)::Ptr{Cdouble}, pointer(e2)::Ptr{NTuple{2,Cint}},
+		2::Cint,
+		nvo::Ref{Cint}, nfo::Ref{Cint},
+		vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}}, j::Ref{Ptr{Cint}})::Cint
 	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
 	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
 	index = unsafe_wrap(Array, j[], (Int(nfo[]),2); own=true);

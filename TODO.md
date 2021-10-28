@@ -2,17 +2,17 @@
  - [x] make a nice logo (threaded bolt? some variant of Julia logo?)
  - [x] allow 2d->3d transforms (and take account of these for Minkowski,
    convex hull)
- - [ ] add a parameter to circles, spheres and cylinders to mesh them as
-   circumscribed
+ - [x] Minkowski sum in mixed dimensions
  - [ ] allow complement (for intersection)
  - [ ] allow self-union (for fixing meshes)
- - [ ] Minkowski sum in mixed dimensions
  - [x] triangulate faces of `Surface`
  - [x] update `iglwrap` and use latest version
    - [x] `loop`
    - [x] `minkowski_sum` (might need tetrahedralize)
    - [ ] `upsample` (only useful once we have deformations)
    - [ ] `swept_volume`
+ - [ ] add a parameter to circles, spheres and cylinders to mesh them as
+   circumscribed
  - [x] Minkowski sum for holed polygons: slice a connected, holed polygon
    as an almost-simple loop (by connecting outer + inner paths)
    and call binary Minkowski sum
@@ -22,6 +22,9 @@
  - [ ] also in 2d, regularize polygons (e.g. one backwards loop)
  - [x] libigl contains `offset_surface`
  - [x] `intersect_with_half_space`
+ - [ ] add some way of marking individual objects
+   - [ ] this requires expanding the mesh types to include marked objects
+   - [ ] as well as new syntax, e.g. `!object` or `mark()*object`
  - [x] half-space intersection
   - [ ] clarify parameters for `halfspace`
   - [ ] overload `left_half` etc. for 2d children
@@ -30,9 +33,6 @@
  - [ ] overload `color*object` for `color::Colorant`
  - [x] add examples (with images) in documentation
  - [x] clarify priority: `linear_extrude(8)*(5*object)`
- - [ ] add some way of marking individual objects
-   - [ ] this requires expanding the mesh types to include marked objects
-   - [ ] as well as new syntax, e.g. `!object` or `mark()*object`
  - [ ] `text`
    - [ ] use `Pango` for text and `FreeType` for fonts
  - [ ] move doc examples to `WGLMakie`
@@ -55,6 +55,8 @@
    of `extrude`, e.g. `extrude(90°)`; likewise, use `cospi` and `sinpi`
    - [ ] `using Unitful.°` is probably (almost) enough
  - [ ] compute center of gravity (and use it for scaling etc.)
+ - [ ] `color`: add more properties (e.g. shininess) to be able to show
+   e.g. metal parts
  - [ ] find some way of referencing parts of objects,
  e.g. `cylinder().edge(:top)` references the top edge,
  and have it accessible through CSG hierarchy

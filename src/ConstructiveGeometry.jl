@@ -447,6 +447,8 @@ A surface delimited by the given faces.
 struct Surface{T,A} <: AbstractMesh{3,T}
 	mesh::TriangleMesh{T,A}
 	@inline Surface(m::TriangleMesh{T,A}) where{T,A} = new{T,A}(m)
+	@inline Surface{T}(points, faces, attr::A) where{T,A} =
+		new{T,A}(TriangleMesh{T,A}(points, faces, fill(attr, size(faces))))
 	@inline Surface(points::AbstractVector{<:AbstractVector{T}}, faces,
 		attrs::AbstractVector{A} = Nothing[]) where{T,A} =
 		new{T,A}(TriangleMesh{T,A}(points, faces, attrs))
@@ -460,7 +462,8 @@ end
 @inline faces(s::Surface) = TriangleMeshes.faces(s.mesh)
 @inline attributes(s::Surface) = TriangleMeshes.attributes(s.mesh)
 
-@inline triangle_mesh(g::Mesh, points, faces) = Surface(points, faces, g.color)
+@inline triangle_mesh(g::Mesh{T}, points, faces) where{T} =
+	Surface{T}(points, faces, g.color)
 @inline (g::Mesh)(s::Surface) = triangle_mesh(g, vertices(s), faces(s))
 
 @inline scad_info(s::Surface) =
@@ -615,19 +618,30 @@ function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	return triangle_mesh(g, p, f)
 end
 
-# Minkowski sum and difference (TODO)««2
+# Minkowski sum and difference««2
 # Minkowski sum in unequal dimensions is allowed;
 # we place the higher-dimensional summand first,
 # and its dimension is equal to the dimension of the sum:
-struct Minkowski{D,D2} <: AbstractGeometry{D}
+struct MinkowskiSum{D,D2} <: AbstractGeometry{D}
 	first::AbstractGeometry{D}
 	second::AbstractGeometry{D2}
 end
 
-@inline (g::Mesh)(s::Minkowski{2,2}) =
+@inline (g::Mesh)(s::MinkowskiSum{2,2}) =
 	PolygonXor(Shapes.minkowski_sum(g(s.first).poly, g(s.second).poly))
-@inline (g::Mesh)(s::Minkowski{3,3}) =
+@inline (g::Mesh)(s::MinkowskiSum{3,3}) =
 	Surface(TriangleMeshes.minkowski_sum(g(s.first).mesh, g(s.second).mesh))
+function (g::Mesh)(s::MinkowskiSum{3,2})
+	m2 = g(s.second)
+	e2 = sizehint!(NTuple{2,Cint}[], length(vertices(m2)))
+	c = 0
+	for p in paths(m2)
+		n = length(p)
+		push!(e2, (c+n, c+1), ((i, i+1) for i in c+1:c+n-1)...)
+		c+= n
+	end
+	Surface(TriangleMeshes.minkowski_sum(g(s.first).mesh, [vertices3(m2)...], e2))
+end
 # Transformations««1
 abstract type AbstractTransform{D} <: AbstractGeometry{D} end
 # AffineTransform««2
@@ -1148,15 +1162,16 @@ function hull(s::Union{AbstractGeometry,AbstractVector}...)
 end
 # Minkowski««2
 """
-    minkowski(s::AbstractGeometry...)
+    minkowski(s1::AbstractGeometry, s2::AbstractGeometry)
 
 Represents the Minkowski sum of given solids.
-This is currently implemented only for 2d objects.
+Mixing dimensions is allowed (and returns a three-dimensional object).
 """
-@inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{2}) =
-	Minkowski{2,2}(a, b)
-@inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{3}) =
-	Minkowski{3,3}(a, b)
+@inline minkowski(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	MinkowskiSum{D,D}(a, b)
+@inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
+	MinkowskiSum{3,2}(a,b)
+@inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{3})=minkowski(b,a)
 
 # Transformations««1
 # Transform type««2
