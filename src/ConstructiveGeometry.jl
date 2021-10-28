@@ -75,45 +75,40 @@ const ° = 1.
 @inline degrees(x::Angle) = x
 @inline degrees(x::AnyAngle) = degrees(Angle(x))
 # Affine transformations««1
-abstract type AbstractAffineMap end
-struct AffineMap{A,B} <: AbstractAffineMap
+struct AffineMap{A,B}
 	a::A
 	b::B
 end
-struct LinearMap{A} <: AbstractAffineMap
-	a::A
-end
-struct TranslationMap{B} <: AbstractAffineMap
-	b::B
-end
-@inline AffineMap(a; center=nothing) = _affine_map_center(a, center)
-@inline _affine_map_center(a, ::Nothing) = LinearMap(a)
-@inline _affine_map_center(a, c) = AffineMap(a, a*c-c)
 
-@inline linearpart(f::AbstractAffineMap) = f.a
-@inline linearpart(f::TranslationMap) = true
-@inline translate(f::AbstractAffineMap, x) = x + f.b
-@inline translate(f::LinearMap, x) = x
+struct ZeroVector end # additive pendant of UniformScaling
++(a, ::ZeroVector) = a
++(::ZeroVector, a) = a
+-(z::ZeroVector) = z
+-(a,::ZeroVector) = a
+*(_, z::ZeroVector) = z
+*(z::ZeroVector, _) = z
+SVector{N}(::ZeroVector) where{N} = zero(SVector{N})
 
-@inline affine(f::AbstractAffineMap, x) = translate(f, linearpart(f)*x)
-@inline compose(f::AbstractAffineMap, g::AbstractAffineMap) =
-	AffineMap(linearpart(f)*linearpart(g), translate(f, linearpart(f)*g.b))
-@inline compose(f::AbstractAffineMap, g::LinearMap) =
-	AffineMap(linearpart(f)*linearpart(g), f.b)
-@inline compose(f::LinearMap, g::LinearMap) =
-	LinearMap(linearpart(f)*linearpart(g))
-@inline (f::AbstractAffineMap)(x) = affine(f,x)
+# identify size of matrices
+@inline hassize(a::AbstractMatrix, s) = size(a) == s
+@inline hassize(::UniformScaling, s) = true
+@inline hassize(::ZeroVector, s) = true
+@inline hassize(f::AffineMap, (m,n)) = hassize(f.a,(m,n)) && hassize(f.b,(m,))
 
-@inline is2d(f::AbstractAffineMap) =
-	size(linearpart(f)) == (2,2) ||
-	(size(linearpart(f)) == () && size(f.b) == (2,))
-@inline is2d(f::LinearMap) =
-	size(linearpart(f)) == (2,2) || size(linearpart(f)) == ()
-@inline Base.size(f::AbstractAffineMap) = size(linearpart(f))
-@inline signdet(a::Number) = sign(a)
-@inline signdet(a::AbstractMatrix) = sign(det(a))
-@inline signdet(f::AbstractAffineMap) = signdet(linearpart(f))
-@inline det(::Rotations.Rotation{D,T}) where{D,T} = one(T)
+@inline signdet(a::UniformScaling, d) = iszero(a.λ) ? 0 : iseven(d) ? +1 : a.λ
+@inline signdet(a::AbstractMatrix, _) = det(a)
+
+@inline _affine_map_center(a, c=ZeroVector()) = AffineMap(a, a*c-c)
+
+SAffineMap2{T} = AffineMap{SMatrix{2,2,T,4},SVector{2,T}}
+SAffineMap3{T} = AffineMap{SMatrix{3,3,T,9},SVector{3,T}}
+(A::Type{<:SAffineMap3{T}})(u::UniformScaling) where{T}=
+	A(SMatrix{3,3,T}(u), zero(SVector{3,T}))
+SAffineMap3(f::AffineMap) =
+	AffineMap(SMatrix{3,3}(f.a), SVector{3}(f.b))
+
+@inline compose(f::AffineMap, g::AffineMap) = AffineMap(f.a*g.a, f.a*g.b+f.b)
+(f::AffineMap)(v::AbstractVector) = f.a*v + f.b
 
 # Reflection matrices««1
 """
@@ -371,22 +366,18 @@ abstract type AbstractMesh{D,T} <: AbstractGeometryCoord{D,T} end
 include("scad.jl")
 # 2d primitives««1
 # Explicit case: PolygonXor««2
-struct StandardPosition end
-# standard 2d → 3d injection:
-@inline affine(::StandardPosition,v::SVector{2}) = SA[v[1],v[2],0]
-@inline compose(f, ::StandardPosition) = f
-
 """
     PolygonXor{T}
 
 The exclusive union of a number of simple, closed polygons.
 """
-struct PolygonXor{T,P} <: AbstractMesh{2,T}
+struct PolygonXor{T} <: AbstractMesh{2,T}
 	# encapsulates the following as an AbstractGeometry object:
 	poly::Shapes.PolygonXor{T}
 	# plus a 2d -> 3d transform:
-	position::P
-	@inline PolygonXor(s::Shapes.PolygonXor{T}, f::A=StandardPosition()) where{T,A} = new{T,A}(s, f)
+	position::SAffineMap3{T}
+	@inline PolygonXor(s::Shapes.PolygonXor{T}, f=SAffineMap3{T}(I)) where{T} =
+		new{T}(s, f)
 end
 
 @inline polygon_xor(::Mesh{T}, args...) where{T} =
@@ -395,8 +386,8 @@ end
 @inline paths(s::PolygonXor) = poly(s).paths
 @inline position(s::PolygonXor) = s.position
 @inline vertices(s::PolygonXor) = Shapes.vertices(poly(s))
-@inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
-	PolygonXor(Shapes.clip(t, poly.(l)...))
+# @inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
+# 	PolygonXor(Shapes.clip(t, poly.(l)...))
 
 @inline function (g::Mesh)(m::PolygonXor)
 	polygon_xor(g, paths(m)...)
@@ -524,33 +515,93 @@ end
 constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
 	ConstructedSolid{S,T(AbstractGeometry{D}),D} where{D}
 
+# Complement««2
+# It would be possible in theory to represent complementation as a
+# reversed mesh. However, the only reasonable fill-rule in `Clipper.jl`
+# (`positive`) understands a clockwise loop as an empty polygon (because
+# all points have either 0 or -1 as a winding number). A way to solve
+# this (which Clipper does not implement) would be to affect winding
+# number +1 to the point at infinity.
+#
+# So we must instead represent complementation symbolically,
+# using the Boolean rules:
+# ~(~A) = A
+# A ∩ (~B) = A ∖ B
+# (~A) ∩ (~B) = ~(A ∪ B)
+# A ∪ (~B) = ∼(B ∖ A)
+# (~A) ∪ (~B) = ~(A ∩ B)
+# (~A) ∪ (~B) = A ⊕ (~B) = A ⊕ B
+#
+# This means that ad-hoc rules are defined for complements (see below),
+# so we need CSGComplement to be defined before the other types.
+CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
+iscomplement(::CSGComplement) = true
+iscomplement(::AbstractGeometry) = false
+@inline (g::Mesh)(s::CSGComplement) = g(first(children(s)))
+
 # Union««2
 CSGUnion = constructed_solid_type(:union)
-@inline (g::Mesh)(s::CSGUnion{2}) = clip(:union, g.(s.children)...)
-@inline (g::Mesh)(s::CSGUnion{3}) = reduce(csgunion, g.(s.children))
+@inline function (g::Mesh)(s::CSGUnion)
+	isempty(children(s)) && return EmptyUnion() # FIXME
+	(head, tail...) = children(s)
+	m1,i1 = (g(head), iscomplement(head))
+	for x in tail
+		m2,i2 = (g(x), iscomplement(x))
+		if i1
+			# (~A) ∪ (~B) = ~(A ∩ B): i1 ← true, m1 ← m1 ∩ m2
+			# (~A) ∪ B = ~(A ∖ B): i1 ← true, m1 ← m1∖m2
+			m1 = i2 ? csginter(m1,m2) : csgdiff(m1,m2)
+		else
+			(m1,i1) = i2 ? (csgdiff(m2,m1), true) : (csgunion(m1,m2), false)
+		end
+	end
+	return m1
+end
+
+# @inline (g::Mesh)(s::CSGUnion{2}) = clip(:union, g.(s.children)...)
+# @inline (g::Mesh)(s::CSGUnion{3}) = reduce(csgunion, g.(s.children))
 @inline csgunion(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
+@inline csgunion(s1::P, s2::P) where{P<:PolygonXor} =
+	PolygonXor(Shapes.clip(:union, s1.poly, s2.poly))
 
 # Intersection««2
 CSGInter = constructed_solid_type(:intersection)
-@inline (g::Mesh)(s::CSGInter{2})= clip(:intersection, g.(s.children)...)
-@inline (g::Mesh)(s::CSGInter{3}) = reduce(csginter, g.(s.children))
+# @inline (g::Mesh)(s::CSGInter{2})= clip(:intersection, g.(s.children)...)
+# @inline (g::Mesh)(s::CSGInter{3}) = reduce(csginter, g.(s.children))
 @inline csginter(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
+@inline csginter(s1::P, s2::P) where{P<:PolygonXor} =
+	PolygonXor(Shapes.clip(:intersection, s1.poly, s2.poly))
+@inline function (g::Mesh)(s::CSGInter)
+	isempty(children(s)) && return EmptyUnion() # FIXME
+	(head, tail...) = children(s)
+	m1,i1 = (g(head), iscomplement(head))
+	for x in tail
+		m2,i2 = (g(x), iscomplement(x))
+		if i1
+			# (~A) ∩ (~B) = ~(A ∪ B)
+			# (~A) ∩ B =  B∖A
+			(m1,i1) = i2 ? (csgunion(m1,m2), true) : (csgdiff(m2,m1), false)
+		else
+			# A ∩ (~B) = A∖B
+			m1 = i2 ? csgdiff(m1,m2) : csginter(m1,m2)
+		end
+	end
+	return m1
+end
 
 # Difference««2
 # this is a binary operator:
 CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
 
-@inline (g::Mesh)(s::CSGDiff{2}) =
-	clip(:difference, g(s.children[1]), g(s.children[2]))
-@inline (g::Mesh)(s::CSGDiff{3}) = csgdiff(g(s.children[1]), g(s.children[2]))
+# @inline (g::Mesh)(s::CSGDiff{2}) =
+# 	clip(:difference, g(s.children[1]), g(s.children[2]))
+# @inline (g::Mesh)(s::CSGDiff{3}) = csgdiff(g(s.children[1]), g(s.children[2]))
 @inline csgdiff(s1::S, s2::S) where {S<:Surface} =
 	Surface(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
-
-# Complement««2
-# TODO
-CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
+@inline csgdiff(s1::P, s2::P) where{P<:PolygonXor} =
+	PolygonXor(Shapes.clip(:difference, s1.poly, s2.poly))
 
 # Xor (used by extrusion) ««2
 @inline symdiff(s1::S, s2::S) where {S<:Surface} =
@@ -609,7 +660,7 @@ end
 	polygon_xor(g, convex_hull(reduce(vcat, vertices.(g.(children(s))))))
 
 @inline vertices3(m::Surface) = vertices(m)
-@inline vertices3(s::PolygonXor) = (affine(position(s), v) for v in vertices(s))
+@inline vertices3(s::PolygonXor) = (position(s)([v;0]) for v in vertices(s))
 
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	v = SVector{3,T}[]
@@ -650,15 +701,15 @@ end
 # Transformations««1
 abstract type AbstractTransform{D} <: AbstractGeometry{D} end
 # AffineTransform««2
-struct AffineTransform{D,A<:AbstractAffineMap} <: AbstractTransform{D}
-	f::A
+struct AffineTransform{D,A,B} <: AbstractTransform{D}
+	f::AffineMap{A,B}
 	child::AbstractGeometry{D}
 end
 # AffineTransform(f, child) constructor is defined
 
 function (g::Mesh)(s::AffineTransform{3})
 	# FIXME what to do if signdet(s.f) == 0 ?
-	d = signdet(s.f)
+	d = signdet(s.f.a, 3)
 	iszero(d) && throw(SingularException(3))
 	m = g(s.child)
 	return Surface(s.f.(vertices(m)),
@@ -667,15 +718,21 @@ function (g::Mesh)(s::AffineTransform{3})
 end
 
 function (g::Mesh)(s::AffineTransform{2})
-	if is2d(s.f)
-		d = signdet(s.f)
+	if hassize(s.f, (2,2))
+		d = signdet(s.f.a, 2)
 		iszero(d)&& throw(SingularException(2))
 		m = g(s.child)
 		return polygon_xor(g,
 			[ d > 0 ? s.f.(p) : reverse(s.f.(p)) for p in paths(m) ])
-	else
+	elseif hassize(s.f,(3,3))
 		m = g(s.child)
-		return PolygonXor(poly(m), compose(s.f, position(m)))
+		return PolygonXor(poly(m), compose(SAffineMap3(s.f), position(m)))
+	elseif hassize(s.f,(3,2)) # pad by one column:
+		m = g(s.child)
+		f = SAffineMap3(AffineMap([s.f.a SA[0;0;1]], s.f.b))
+		return PolygonXor(poly(m), compose(f, position(m)))
+	else
+		throw(DimensionMismatch("linear map * shape should have dimension (2,2) or (3,3)"))
 	end
 end
 
@@ -1126,6 +1183,8 @@ Shorthand for `setdiff(union(a...), union(b...))`.
 @inline setdiff(x::AbstractVector{<:AbstractGeometry},
                 y::AbstractVector{<:AbstractGeometry}) =
 	setdiff(union(x...), union(y...))
+
+@inline complement(x::AbstractGeometry{D}) where{D} = CSGComplement{D}((x,))
 # Convex hull««2
 """
     hull(s::AbstractGeometry...)
@@ -1370,7 +1429,7 @@ Represents the affine operation `x -> a*x + b`.
     (3 × n) matrix multiplications are replaced by
     (3 × 3) multiplications, followed by a single (3 × n).
 """
-@inline mult_matrix(a, s...; center=nothing) =
+@inline mult_matrix(a, s...; center=ZeroVector()) =
 	operator(AffineTransform, (_affine_map_center(a, center),), s...)
 # translate ««2
 """
@@ -1380,7 +1439,7 @@ Represents the affine operation `x -> a*x + b`.
 
 Translates solids `s...` by vector `v`.
 """
-@inline translate(a,s...)= operator(AffineTransform,(TranslationMap(a),), s...)
+@inline translate(v,s...)= operator(AffineTransform,(AffineMap(I,v),), s...)
 """
     raise(z, s...)
 
@@ -1407,7 +1466,7 @@ the invariant point.
 the associated diagonal matrix.
 """
 @inline scale(a,s...; kwargs...) = mult_matrix(scaling(a), s...; kwargs...)
-@inline scaling(a) = a
+@inline scaling(a::Real) = a*I
 @inline scaling(a::AbstractVector) = Diagonal(a)
 
 # mirror««2
@@ -1481,6 +1540,7 @@ TODO: more flexible syntax
 # overloading Julia operators««1
 # backslash replaces U+2216 ∖ SET MINUS, which is not an allowed Julia operator
 @inline Base.:\(x::AbstractGeometry, y::AbstractGeometry) = setdiff(x, y)
+@inline Base.:~(x::AbstractGeometry) = complement(x)
 @inline Base.:-(x::AbstractGeometry, y::AbstractGeometry,
 	tail::AbstractGeometry...) = setdiff(x, union(y, tail...))
 # this purposely does not define a method for -(x::AbstractGeometry).

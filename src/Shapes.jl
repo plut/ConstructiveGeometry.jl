@@ -101,7 +101,7 @@ const _CLIPPER_ENUM = (#««
 @inline function clip(op::Symbol,
 		v1::AbstractVector{Path{2,T}},
 		v2::AbstractVector{Path{2,T}};
-		fill = :evenodd)::Vector{Path{2,T}} where {T}
+		fill = :nonzero)::Vector{Path{2,T}} where {T}
 	c = Clipper.Clip()
 	Clipper.add_paths!(c, toc(v1), Clipper.PolyTypeSubject, true) # closed=true
 	Clipper.add_paths!(c, toc(v2), Clipper.PolyTypeClip, true)
@@ -315,8 +315,10 @@ function identify_polygons(s::PolygonXor)
 	return index
 end
 
-@inline clip(op, s::PolygonXor{T}...) where{T} =
-	reduce((p,q)->PolygonXor{T}(clip(op, paths(p), paths(q), fill=:evenodd)), s)
+@inline clip(op, p::P, q::P) where{P<:PolygonXor} =
+	P(clip(op, paths(p), paths(q), fill=:nonzero))
+# @inline clip(op, s::PolygonXor{T}...) where{T} =
+# 	reduce((p,q)->PolygonXor{T}(clip(op, paths(p), paths(q), fill=:nonzero)), s)
 
 @inline offset(s::PolygonXor{T}, r; kwargs...) where{T} =
 	PolygonXor{T}(offset(paths(s), r; kwargs...))
@@ -407,7 +409,7 @@ function minkowski_sum(m1::PolygonXor, m2::PolygonXor)#««
 	for p1 in m1c, p2 in m2c
 		# vector of paths
 		s = fromc(Clipper.minkowski_sum(toc(p1), toc(p2)))
-		s = PolygonXor(simplify_paths(s; fill=:evenodd))
+		s = PolygonXor(simplify_paths(s; fill=:nonzero))
 		result = (result == nothing) ? s : clip(:union, result, s);
 
 		# fill holes:

@@ -1,9 +1,14 @@
 # By order of priority
+ - [x] rewrite affine transforms
+   either use 3x3+3 matrices internally in all places (ugly)
+   or use any types of transform (Julia-esque) and instantiate on meshing
+    * decide size for 2d meshes
  - [x] make a nice logo (threaded bolt? some variant of Julia logo?)
  - [x] allow 2d->3d transforms (and take account of these for Minkowski,
    convex hull)
  - [x] Minkowski sum in mixed dimensions
- - [ ] allow complement (for intersection)
+ - [x] allow complement (for intersection)
+ - [ ] make meshing type-stable
  - [ ] allow self-union (for fixing meshes)
  - [x] triangulate faces of `Surface`
  - [x] update `iglwrap` and use latest version
@@ -30,6 +35,7 @@
   - [ ] overload `left_half` etc. for 2d children
  - [x] plane intersection: `slice`
  - [x] projection
+ - [ ] define a path type (for Minkowski + stroke) ?
  - [ ] overload `color*object` for `color::Colorant`
  - [x] add examples (with images) in documentation
  - [x] clarify priority: `linear_extrude(8)*(5*object)`

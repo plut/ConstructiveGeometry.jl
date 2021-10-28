@@ -50,7 +50,7 @@ but the information about the embedding will be used when computing
 convex hull or Minkowski sum with a three-dimensional object.
 
 ```@repl 0
-s = hull([30,0,0]+[1 0;0 1;.5 0]*circle(20), [0,0,30]);
+s = hull([30,0,0]+[1 0 0;0 1 0;.5 0 0]*circle(20), [0,0,30]);
 png("embed_2d_3d", s); # hide
 ```
 ![convex hull of a non-canonically embedded circle and a point](embed_2d_3d.png)
