@@ -631,16 +631,21 @@ end
 	PolygonXor(Shapes.minkowski_sum(g(s.first).poly, g(s.second).poly))
 @inline (g::Mesh)(s::MinkowskiSum{3,3}) =
 	Surface(TriangleMeshes.minkowski_sum(g(s.first).mesh, g(s.second).mesh))
-function (g::Mesh)(s::MinkowskiSum{3,2})
+function (g::Mesh{T})(s::MinkowskiSum{3,2}) where{T}
+	m1 = g(s.first).mesh
 	m2 = g(s.second)
-	e2 = sizehint!(NTuple{2,Cint}[], length(vertices(m2)))
-	c = 0
-	for p in paths(m2)
-		n = length(p)
-		push!(e2, (c+n, c+1), ((i, i+1) for i in c+1:c+n-1)...)
-		c+= n
-	end
-	Surface(TriangleMeshes.minkowski_sum(g(s.first).mesh, [vertices3(m2)...], e2))
+	tri = Shapes.triangulate(poly(m2))
+	v2 = vertices3(m2)
+# 	e2 = sizehint!(NTuple{2,Cint}[], length(vertices(m2)))
+# 	c = 0
+# 	for p in paths(m2)
+# 		n = length(p)
+# 		push!(e2, (c+n, c+1), ((i, i+1) for i in c+1:c+n-1)...)
+# 		c+= n
+# 	end
+	return Surface(TriangleMeshes.minkowski_sum(m1,
+		TriangleMesh{T}(collect(vertices3(m2)), tri, fill(first(m1.attributes), 0))))
+# 	[vertices3(m2)...], e2))
 end
 # Transformations««1
 abstract type AbstractTransform{D} <: AbstractGeometry{D} end
