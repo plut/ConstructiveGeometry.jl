@@ -13,16 +13,50 @@ png(name, s) = save(name*".png", Makie.plot(s));
 ```@docs
 union(::AbstractGeometry,::AbstractGeometry)
 ```
+```@repl 0
+s = union(cube(50), sphere(50));
+png("union", s); # hide
+```
+![example: union of a sphere and a cube](union.png)
+
 ```@docs
 intersect(::AbstractGeometry{D},::AbstractGeometry{D}) where{D}
 ```
+```@repl 0
+s = intersect(cube(50), sphere(50));
+png("intersection", s); # hide
+```
+![example: intersection of a sphere and a cube](intersection.png)
 ```@docs
 setdiff(::AbstractGeometry{D},::AbstractGeometry{D}) where{D}
 ```
+```@repl 0
+s = setdiff(cube(50), [50,0,0]+sphere(50));
+png("setdiff", s); # hide
+```
+![example: difference of a sphere and a cube](setdiff.png)
+```@docs
+complement
+```
+Complements are provided as a shortcut to simplify “subtractive”
+operations, *i.e.* chains of intersections and differences.
+See [Three-dimensional embeddings of two-dimensional objects](@ref embed).
+
 ## Convex hull
 ```@docs
 hull
 ```
+```@repl 0
+s = hull(cube(50), [50,0,0]+sphere(50));
+png("hull", s); # hide
+```
+![example: convex hull of a sphere and a cube](hull.png)
+
+In the case of mixed dimensions, two-dimensional objects are understood
+as included in the horizontal plane, unless they have been subjected
+to a three-dimensional affine transformation; in that case,
+this transformation is applied to their vertices.
+See [Three-dimensional embeddings of two-dimensional objects](@ref embed).
 
 ## Minkowski sum
 ```@docs

@@ -716,7 +716,7 @@ function (g::Mesh{T})(s::MinkowskiSum{3,2}) where{T}
 	m1 = g(s.first).mesh
 	m2 = g(s.second)
 	tri = Shapes.triangulate(poly(m2))
-	v2 = vertices3(m2)
+	v2 = collect(vertices3(m2))
 # 	e2 = sizehint!(NTuple{2,Cint}[], length(vertices(m2)))
 # 	c = 0
 # 	for p in paths(m2)
@@ -725,7 +725,7 @@ function (g::Mesh{T})(s::MinkowskiSum{3,2}) where{T}
 # 		c+= n
 # 	end
 	return VolumeMesh(TriangleMeshes.minkowski_sum(m1,
-		TriangleMesh{T}(collect(vertices3(m2)), tri, fill(first(m1.attributes), 0))))
+		TriangleMesh{T,MeshColor}(v2, tri, fill(first(m1.attributes), length(tri)))))
 # 	[vertices3(m2)...], e2))
 end
 # Transformations««1
@@ -1165,7 +1165,7 @@ symbols `sym1`, `sym2`..., `children(x)`.
 
 # Booleans««2
 """
-    union(a::AbstractGeometry{D}...)
+    union(a::AbstractGeometry...)
 
 Computes the union of several solids. The dimensions must match.
 """
@@ -1175,7 +1175,7 @@ Computes the union of several solids. The dimensions must match.
 	CSGUnion{D}(unroll2(a, b, Val(:union)))
 
 """
-    intersect(a::AbstractGeometry{D}...)
+    intersect(a::AbstractGeometry...)
 
 Computes the intersection of several solids.
 Mismatched dimensions are allowed; 3d solids will be intersected
@@ -1212,6 +1212,20 @@ Shorthand for `setdiff(union(a...), union(b...))`.
                 y::AbstractVector{<:AbstractGeometry}) =
 	setdiff(union(x...), union(y...))
 
+"""
+    complement(x::AbstractGeometry)
+    ~x
+
+Returns the complement of `x`, i.e. an object X such that y ∩ X = y ∖ x.
+
+!!! note "Warning: complement"
+
+    Complements are not supported for all operations.
+    They would typically not make sense for convex hulls,
+    and Minkowski differences are not implemented (yet).
+   For now they only work with Boolean operations: ∪, ∩, ∖.
+
+"""
 @inline complement(x::AbstractGeometry{D}) where{D} = CSGComplement{D}((x,))
 # Convex hull««2
 """
@@ -1221,8 +1235,6 @@ Shorthand for `setdiff(union(a...), union(b...))`.
 Represents the convex hull of given solids (and, possibly, individual
 points).
 Mixing dimensions (and points) is allowed.
-
-TODO: for this operation in particular, applying a 2d->3d transform to 2d objects should be possible
 """
 @inline hull(s::AbstractGeometry{2}...) =
 	CSGHull{2}([unroll(t, Val.((:hull, :union))...) for t in s])

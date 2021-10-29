@@ -58,8 +58,9 @@ its value is hence ``s = r(1-\cos(π/n)) ≈ \frac{π^2 r}{2 n^2}``.
 By definition, ``\texttt{accuracy} = s``
 while ``\texttt{precision} = s/r \approx \frac{π^2}{2 n^2}``.
 This gives
-
-``n = \min(π √{r/(2\texttt{accuracy})}, π/ √{\texttt{precision})}).``
+```math
+n = \min(π √{r/(2\texttt{accuracy})}, π/ √{\texttt{precision})}).
+```
 
 In addition, the number of sides is bounded below to always be at least 4.
 The number of sides thus increases as the square root of the radius,
@@ -91,7 +92,10 @@ thus the average (squared) edge length is
 The sagitta for a chord of length ``d`` is given by
 ``s/r = 1 - √{1-d^2/4r^2} ≈ (1-(1-d^2/8 r^2)) ≈ (π/√3)/(n-2)``.
 Hence we find
-``n ≈ 2 + (π/√3)/(\textt{max}(\texttt{precision},\textt{accuracy}/r))``.
+
+```math
+n ≈ 2 + (π/√3)/(\textt{max}(\texttt{precision},\textt{accuracy}/r)).
+```
 
 With the default values for `accuracy` and `precision`:
  - small spheres have approximately ``2+18r`` vertices (and always at least 6 vertices);

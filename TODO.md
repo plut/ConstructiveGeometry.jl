@@ -17,6 +17,8 @@
    - [ ] `upsample` (only useful once we have deformations)
    - [ ] `swept_volume`
    - [x] `centroid`
+ - [ ] `cylinder(..., center)`
+ - [ ] `cylinder(h, r1, r2)`
  - [ ] add a parameter to circles, spheres and cylinders to mesh them as
    circumscribed
  - [x] Minkowski sum for holed polygons: slice a connected, holed polygon
@@ -28,9 +30,9 @@
  - [ ] also in 2d, regularize polygons (e.g. one backwards loop)
  - [x] libigl contains `offset_surface`
  - [x] `intersect_with_half_space`
- - [ ] add some way of marking individual objects
-   - [ ] this requires expanding the mesh types to include marked objects
-   - [ ] as well as new syntax, e.g. `!object` or `mark()*object`
+ - [x] add some way of marking individual objects
+   - [x] this requires expanding the mesh types to include marked objects
+   - [x] as well as new syntax, e.g. `!object` or `mark()*object`
  - [x] half-space intersection
   - [ ] clarify parameters for `halfspace`
   - [ ] overload `left_half` etc. for 2d children

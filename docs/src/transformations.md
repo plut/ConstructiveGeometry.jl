@@ -41,7 +41,7 @@ to preserve orientation.
 
 For non-invertible transformations, see [`project`](@ref).
 
-### Three-dimensional embeddings of two-dimensional objects
+### [Three-dimensional embeddings of two-dimensional objects](@id embed)
 As an exception, it is allowed to apply a (2d -> 3d) transformation
 to any three-dimensional object.
 The result of such a transformation is still two-dimensional
@@ -206,7 +206,7 @@ color
 highlight
 ```
 ```@repl 0
-s = intersect(:green % cube(3), :red % sphere(3));
+s = intersect(:green % cube(10), :red % ([10,0,0]+sphere(10)));
 png("highlight", s); # hide
 ```
 ![example: intersection of a highlighted sphere and a highlighted cube](highlight.png)
