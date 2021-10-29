@@ -267,6 +267,7 @@ end
 @inline coordtype(s::PolygonXor) = coordtype(typeof(s))
 @inline paths(p::PolygonXor) = p.paths
 @inline vertices(p::PolygonXor) = reduce(vcat, paths(p))
+@inline simplify(p::P) where{P<:PolygonXor} = P(simplify_paths(paths(p)))
 
 """
     perimeters(::PolygonXor)

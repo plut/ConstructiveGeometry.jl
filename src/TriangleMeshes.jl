@@ -172,6 +172,18 @@ mutable struct Vec3d
 	y::Float64
 	z::Float64
 end
+function centroid_and_volume(m::CTriangleMesh)
+	nvo = Ref(Cint(0))
+	nfo = Ref(Cint(0))
+	vo = Ref(Ptr{Cdouble}(0))
+	fo = Ref(Ptr{Cint}(0))
+	c = Vec3d(0,0,0)
+	v = @ccall libiglwrap.centroid_and_volume(
+		nvertices(m)::Cint, nfaces(m)::Cint,
+		vpointer(m)::Ref{Cdouble}, fpointer(m)::Ref{Cint},
+		c::Ref{Vec3d})::Cdouble
+	return (SA[c.x,c.y,c.z], v)
+end
 function halfspace(direction, origin, m::CTriangleMesh{A}, color) where{A}
 	nvo = Ref(Cint(0))
 	nfo = Ref(Cint(0))
@@ -200,6 +212,7 @@ end
 @inline Base.symdiff(m1::CTriangleMesh, m2::CTriangleMesh) = boolean(3, m1, m2)
 
 # Own functions ««1
+
 
 """
     plane_slice(m::TriangleMesh)

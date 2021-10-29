@@ -9,13 +9,14 @@
  - [x] Minkowski sum in mixed dimensions
  - [x] allow complement (for intersection)
  - [x] make meshing type-stable
- - [ ] allow self-union (for fixing meshes)
+ - [x] allow self-union (for fixing meshes)
  - [x] triangulate faces of `Surface`
  - [x] update `iglwrap` and use latest version
    - [x] `loop`
    - [x] `minkowski_sum` (might need tetrahedralize)
    - [ ] `upsample` (only useful once we have deformations)
    - [ ] `swept_volume`
+   - [x] `centroid`
  - [ ] add a parameter to circles, spheres and cylinders to mesh them as
    circumscribed
  - [x] Minkowski sum for holed polygons: slice a connected, holed polygon
@@ -23,7 +24,7 @@
    and call binary Minkowski sum
  - [ ] `TriangleMeshes`: have a way to detect non-pwm meshes *and explain
    why*
-   - [ ] fix meshes on stl import
+   - [ ] fix meshes on stl import: *a bit harder, IGL does not have a function for this*
  - [ ] also in 2d, regularize polygons (e.g. one backwards loop)
  - [x] libigl contains `offset_surface`
  - [x] `intersect_with_half_space`

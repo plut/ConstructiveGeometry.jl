@@ -558,6 +558,8 @@ function (g::Mesh)(s::CSGUnion)::MeshType(g,s)
 	return m1
 end
 
+@inline self_union(m::PolygonXor) = PolygonXor(Shapes.simplify(poly(m)))
+@inline self_union(m::Surface) = csgunion(m, m)
 # @inline (g::Mesh)(s::CSGUnion{2}) = clip(:union, g.(s.children)...)
 # @inline (g::Mesh)(s::CSGUnion{3}) = reduce(csgunion, g.(s.children))
 @inline csgunion(s1::S, s2::S) where {S<:Surface} =
