@@ -19,8 +19,8 @@ struct TriangleMesh{T,A}
 	attributes::Vector{A}
 	@inline TriangleMesh{T,A}(v, f, a) where{T,A} =
 		new{T,A}(v, _face.(f), a)
-	@inline TriangleMesh{T}(v, f, a::AbstractVector{A}) where{T,A} =
-		TriangleMesh{T,A}(v, f, a)
+# 	@inline TriangleMesh{T}(v, f, a::AbstractVector{A}) where{T,A} =
+# 		TriangleMesh{T,A}(v, f, a)
 end
 
 const CTriangleMesh = TriangleMesh{Cdouble}

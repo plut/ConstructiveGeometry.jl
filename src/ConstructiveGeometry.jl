@@ -49,12 +49,12 @@ Base.size(c::Consecutives) = size(c.parent)
 #
 # ε = “thickness” of points, edges etc. for computing intersections:
 
-const ColorType = Colors.RGBA{N0f8}
+const MeshColor = Colors.RGBA{N0f8}
 const _DEFAULT_PARAMETERS = (
 	accuracy = 0.1, precision = .005, symmetry = 1,
 	type = Float64, ε=1/65536,
 # 	type = Rational{BigInt}, ε = 0,
-	color = ColorType(.3,.4,.5), # bluish gray
+	color = MeshColor(.3,.4,.5), # bluish gray
 )
 
 @inline get_parameter(parameters, name) =
@@ -100,12 +100,20 @@ SVector{N}(::ZeroVector) where{N} = zero(SVector{N})
 
 SAffineMap2{T} = AffineMap{SMatrix{2,2,T,4},SVector{2,T}}
 SAffineMap3{T} = AffineMap{SMatrix{3,3,T,9},SVector{3,T}}
-(A::Type{<:SAffineMap3{T}})(u::UniformScaling) where{T}=
+# (A::Type{<:SAffineMap3{T}})(u::UniformScaling) where{T}=
+# 	A(SMatrix{3,3,T}(u), zero(SVector{3,T}))
+Base.convert(A::Type{SAffineMap3{T}}, u::UniformScaling) where{T} =
 	A(SMatrix{3,3,T}(u), zero(SVector{3,T}))
 SAffineMap3(f::AffineMap) = AffineMap(SMatrix{3,3}(f.a), SVector{3}(f.b))
 
 @inline compose(f::AffineMap, g::AffineMap) = AffineMap(f.a*g.a, f.a*g.b+f.b)
-(f::AffineMap)(v::AbstractVector) = f.a*v + f.b
+@inline (f::AffineMap)(v::AbstractVector) = f.a*v + f.b
+function (f::AffineMap)(s::Shapes.PolygonXor)
+	d = signdet(f.a, 2)
+	iszero(d)&& throw(SingularException(2))
+	d > 0 && return Shapes.PolygonXor([ f.(p) for p in Shapes.paths(s) ])
+	return Shapes.PolygonXor([reverse(f.(p)) for p in Shapes.paths(s) ])
+end
 
 # Reflection matrices««1
 """
@@ -362,34 +370,35 @@ abstract type AbstractMesh{D,T} <: AbstractGeometryCoord{D,T} end
 
 include("scad.jl")
 # 2d primitives««1
-# Explicit case: PolygonXor««2
+# Explicit case: ShapeMesh««2
 """
-    PolygonXor{T}
+    ShapeMesh{T}
 
 The exclusive union of a number of simple, closed polygons.
 """
-struct PolygonXor{T} <: AbstractMesh{2,T}
+struct ShapeMesh{T} <: AbstractMesh{2,T}
 	# encapsulates the following as an AbstractGeometry object:
 	poly::Shapes.PolygonXor{T}
 	# plus a 2d -> 3d transform:
 	position::SAffineMap3{T}
-	@inline PolygonXor(s::Shapes.PolygonXor{T}, f=SAffineMap3{T}(I)) where{T} =
-		new{T}(s, f)
-end
-@inline MeshType(::Mesh{T},::AbstractGeometry{2}) where{T} = PolygonXor{T}
+	# plus possible highlighted parts (à la Openscad “%”):
+	highlights::Vector{Tuple{MeshColor,Shapes.PolygonXor{T}}}
 
-@inline polygon_xor(::Mesh{T}, args...) where{T} =
-	PolygonXor(Shapes.PolygonXor{T}(args...))
-@inline poly(s::PolygonXor) = s.poly
-@inline paths(s::PolygonXor) = poly(s).paths
-@inline position(s::PolygonXor) = s.position
-@inline vertices(s::PolygonXor) = Shapes.vertices(poly(s))
-# @inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
-# 	PolygonXor(Shapes.clip(t, poly.(l)...))
-
-@inline function (g::Mesh)(m::PolygonXor)::MeshType(g,m)
-	polygon_xor(g, paths(m)...)
+	@inline ShapeMesh{T}(s::Shapes.PolygonXor, f=I, h=[]) where{T}= new{T}(s,f,h)
+	@inline ShapeMesh(s::Shapes.PolygonXor{T}, f=I, h=[]) where{T}= new{T}(s,f,h)
 end
+@inline MeshType(::Mesh{T},::AbstractGeometry{2}) where{T} = ShapeMesh{T}
+
+@inline ShapeMesh(::Mesh{T}, paths, f=I, h=[]) where{T} =
+	ShapeMesh(Shapes.PolygonXor{T}(paths), f, h)
+@inline poly(s::ShapeMesh) = s.poly
+@inline paths(s::ShapeMesh) = poly(s).paths
+@inline position(s::ShapeMesh) = s.position
+@inline vertices(s::ShapeMesh) = Shapes.vertices(poly(s))
+# @inline clip(t::Symbol, l::ShapeMesh{T}...) where{T} =
+# 	ShapeMesh(Shapes.clip(t, poly.(l)...))
+
+@inline (g::Mesh)(m::ShapeMesh)::MeshType(g,m) = ShapeMesh(g, paths(m))
 
 # Square««2
 struct Square{T} <: AbstractGeometryCoord{2,T}
@@ -399,7 +408,7 @@ end
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
 @inline (g::Mesh{T})(s::Square) where{T} =
-	polygon_xor(g, square_vertices(T(s.size[1]), T(s.size[2])))
+	ShapeMesh(g, [square_vertices(T(s.size[1]), T(s.size[2]))])
 
 # Circle««2
 struct Circle{T} <: AbstractGeometryCoord{2,T}
@@ -407,7 +416,7 @@ struct Circle{T} <: AbstractGeometryCoord{2,T}
 end
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
 @inline (g::Mesh{T})(s::Circle) where{T} =
-	polygon_xor(g, unit_n_gon(T(s.radius), g.parameters))
+	ShapeMesh(g, [unit_n_gon(T(s.radius), g.parameters)])
 
 # Stroke ««2
 struct Stroke{T} <: AbstractGeometryCoord{2,T}
@@ -423,41 +432,42 @@ Stroke(points, width; ends=:round, join=:round, miter_limit=2.) =
 function (g::Mesh{T})(s::Stroke) where{T}
 	r = one_half(T(s.width))
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * r)
-	return polygon_xor(g, Shapes.offset([s.points], r;
-		join=s.join, ends=s.ends, miter_limit = s.miter_limit)...)
+	return ShapeMesh(g, Shapes.offset([s.points], r;
+		join=s.join, ends=s.ends, miter_limit = s.miter_limit))
 end
 # 3d primitives««1
-# Surface««2
+# VolumeMesh««2
 """
-    Surface{T}
+    VolumeMesh{T}
 
 A surface delimited by the given faces.
 """
-struct Surface{T,A} <: AbstractMesh{3,T}
+struct VolumeMesh{T,A} <: AbstractMesh{3,T}
 	mesh::TriangleMesh{T,A}
-	@inline Surface(m::TriangleMesh{T,A}) where{T,A} = new{T,A}(m)
-	@inline Surface{T}(points, faces, attr::A) where{T,A} =
-		new{T,A}(TriangleMesh{T,A}(points, faces, fill(attr, size(faces))))
-	@inline Surface(points::AbstractVector{<:AbstractVector{T}}, faces,
-		attrs::AbstractVector{A} = Nothing[]) where{T,A} =
-		new{T,A}(TriangleMesh{T,A}(points, faces, attrs))
+	highlights::Vector{TriangleMesh{T,A}}
+	@inline VolumeMesh(m::TriangleMesh{T,A}, h=[]) where{T,A} = new{T,A}(m, h)
+# 	@inline VolumeMesh{T}(points, faces, attr::A) where{T,A} =
+# 		new{T,A}(TriangleMesh{T,A}(points, faces, fill(attr, size(faces))))
+	@inline VolumeMesh(points::AbstractVector{<:AbstractVector{T}}, faces,
+		attrs::AbstractVector{A} = Nothing[], h=[]) where{T,A} =
+		new{T,A}(TriangleMesh{T,A}(points, faces, attrs), h)
 end
 @inline MeshType(::Mesh{T},::AbstractGeometry{3}) where{T} =
-	Surface{T,ColorType}
-@inline Surface(points, faces, attrs...) =
-	Surface(points, [(f...,) for f in faces], attrs...)
-@inline Surface(points, faces, c::Colorant) =
-	Surface(points, faces, [c for _ in faces])
+	VolumeMesh{T,MeshColor}
+@inline VolumeMesh(points, faces, attrs...) =
+	VolumeMesh(points, [(f...,) for f in faces], attrs...)
+@inline VolumeMesh(points, faces, c::Colorant) =
+	VolumeMesh(points, faces, [c for _ in faces])
 
-@inline vertices(s::Surface) = TriangleMeshes.vertices(s.mesh)
-@inline faces(s::Surface) = TriangleMeshes.faces(s.mesh)
-@inline attributes(s::Surface) = TriangleMeshes.attributes(s.mesh)
+@inline vertices(s::VolumeMesh) = TriangleMeshes.vertices(s.mesh)
+@inline faces(s::VolumeMesh) = TriangleMeshes.faces(s.mesh)
+@inline attributes(s::VolumeMesh) = TriangleMeshes.attributes(s.mesh)
 
-@inline triangle_mesh(g::Mesh{T}, points, faces) where{T} =
-	Surface{T}(points, faces, g.color)
-@inline (g::Mesh)(s::Surface) = triangle_mesh(g, vertices(s), faces(s))
+@inline VolumeMesh(g::Mesh{T}, points, faces) where{T} =
+	VolumeMesh(SVector{3,T}.(points), faces, fill(g.color, size(faces)))
+@inline (g::Mesh)(s::VolumeMesh) = VolumeMesh(g, vertices(s), faces(s))
 
-@inline scad_info(s::Surface) =
+@inline scad_info(s::VolumeMesh) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
 
 
@@ -472,7 +482,7 @@ end
 		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
 
 (g::Mesh{T})(s::Cube) where{T} =
-	triangle_mesh(g, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
+	VolumeMesh(g, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
 	[ # 12 triangular faces:
 	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
 	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
@@ -488,7 +498,7 @@ end
 function (g::Mesh{T})(s::Sphere) where{T}
 	plist = fibonacci_sphere_points(T(s.radius), g.parameters)
 	(pts, faces) = convex_hull(plist)
-	return triangle_mesh(g, pts, faces)
+	return VolumeMesh(g, pts, faces)
 end
 
 # Cylinder is implemented as an extrusion
@@ -558,22 +568,30 @@ function (g::Mesh)(s::CSGUnion)::MeshType(g,s)
 	return m1
 end
 
-@inline self_union(m::PolygonXor) = PolygonXor(Shapes.simplify(poly(m)))
-@inline self_union(m::Surface) = csgunion(m, m)
+@inline self_union(m::ShapeMesh) = ShapeMesh(Shapes.simplify(poly(m)))
+@inline self_union(m::VolumeMesh) = csgunion(m, m)
 # @inline (g::Mesh)(s::CSGUnion{2}) = clip(:union, g.(s.children)...)
 # @inline (g::Mesh)(s::CSGUnion{3}) = reduce(csgunion, g.(s.children))
-@inline csgunion(s1::S, s2::S) where {S<:Surface} =
-	Surface(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
-@inline csgunion(s1::P, s2::P) where{P<:PolygonXor} =
-	PolygonXor(Shapes.clip(:union, s1.poly, s2.poly))
-@inline csginter(s1::S, s2::S) where {S<:Surface} =
-	Surface(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
-@inline csginter(s1::P, s2::P) where{P<:PolygonXor} =
-	PolygonXor(Shapes.clip(:intersection, s1.poly, s2.poly))
-@inline csgdiff(s1::S, s2::S) where {S<:Surface} =
-	Surface(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
-@inline csgdiff(s1::P, s2::P) where{P<:PolygonXor} =
-	PolygonXor(Shapes.clip(:difference, s1.poly, s2.poly))
+
+@inline csgunion(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(0, s1.mesh, s2.mesh),
+		[s1.highlights;s2.highlights])
+@inline csginter(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(1, s1.mesh, s2.mesh),
+		[s1.highlights;s2.highlights])
+@inline csgdiff(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(2, s1.mesh, s2.mesh),
+		[s1.highlights;s2.highlights])
+
+@inline csgunion(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:union, s1.poly, s2.poly), I,
+		[s1.highlights; s2.highlights])
+@inline csginter(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:intersection, s1.poly, s2.poly), I,
+		[s1.highlights; s2.highlights])
+@inline csgdiff(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:difference, s1.poly, s2.poly), I,
+		[s1.highlights; s2.highlights])
 
 # Intersection««2
 CSGInter = constructed_solid_type(:intersection)
@@ -616,8 +634,8 @@ end
 # @inline (g::Mesh)(s::CSGDiff{3}) = csgdiff(g(s.children[1]), g(s.children[2]))
 
 # Xor (used by extrusion) ««2
-@inline symdiff(s1::S, s2::S) where {S<:Surface} =
-	Surface(TriangleMeshes.boolean(3, s1.mesh, s2.mesh))
+@inline symdiff(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(3, s1.mesh, s2.mesh))
 # Empty unions and intersects««2
 """
     EmptyUnion
@@ -669,16 +687,16 @@ struct CSGHull{D} <: AbstractConstructed{:hull,D}
 end
 
 @inline (g::Mesh)(s::CSGHull{2}) =
-	polygon_xor(g, convex_hull(reduce(vcat, vertices.(g.(children(s))))))
+	ShapeMesh(g, [convex_hull(reduce(vcat, vertices.(g.(children(s)))))])
 
-@inline vertices3(m::Surface) = vertices(m)
-@inline vertices3(s::PolygonXor) = (position(s)([v;0]) for v in vertices(s))
+@inline vertices3(m::VolumeMesh) = vertices(m)
+@inline vertices3(s::ShapeMesh) = (position(s)([v;0]) for v in vertices(s))
 
 function (g::Mesh{T})(s::CSGHull{3}) where{T}
 	v = SVector{3,T}[]
 	for x in children(s); push!(v, vertices3(g(x))...); end
 	(p, f) = convex_hull(v)
-	return triangle_mesh(g, p, f)
+	return VolumeMesh(g, p, f)
 end
 
 # Minkowski sum and difference««2
@@ -691,9 +709,9 @@ struct MinkowskiSum{D,D2} <: AbstractGeometry{D}
 end
 
 @inline (g::Mesh)(s::MinkowskiSum{2,2}) =
-	PolygonXor(Shapes.minkowski_sum(g(s.first).poly, g(s.second).poly))
+	ShapeMesh(Shapes.minkowski_sum(g(s.first).poly, g(s.second).poly))
 @inline (g::Mesh)(s::MinkowskiSum{3,3}) =
-	Surface(TriangleMeshes.minkowski_sum(g(s.first).mesh, g(s.second).mesh))
+	VolumeMesh(TriangleMeshes.minkowski_sum(g(s.first).mesh, g(s.second).mesh))
 function (g::Mesh{T})(s::MinkowskiSum{3,2}) where{T}
 	m1 = g(s.first).mesh
 	m2 = g(s.second)
@@ -706,7 +724,7 @@ function (g::Mesh{T})(s::MinkowskiSum{3,2}) where{T}
 # 		push!(e2, (c+n, c+1), ((i, i+1) for i in c+1:c+n-1)...)
 # 		c+= n
 # 	end
-	return Surface(TriangleMeshes.minkowski_sum(m1,
+	return VolumeMesh(TriangleMeshes.minkowski_sum(m1,
 		TriangleMesh{T}(collect(vertices3(m2)), tri, fill(first(m1.attributes), 0))))
 # 	[vertices3(m2)...], e2))
 end
@@ -724,28 +742,26 @@ function (g::Mesh)(s::AffineTransform{3})
 	d = signdet(s.f.a, 3)
 	iszero(d) && throw(SingularException(3))
 	m = g(s.child)
-	return Surface(s.f.(vertices(m)),
+	return VolumeMesh(s.f.(vertices(m)),
 		d > 0 ? faces(m) : reverse.(faces(m)),
 		attributes(m))
 end
 
 function (g::Mesh)(s::AffineTransform{2})
 	if hassize(s.f, (2,2))
-		d = signdet(s.f.a, 2)
-		iszero(d)&& throw(SingularException(2))
 		m = g(s.child)
-		return polygon_xor(g,
-			[ d > 0 ? s.f.(p) : reverse(s.f.(p)) for p in paths(m) ])
+		return ShapeMesh(s.f(poly(m)), m.position,
+		  [ (c, s.f(p)) for (c,p) in m.highlights ])
 	elseif hassize(s.f,(3,3))
 		m = g(s.child)
-		return PolygonXor(poly(m), compose(SAffineMap3(s.f), position(m)))
+		return ShapeMesh(poly(m), compose(SAffineMap3(s.f), position(m)),
+			m.highlights)
 	elseif hassize(s.f,(3,2)) # pad by one column:
 		m = g(s.child)
 		f = SAffineMap3(AffineMap([s.f.a SA[0;0;1]], s.f.b))
-		return PolygonXor(poly(m), compose(f, position(m)))
-	else
-		throw(DimensionMismatch("linear map * shape should have dimension (2,2) or (3,3)"))
+		return ShapeMesh(poly(m), compose(f, position(m)), m.highlights)
 	end
+	throw(DimensionMismatch("linear map * shape should have dimension (2,2) or (3,3)"))
 end
 
 # Project and slice (TODO)««2
@@ -756,15 +772,15 @@ end
 function (g::Mesh)(s::Project)
 	triangles = TriangleMeshes.project(g(s.child).mesh)
 	# FIXME: strangely, this makes some tiny “holes”
-	# (projection should be exact?!).
+	# (projection should be exact?!). Could be Clipper's fault?
 	c = (Shapes.clip(:union,
 		[Shapes.PolygonXor([t]) for t in triangles]...))
 	filter!(p->abs(Shapes.area(p)) > 1e-9, c.paths)
-	return PolygonXor(c)
+	return ShapeMesh(c)
 # 	m = g(s.child)
 # 	p = TriangleMeshes.vertices(m.mesh)
 # 	f = TriangleMeshes.faces(m.mesh)
-# 	return polygon_xor(g, [SA[x[1], x[2]] for x in p], f)
+# 	return shape_mesh(g, [SA[x[1], x[2]] for x in p], f)
 end
 
 struct Slice{T} <: AbstractGeometry{2}
@@ -774,7 +790,7 @@ end
 
 function (g::Mesh)(s::Slice)
 	(pts, seg) = TriangleMeshes.plane_slice(s.z, g(s.child).mesh)
-	return PolygonXor(Shapes.glue_segments(pts, seg))
+	return ShapeMesh(Shapes.glue_segments(pts, seg))
 end
 
 struct Halfspace <: AbstractGeometry{3}
@@ -783,7 +799,7 @@ struct Halfspace <: AbstractGeometry{3}
 	child::AbstractGeometry{3}
 end
 
-(g::Mesh)(s::Halfspace) = Surface(TriangleMeshes.halfspace(
+(g::Mesh)(s::Halfspace) = VolumeMesh(TriangleMeshes.halfspace(
 	s.direction, s.origin, g(s.child).mesh,g.color))
 
 # SetParameters««2
@@ -805,7 +821,7 @@ end
 
 function (g::Mesh)(s::LinearExtrude)
 	m = g(s.child)
-	@assert m isa PolygonXor
+	@assert m isa ShapeMesh
 	pts2 = Shapes.vertices(m.poly)
 	tri = Shapes.triangulate(m.poly)
 	peri = Shapes.perimeters(m.poly)
@@ -823,7 +839,7 @@ function (g::Mesh)(s::LinearExtrude)
 	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
 	]
-	return triangle_mesh(g, pts3, faces)
+	return VolumeMesh(g, pts3, faces)
 end
 
 # Cone««2
@@ -844,7 +860,7 @@ function (g::Mesh{T})(s::Cone) where{T}
 	push!(pts3, SVector{3,T}(s.apex))
 	faces = [ tri;
 		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
-	return triangle_mesh(g, pts3, faces)
+	return VolumeMesh(g, pts3, faces)
 end
 # Rotate extrusion««2
 struct RotateExtrude{T} <: AbstractTransform{3}
@@ -854,7 +870,7 @@ end
 
 function (g::Mesh{T})(s::RotateExtrude) where{T}
 	# right half of child:
-	m0 = g(s.child)::PolygonXor{T}
+	m0 = g(s.child)::ShapeMesh{T}
 	m = intersect(Shapes.HalfPlane(SA[1,0],0), m0.poly)
 	pts2 = Shapes.vertices(m)
 	tri = Shapes.triangulate(m)
@@ -901,7 +917,7 @@ function (g::Mesh{T})(s::RotateExtrude) where{T}
 		@debug "(end perimeter)»»"
 	end
 	@debug "triangles = $triangles"
-	return triangle_mesh(g, pts3, triangles)
+	return VolumeMesh(g, pts3, triangles)
 end
 
 # Path extrusion««2
@@ -920,7 +936,7 @@ function (g::Mesh)(s::PathExtrude)
 	polyxor = g(s.child)
 	rmax = sqrt(maximum(norm².(s.path)))
 	ε = max(get_parameter(g, :accuracy), get_parameter(g, :precision)*rmax)
-	v = [ triangle_mesh(g, Shapes.path_extrude(s.path, p;
+	v = [ VolumeMesh(g, Shapes.path_extrude(s.path, p;
 		closed=s.closed, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
 		for p in paths(polyxor) ]
 	return reduce(symdiff, v)
@@ -946,12 +962,12 @@ end
 function (g::Mesh)(s::Offset{2})
 	m = g(s.child)
 	ε = max(get_parameter(g,:accuracy), get_parameter(g,:precision) * s.radius)
-	return PolygonXor(Shapes.offset(poly(m), s.radius;
+	return ShapeMesh(Shapes.offset(poly(m), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
 end
 
 @inline (g::Mesh)(s::Offset{3}) =
-	Surface(TriangleMeshes.offset(g(s.child).mesh, s.radius, s.npoints))
+	VolumeMesh(TriangleMeshes.offset(g(s.child).mesh, s.radius, s.npoints))
 
 # Decimate««2
 struct Decimate <: AbstractGeometry{3}
@@ -960,7 +976,7 @@ struct Decimate <: AbstractGeometry{3}
 end
 
 @inline (g::Mesh)(s::Decimate) =
-	Surface(TriangleMeshes.decimate(g(s.child).mesh, s.max_faces))
+	VolumeMesh(TriangleMeshes.decimate(g(s.child).mesh, s.max_faces))
 
 struct LoopSubdivide <: AbstractGeometry{3}
 	count::Int
@@ -968,7 +984,7 @@ struct LoopSubdivide <: AbstractGeometry{3}
 end
 
 @inline (g::Mesh)(s::LoopSubdivide) =
-	Surface(TriangleMeshes.loop(g(s.child).mesh, s.count))
+	VolumeMesh(TriangleMeshes.loop(g(s.child).mesh, s.count))
 
 #————————————————————— Front-end —————————————————————————————— ««1
 
@@ -1069,7 +1085,7 @@ Filled polygon delimitated by the given vertices.
 
 TODO: allow several paths and simplify crossing paths.
 """
-@inline polygon(path) = PolygonXor(Shapes.PolygonXor([path]))
+@inline polygon(path) = ShapeMesh(Shapes.PolygonXor([path]))
 # Stroke««2
 """
     stroke(points, width; kwargs)
@@ -1082,7 +1098,7 @@ Draws a path of given width.
 stroke(points, width; kwargs...) = Stroke(points, width; kwargs...)
 
 
-# Surface««2
+# VolumeMesh««2
 """
     surface(vertices, faces)
 
@@ -1111,7 +1127,7 @@ function surface(vertices, faces)
 			SA[dot(u,vertices[i]), dot(v,vertices[i])] for i in f ])
 		push!(triangles, tri...)
 	end
-	return Surface(vertices, triangles,
+	return VolumeMesh(vertices, triangles,
 		fill(_DEFAULT_PARAMETERS.color, size(triangles)))
 end
 
@@ -1406,15 +1422,47 @@ Colors objects `s...` in the given color.
 """
 @inline color(c::Colorant, s...) = operator(Color, (c,), s...)
 @inline color(c::Union{Symbol,AbstractString}, s...) =
-	color(parse(ColorType, c), s...)
+	color(parse(MeshColor, c), s...)
 @inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
 
 @inline (g::Mesh)(c::Color{2}) = g(c.child)
 @inline (g::Mesh)(c::Color{3}) = let m = g(c.child)
-	Surface(vertices(m), faces(m), c.color)
+	VolumeMesh(vertices(m), faces(m), c.color)
 end
 
+struct Highlight{D,C<:Colorant} <: AbstractGeometry{D}
+	color::C
+	child::AbstractGeometry{D}
+end
+
+"""
+    highlight(c::Colorant, s)
+		highlight(c::AbstractString, s)
+		(c::Colorant) % s
+
+Marks an object as highlighted.
+This means that the base object will be displayed (in the specified color)
+at the same time as all results of operations built from this object.
+"""
+@inline highlight(c::Colorant, s...) = operator(Highlight, (c,), s...)
+@inline highlight(c::Union{Symbol,AbstractString}, s...) =
+	highlight(Colors.coloralpha(parse(Colorant, c), .25), s...)
+
+function (g::Mesh{T})(c::Highlight{2}) where{T}
+	m = g(c.child)
+	return ShapeMesh(m.poly, m.position, [ (c.color, m.poly) ])
+end
+
+function (g::Mesh{T})(c::Highlight{3}) where{T}
+	m = g(c.child).mesh
+	v = TriangleMeshes.vertices(m)
+	f = TriangleMeshes.faces(m)
+	a = TriangleMeshes.attributes(m)
+	a1 = fill(c.color, size(f))
+	return VolumeMesh(v, f, a, [ TriangleMesh{T,MeshColor}(v, f, a1) ])
+end
+		
 # Affine transformations««1
 # mult_matrix««2
 """
@@ -1575,6 +1623,8 @@ TODO: more flexible syntax
 @inline Base.:*(a::Transform,z::Complex) = a*mult_matrix(_to_matrix(z))
 
 @inline Base.:*(c::Symbol, x::AbstractGeometry) = color(String(c), x)
+@inline Base.:%(c::Symbol, x::AbstractGeometry) = highlight(String(c), x)
+@inline Base.:%(c::Colorant, x::AbstractGeometry) = highlight(c, x)
 
 ⋃ = Base.union
 ⋂ = Base.intersect
@@ -1654,7 +1704,7 @@ Outputs an STL description of `object` to the given `file` (string or IO).
 Optional `kwargs` are the same as for the `mesh` function
 or the `set_parameters` object.
 """
-function stl(io::IO, m::Surface)
+function stl(io::IO, m::VolumeMesh)
 	println(io, "solid Julia_ConstructiveGeometry_jl_model")
 	points = TriangleMeshes.vertices(m)
 	faces = TriangleMeshes.faces(m)
@@ -1678,7 +1728,7 @@ end
 @inline stl(f::AbstractString, args...; kwargs...) =
 	open(f, "w") do io stl(io, args...; kwargs...) end
 # SVG ««1
-function svg(io::IO, m::PolygonXor)
+function svg(io::IO, m::ShapeMesh)
 	(x,y) = paths(m)[1][1]; rect = MVector(x, x, y, y)
 	for (x,y) in Shapes.vertices(m)
 		x < rect[1] && (rect[1] = x)
@@ -1726,26 +1776,44 @@ Exports 2d `shape` as an SVG file.
 @inline Makie.plot!(scene::Makie.AbstractScene, g::AbstractGeometry; kwargs...)=
 	Makie.plot!(scene, mesh(g); kwargs...)
 
-function Makie.plot!(scene::Makie.AbstractScene, m::Surface; kwargs...)
-	vmat = similar(first(vertices(m)), 3*length(faces(m)), 3)
-	for (i, f) in pairs(faces(m)), j in 1:3, k in 1:3
-		vmat[3*i+j-3, k] = vertices(m)[f[j]][k]
+function Makie.plot!(scene::Makie.AbstractScene, m::TriangleMesh; kwargs...)
+	v = TriangleMeshes.vertices(m); f = TriangleMeshes.faces(m);
+	a = TriangleMeshes.attributes(m)
+	vmat = similar(first(v), 3*length(f), 3)
+	for (i, f) in pairs(f), j in 1:3, k in 1:3
+		vmat[3*i+j-3, k] = v[f[j]][k]
 	end
 	fmat = collect(1:size(vmat, 1))
-	attr = [ attributes(m)[fld1(i,3)] for i in 1:size(vmat, 1)]
+	attr = [ a[fld1(i,3)] for i in 1:size(vmat, 1)]
 	Makie.mesh!(scene, vmat, fmat, color=attr;
 		lightposition=Makie.Vec3f0(5e3,1e3, 10e3), kwargs... )
 	return scene
 end
 
-function Makie.plot!(scene::Makie.AbstractScene, m::PolygonXor; kwargs...)
-	v = Shapes.vertices(poly(m))
-	tri = Shapes.triangulate(poly(m))
+function Makie.plot!(scene::Makie.AbstractScene, m::VolumeMesh; kwargs...)
+	for s in m.highlights
+		Makie.plot!(scene, s)
+	end
+	Makie.plot!(scene, m.mesh; kwargs...)
+end
+
+function Makie.plot!(scene::Makie.AbstractScene, s::Shapes.PolygonXor,
+		color=_DEFAULT_PARAMETERS.color; kwargs...)
+	isempty(s.paths) && return scene
+	v = Shapes.vertices(s)
+	tri = Shapes.triangulate(s)
 	m = [ t[j] for t in tri, j in 1:3 ]
 	Makie.mesh!(scene, v, m,
 		specular=Makie.Vec3f0(0,0,0), diffuse=Makie.Vec3f0(0,0,0),
-		color = _DEFAULT_PARAMETERS.color; kwargs...)
+		color=color; kwargs...)
 	return scene
+end
+
+function Makie.plot!(scene::Makie.AbstractScene, m::ShapeMesh; kwargs...)
+	for (c, s) in m.highlights
+		Makie.plot!(scene, s, color=c; kwargs...)
+	end
+	Makie.plot!(scene, poly(m); kwargs...)
 end
 # OpenSCAD output««1
 # Annotations ««1

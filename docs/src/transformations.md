@@ -203,6 +203,14 @@ or as a product `transform(parameters) * s`.
 color
 ```
 ```@docs
+highlight
+```
+```@repl 0
+s = intersect(:green % cube(3), :red % sphere(3));
+png("highlight", s); # hide
+```
+![example: intersection of a highlighted sphere and a highlighted cube](highlight.png)
+```@docs
 set_parameters
 ```
 

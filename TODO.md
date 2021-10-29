@@ -55,6 +55,7 @@
  - [ ] and even `convex_hull`
  - [ ] 2d Minkowski difference
  - [ ] `linear_extrude` with twist and scale
+ - [ ] `rotate_extrude` with slide (per-turn) along the axis
  - [ ] find a way to fix path extrusion? either
    - [ ] cut “by hand” the result of a “butt” extrusion;
    - [ ] intersect the result of a custom “fill” extrusion;
