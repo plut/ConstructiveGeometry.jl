@@ -8,7 +8,7 @@
    convex hull)
  - [x] Minkowski sum in mixed dimensions
  - [x] allow complement (for intersection)
- - [ ] make meshing type-stable
+ - [x] make meshing type-stable
  - [ ] allow self-union (for fixing meshes)
  - [x] triangulate faces of `Surface`
  - [x] update `iglwrap` and use latest version

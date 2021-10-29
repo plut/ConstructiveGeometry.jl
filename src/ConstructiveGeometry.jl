@@ -90,22 +90,19 @@ struct ZeroVector end # additive pendant of UniformScaling
 SVector{N}(::ZeroVector) where{N} = zero(SVector{N})
 
 # identify size of matrices
-@inline hassize(a::AbstractMatrix, s) = size(a) == s
-@inline hassize(::UniformScaling, s) = true
-@inline hassize(::ZeroVector, s) = true
+@inline hassize(a::AbstractArray, s) = size(a) == s
+@inline hassize(::UniformScaling, _) = true
+@inline hassize(::ZeroVector, _) = true
 @inline hassize(f::AffineMap, (m,n)) = hassize(f.a,(m,n)) && hassize(f.b,(m,))
 
 @inline signdet(a::UniformScaling, d) = iszero(a.λ) ? 0 : iseven(d) ? +1 : a.λ
 @inline signdet(a::AbstractMatrix, _) = det(a)
 
-@inline _affine_map_center(a, c=ZeroVector()) = AffineMap(a, a*c-c)
-
 SAffineMap2{T} = AffineMap{SMatrix{2,2,T,4},SVector{2,T}}
 SAffineMap3{T} = AffineMap{SMatrix{3,3,T,9},SVector{3,T}}
 (A::Type{<:SAffineMap3{T}})(u::UniformScaling) where{T}=
 	A(SMatrix{3,3,T}(u), zero(SVector{3,T}))
-SAffineMap3(f::AffineMap) =
-	AffineMap(SMatrix{3,3}(f.a), SVector{3}(f.b))
+SAffineMap3(f::AffineMap) = AffineMap(SMatrix{3,3}(f.a), SVector{3}(f.b))
 
 @inline compose(f::AffineMap, g::AffineMap) = AffineMap(f.a*g.a, f.a*g.b+f.b)
 (f::AffineMap)(v::AbstractVector) = f.a*v + f.b
@@ -379,6 +376,7 @@ struct PolygonXor{T} <: AbstractMesh{2,T}
 	@inline PolygonXor(s::Shapes.PolygonXor{T}, f=SAffineMap3{T}(I)) where{T} =
 		new{T}(s, f)
 end
+@inline MeshType(::Mesh{T},::AbstractGeometry{2}) where{T} = PolygonXor{T}
 
 @inline polygon_xor(::Mesh{T}, args...) where{T} =
 	PolygonXor(Shapes.PolygonXor{T}(args...))
@@ -389,7 +387,7 @@ end
 # @inline clip(t::Symbol, l::PolygonXor{T}...) where{T} =
 # 	PolygonXor(Shapes.clip(t, poly.(l)...))
 
-@inline function (g::Mesh)(m::PolygonXor)
+@inline function (g::Mesh)(m::PolygonXor)::MeshType(g,m)
 	polygon_xor(g, paths(m)...)
 end
 
@@ -444,6 +442,8 @@ struct Surface{T,A} <: AbstractMesh{3,T}
 		attrs::AbstractVector{A} = Nothing[]) where{T,A} =
 		new{T,A}(TriangleMesh{T,A}(points, faces, attrs))
 end
+@inline MeshType(::Mesh{T},::AbstractGeometry{3}) where{T} =
+	Surface{T,ColorType}
 @inline Surface(points, faces, attrs...) =
 	Surface(points, [(f...,) for f in faces], attrs...)
 @inline Surface(points, faces, c::Colorant) =
@@ -541,7 +541,7 @@ iscomplement(::AbstractGeometry) = false
 
 # Union««2
 CSGUnion = constructed_solid_type(:union)
-@inline function (g::Mesh)(s::CSGUnion)
+function (g::Mesh)(s::CSGUnion)::MeshType(g,s)
 	isempty(children(s)) && return EmptyUnion() # FIXME
 	(head, tail...) = children(s)
 	m1,i1 = (g(head), iscomplement(head))
@@ -564,17 +564,21 @@ end
 	Surface(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
 @inline csgunion(s1::P, s2::P) where{P<:PolygonXor} =
 	PolygonXor(Shapes.clip(:union, s1.poly, s2.poly))
+@inline csginter(s1::S, s2::S) where {S<:Surface} =
+	Surface(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
+@inline csginter(s1::P, s2::P) where{P<:PolygonXor} =
+	PolygonXor(Shapes.clip(:intersection, s1.poly, s2.poly))
+@inline csgdiff(s1::S, s2::S) where {S<:Surface} =
+	Surface(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
+@inline csgdiff(s1::P, s2::P) where{P<:PolygonXor} =
+	PolygonXor(Shapes.clip(:difference, s1.poly, s2.poly))
 
 # Intersection««2
 CSGInter = constructed_solid_type(:intersection)
 # @inline (g::Mesh)(s::CSGInter{2})= clip(:intersection, g.(s.children)...)
 # @inline (g::Mesh)(s::CSGInter{3}) = reduce(csginter, g.(s.children))
-@inline csginter(s1::S, s2::S) where {S<:Surface} =
-	Surface(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
-@inline csginter(s1::P, s2::P) where{P<:PolygonXor} =
-	PolygonXor(Shapes.clip(:intersection, s1.poly, s2.poly))
-@inline function (g::Mesh)(s::CSGInter)
-	isempty(children(s)) && return EmptyUnion() # FIXME
+function (g::Mesh)(s::CSGInter)::MeshType(g,s)
+	isempty(children(s)) && return EmptyIntersect() # FIXME
 	(head, tail...) = children(s)
 	m1,i1 = (g(head), iscomplement(head))
 	for x in tail
@@ -594,14 +598,20 @@ end
 # Difference««2
 # this is a binary operator:
 CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
+function (g::Mesh)(s::CSGDiff)::MeshType(g,s)
+	(c1, c2) = children(s)
+	(m1, i1) = (g(c1), iscomplement(c1))
+	(m2, i2) = (g(c2), iscomplement(c2))
+	if i1
+		return i2 ? csgdiff(m2,m1) : csgunion(m1,m2)
+	else
+		return i2 ? csgunion(m1,m2) : csgdiff(m1,m2)
+	end
+end
 
 # @inline (g::Mesh)(s::CSGDiff{2}) =
 # 	clip(:difference, g(s.children[1]), g(s.children[2]))
 # @inline (g::Mesh)(s::CSGDiff{3}) = csgdiff(g(s.children[1]), g(s.children[2]))
-@inline csgdiff(s1::S, s2::S) where {S<:Surface} =
-	Surface(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
-@inline csgdiff(s1::P, s2::P) where{P<:PolygonXor} =
-	PolygonXor(Shapes.clip(:difference, s1.poly, s2.poly))
 
 # Xor (used by extrusion) ««2
 @inline symdiff(s1::S, s2::S) where {S<:Surface} =
@@ -1430,7 +1440,7 @@ Represents the affine operation `x -> a*x + b`.
     (3 × 3) multiplications, followed by a single (3 × n).
 """
 @inline mult_matrix(a, s...; center=ZeroVector()) =
-	operator(AffineTransform, (_affine_map_center(a, center),), s...)
+	operator(AffineTransform, (AffineMap(a, a*center-center),), s...)
 # translate ««2
 """
     translate(v, s...)

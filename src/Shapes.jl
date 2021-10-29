@@ -317,8 +317,7 @@ end
 
 @inline clip(op, p::P, q::P) where{P<:PolygonXor} =
 	P(clip(op, paths(p), paths(q), fill=:nonzero))
-# @inline clip(op, s::PolygonXor{T}...) where{T} =
-# 	reduce((p,q)->PolygonXor{T}(clip(op, paths(p), paths(q), fill=:nonzero)), s)
+@inline clip(op, s::P...) where{P<:PolygonXor} = reduce((p,q)->clip(op, p,q), s)
 
 @inline offset(s::PolygonXor{T}, r; kwargs...) where{T} =
 	PolygonXor{T}(offset(paths(s), r; kwargs...))
