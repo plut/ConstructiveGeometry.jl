@@ -3,6 +3,8 @@ using StaticArrays
 using FastClosures
 using IGLWrap_jll
 libiglwrap="/home/jerome/src/iglwrap/local/libiglwrap.so"
+const Vec3d = MVector{3,Cdouble}
+const Mat3d = MMatrix{3,3,Cdouble,9}
 
 # Data type ««1
 @inline det(a::SVector{2}, b::SVector{2}) = a[1]*b[2]-a[2]*b[1]
@@ -34,59 +36,72 @@ const CTriangleMesh = TriangleMesh{Cdouble}
 
 # IGL interface ««1
 
+# a type to capture what is returned by IGL functions ««
+@inline unsafe_array(T, p, n) =
+	unsafe_wrap(Array, convert(Ptr{T}, p), n; own=true)
+mutable struct Cmesh
+	nv::Cint
+	nf::Cint
+	vertices::Ptr{Cdouble}
+	faces::Ptr{Cint}
+	@inline Cmesh() = new()
+end
+@inline fieldpointer(m::T, name) where{T} =
+	pointer_from_objref(m) + fieldoffset(T, findfirst(==(name), fieldnames(T)))
+@inline nvertices(m::Cmesh) = fieldpointer(m, :nv)
+@inline nfaces(m::Cmesh) = fieldpointer(m, :nf)
+@inline vpointer(m::Cmesh) = fieldpointer(m, :vertices)
+@inline fpointer(m::Cmesh) = fieldpointer(m, :faces)
+CTriangleMesh(m::Cmesh, a::AbstractVector{A}) where{A} = CTriangleMesh{A}(
+	unsafe_array(Point, m.vertices, m.nv),
+	unsafe_array(Face , m.faces   , m.nf),
+	a)
+
 @inline vpointer(m::TriangleMesh{Cdouble}) =
 	convert(Ptr{Cdouble}, pointer(m.vertices))
 @inline fpointer(m::TriangleMesh) = convert(Ptr{Cint}, pointer(m.faces))
+
+#»»
+
 function boolean(op, m1::CTriangleMesh{A}, m2::CTriangleMesh{A}) where{A}#««
 	n = nfaces(m1)
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
+	cm = Cmesh()
 	j = Ref(Ptr{Cint}(0));
 	r = @ccall libiglwrap.mesh_boolean(op::Cint,
 		nvertices(m1)::Cint, nfaces(m1)::Cint,
 		vpointer(m1)::Ref{Cdouble}, fpointer(m1)::Ref{Cint},
 		nvertices(m2)::Cint, nfaces(m2)::Cint,
 		vpointer(m2)::Ref{Cdouble}, fpointer(m2)::Ref{Cint},
-		nvo::Ref{Cint}, nfo::Ref{Cint},
-		vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}}, j::Ref{Ptr{Cint}})::Cint
-	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
-	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
-	index = unsafe_wrap(Array, j[], (Int(nfo[]),); own=true);
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}},
+		j::Ref{Ptr{Cint}})::Cint
+	index = unsafe_array(Cint, j[], cm.nf)
 	ao = [ i ≤ n ? m1.attributes[i] : m2.attributes[i-n] for i in index ]
-	return CTriangleMesh{A}(rvo, rfo, ao)
+	return CTriangleMesh(cm, ao)
 end#»»
 function minkowski_sum(m1::CTriangleMesh{A}, m2::CTriangleMesh{A}) where{A}#««
 	n = nfaces(m1)
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
+	cm = Cmesh()
 	j = Ref(Ptr{Cint}(0));
 	r = @ccall libiglwrap.minkowski_sum(
 		nvertices(m1)::Cint, nfaces(m1)::Cint,
 		vpointer(m1)::Ref{Cdouble}, fpointer(m1)::Ref{Cint},
 		nvertices(m2)::Cint, nfaces(m2)::Cint,
-		vpointer(m2)::Ref{Cdouble}, fpointer(m2)::Ref{Cint}, 3::Cint,
-		nvo::Ref{Cint}, nfo::Ref{Cint},
-		vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}}, j::Ref{Ptr{Cint}})::Cint
-	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
-	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
-	index = unsafe_wrap(Array, j[], (Int(nfo[]),2); own=true);
-	ao = fill(first(attributes(m1)), size(index))
-# 	return (rvo, rfo, index)
-	return CTriangleMesh{A}(rvo, rfo, fill(first(m1.attributes), length(rfo)))
+		vpointer(m2)::Ref{Cdouble}, fpointer(m2)::Ref{Cint},
+		3::Cint,
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}},
+		j::Ref{Ptr{Cint}})::Cint
+# 	index = unsafe_array(Cint, j[], cm.nf)
+# 	ao = fill(first(attributes(m1)), size(index))
+	return CTriangleMesh(cm, fill(first(m1.attributes), cm.nf))
 # 	ao = [ i ≤ n ? m1.attributes[i] : m2.attributes[i-n] for i in index ]
 # 	return (CTriangleMesh{A}(rvo, rfo, ao), index)
 end#»»
 function minkowski_sum(m1::CTriangleMesh{A}, v2::Vector{Point},
 		e2::Vector{NTuple{2,Cint}}) where{A}#««
 	n = nfaces(m1)
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
+	cm = Cmesh()
 	j = Ref(Ptr{Cint}(0));
 	r = @ccall libiglwrap.minkowski_sum(
 		nvertices(m1)::Cint, nfaces(m1)::Cint,
@@ -94,14 +109,13 @@ function minkowski_sum(m1::CTriangleMesh{A}, v2::Vector{Point},
 		length(v2)::Cint, length(e2)::Cint,
 		pointer(v2)::Ptr{Cdouble}, pointer(e2)::Ptr{NTuple{2,Cint}},
 		2::Cint,
-		nvo::Ref{Cint}, nfo::Ref{Cint},
-		vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}}, j::Ref{Ptr{Cint}})::Cint
-	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
-	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
-	index = unsafe_wrap(Array, j[], (Int(nfo[]),2); own=true);
-	ao = fill(first(attributes(m1)), size(index))
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}},
+		j::Ref{Ptr{Cint}})::Cint
+	# index = unsafe_array(Cint, j[], cm.nf)
+# 	ao = fill(first(attributes(m1)), size(index))
 # 	return (rvo, rfo, index)
-	return CTriangleMesh{A}(rvo, rfo, fill(first(m1.attributes), length(rfo)))
+	return CTriangleMesh(cm, fill(first(attributes(m1)), cm.nf))
 # 	ao = [ i ≤ n ? m1.attributes[i] : m2.attributes[i-n] for i in index ]
 # 	return (CTriangleMesh{A}(rvo, rfo, ao), index)
 end#»»
@@ -113,98 +127,90 @@ function ispwn(m::TriangleMesh)#««
 	return (r ≠ 0)
 end#»»
 function offset(m::CTriangleMesh{A}, level::Real, grid::Integer) where{A}#««
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
+	cm = Cmesh()
 	r = @ccall libiglwrap.offset_surface(
 		nvertices(m)::Cint, nfaces(m)::Cint,
 		vpointer(m)::Ref{Cdouble}, fpointer(m)::Ref{Cint},
 		level::Cdouble, grid::Cint,
-		nvo::Ref{Cint}, nfo::Ref{Cint}, vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}}
-		)::Cint
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}})::Cint
 	@assert r == 0
 
-	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
-	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
-	return CTriangleMesh{A}(rvo, rfo,
-		fill(first(m.attributes), nfo[]))
+	return CTriangleMesh(cm, fill(first(m.attributes), cm.nf))
 end#»»
 function decimate(m::CTriangleMesh{A}, max_faces::Integer) where{A}#««
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
+	cm = Cmesh()
 	j = Ref(Ptr{Cint}(0));
 	r = @ccall libiglwrap.decimate(
 		nvertices(m)::Cint, nfaces(m)::Cint,
 		vpointer(m)::Ref{Cdouble}, fpointer(m)::Ref{Cint},
 		max_faces::Cint,
-		nvo::Ref{Cint}, nfo::Ref{Cint}, vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}},
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}},
 		j::Ref{Ptr{Cint}})::Cint
 	@assert r == 0
 
-	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
-	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
-	index = unsafe_wrap(Array, j[], (Int(nfo[]),); own=true);
-	return CTriangleMesh{A}(rvo, rfo, [m.attributes[i] for i in index])
+	index = unsafe_array(Cint, j[], cm.nf)
+	return CTriangleMesh(cm, m.attributes[index])
 end#»»
 function loop(m::CTriangleMesh{A}, count::Integer) where{A}#««
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
+	cm = Cmesh()
 	r = @ccall libiglwrap.loop(
 		nvertices(m)::Cint, nfaces(m)::Cint,
 		vpointer(m)::Ref{Cdouble}, fpointer(m)::Ref{Cint},
 		count::Cint,
-		nvo::Ref{Cint}, nfo::Ref{Cint}, vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}}
-		)::Cint
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}})::Cint
 	@assert r == 0
 
-	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
-	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
-	return CTriangleMesh{A}(rvo, rfo,
-		[ attributes(m)[fld1(i, 4^count)] for i in 1:length(rfo)])
+	return CTriangleMesh(cm, attributes(m)[fld1.(1:cm.nf, 4^count)])
 end#»»
-mutable struct Vec3d
-	x::Float64
-	y::Float64
-	z::Float64
-end
-function centroid_and_volume(m::CTriangleMesh)
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
-	c = Vec3d(0,0,0)
+function centroid_and_volume(m::CTriangleMesh)#««
+	c = Vec3d(undef)
 	v = @ccall libiglwrap.centroid_and_volume(
 		nvertices(m)::Cint, nfaces(m)::Cint,
 		vpointer(m)::Ref{Cdouble}, fpointer(m)::Ref{Cint},
 		c::Ref{Vec3d})::Cdouble
-	return (SA[c.x,c.y,c.z], v)
-end
-function halfspace(direction, origin, m::CTriangleMesh{A}, color) where{A}
-	nvo = Ref(Cint(0))
-	nfo = Ref(Cint(0))
-	vo = Ref(Ptr{Cdouble}(0))
-	fo = Ref(Ptr{Cint}(0))
+	return (c, v)
+end#»»
+function halfspace(direction, origin, m::CTriangleMesh{A}, color::A) where{A}#««
+	cm = Cmesh()
 	j = Ref(Ptr{Cint}(0));
 	r = @ccall libiglwrap.intersect_with_half_space(
 		nvertices(m)::Cint, nfaces(m)::Cint,
 		vpointer(m)::Ref{Cdouble}, fpointer(m)::Ref{Cint},
 		Vec3d(origin...)::Ref{Vec3d},
 		Vec3d(direction...)::Ref{Vec3d},
-		nvo::Ref{Cint}, nfo::Ref{Cint}, vo::Ref{Ptr{Cdouble}}, fo::Ref{Ptr{Cint}},
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}},
 		j::Ref{Ptr{Cint}})::Cint
 	@assert r == 0
+	index = unsafe_array(Cint, j[], cm.nf)
 
-	rvo = unsafe_wrap(Array, convert(Ptr{Point},vo[]), Int(nvo[]); own=true)
-	rfo = unsafe_wrap(Array, convert(Ptr{Face}, fo[]), Int(nfo[]); own=true)
-	index = unsafe_wrap(Array, j[], (Int(nfo[]),); own=true);
-	return CTriangleMesh{A}(rvo, rfo,
+	return CTriangleMesh(cm,
 		[(i <= nfaces(m) ? m.attributes[i] : color) for i in index])
-end
+end#»»
+function swept_volume(m::CTriangleMesh, transform, #««
+	nsteps, gridres, isolevel = 0)
+	cm = Cmesh()
+	f = (t,a,b) -> begin
+		u, v = transform(t)
+		unsafe_store!(a, Mat3d(u)) # column-major, same as Eigen
+		unsafe_store!(b, Vec3d(v))
+		return
+	end
+	ctransform = @cfunction($f, Cvoid, (Cdouble, Ptr{Mat3d}, Ptr{Vec3d}))
+	r = @ccall libiglwrap.swept_volume(
+		nvertices(m)::Cint, nfaces(m)::Cint,
+		vpointer(m)::Ref{Cdouble}, fpointer(m)::Ref{Cint},
+		ctransform::Ptr{Cvoid}, nsteps::Csize_t, gridres::Csize_t,
+		isolevel::Cdouble,
+		nvertices(cm)::Ptr{Cint}, nfaces(cm)::Ptr{Cint},
+		vpointer(cm)::Ptr{Ptr{Cdouble}}, fpointer(cm)::Ptr{Ptr{Cint}})::Cint
+	@assert r == 0
+
+	return CTriangleMesh(cm, fill(first(attributes(m)), cm.nf))
+end#»»
 
 @inline Base.union(m1::CTriangleMesh, m2::CTriangleMesh) = boolean(0, m1, m2)
 @inline Base.intersect(m1::CTriangleMesh, m2::CTriangleMesh)= boolean(1, m1, m2)

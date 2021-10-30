@@ -136,8 +136,25 @@ png("rotate_extrude", s); # hide
 ```
 ![example: rotation extrusion of a L-shape](rotate_extrude.png)
 ```@docs
-path_extrude
+sweep
 ```
+
+A swept surface is similar to a (closed) path extrusion:
+
+```@repl 0
+s = sweep(square(50))*circle(5);
+png("sweep", s); # hide
+```
+![example: a circle swept along a square](sweep.png)
+
+!!! warning "Swept surfaces"
+
+    A surface may only be swept along a closed loop
+    (or the union of several closed loops) for now;
+    this is a limitation of the `clipper` library,
+    which [does not support single-path extrusion](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm)
+    for now (and this is unlikely to change in the near future).
+
 ## 3d → 2d transformations: slicing and projection
 
 Slicing and projection convert a volume to a shape.

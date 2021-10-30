@@ -109,27 +109,28 @@ const _CLIPPER_ENUM = (#««
 	f = _CLIPPER_ENUM.fill[fill]
 	return fromc(Clipper.execute(c, _CLIPPER_ENUM.clip[op], f, f)[2])
 end
-@inline function offset(v::AbstractVector{Path{2,T}}, r::Real;
+@inline function offset(v::AbstractVector{<:Path{2}}, r::Real;
 		join = :round,
 		ends = :fill,
 		miter_limit = 2.,
 		precision = 0.2
-		)::Vector{Path{2,T}} where{T}
+		)::Vector{Path{2,Float64}}
 	c = Clipper.ClipperOffset(miter_limit, precision*_CLIPPER_ONE)
 	Clipper.add_paths!(c, toc(v),
 		_CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
 	return fromc(Clipper.execute(c, r*_CLIPPER_ONE))
 end
-@inline function offset(v::AbstractVector{Path{2,T}}, r::AbstractVector{<:Real};
+@inline function offset(v::AbstractVector{<:Path{2}}, r::AbstractVector{<:Real};
 		join = :round,
 		ends = :fill,
 		miter_limit = 2.,
 		precision = 0.2
-		)::Vector{Vector{Path{2,T}}} where{T}
+		)::Vector{Vector{Path{2,Float64}}} where{T}
 	# “Simultaneously” computes offset for several offset values.
 	# Used by path_extrude().
 	c = Clipper.ClipperOffset(miter_limit, precision*_CLIPPER_ONE)
-	Clipper.add_paths!(c, v, _CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
+	Clipper.add_paths!(c, toc(v),
+		_CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
 	return [ fromc(Clipper.execute(c, ρ*_CLIPPER_ONE)) for ρ in r]
 end
 @inline simplify_paths(p::AbstractVector{<:Path{2}}; fill=:nonzero) =
@@ -647,13 +648,13 @@ along the given path. Both arguments are provided as a
 
 Returns a `Surface` (defined by points and a triangulation).
 """
-function path_extrude(path, poly;
+function path_extrude(path::Path{2}, poly::Path{2};
 		join=:round, closed=false, miter_limit=2.0, precision=0.2)
 	# in kwargs: ends = closed ? :fill : :butt
 	N = length(poly)
 	# offset_path is a vector of vector of paths
 	@assert closed == true "Open-path extrusion is currently not implemented by ClipperLib"
-	offset_path = Shapes.offset([path], [pt[1] for pt in poly ];
+	offset_path = offset([path], [pt[1] for pt in poly ];
 		join, miter_limit, ends=closed ? :fill : :single)
 	new_points = SVector{3,eltype(eltype(eltype(offset_path)))}[]
 	first_face = Int[]; last_ff = 1

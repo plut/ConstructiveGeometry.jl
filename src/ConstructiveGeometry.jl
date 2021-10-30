@@ -9,6 +9,7 @@ import LinearAlgebra: det
 using StaticArrays
 using FixedPointNumbers
 using FastClosures
+# using Unitful: °
 
 import Rotations
 import Colors: Colors, Colorant
@@ -921,25 +922,31 @@ function (g::Mesh{T})(s::RotateExtrude) where{T}
 end
 
 # Path extrusion««2
-struct PathExtrude{T} <: AbstractTransform{3}
-	path::Vector{SVector{2,T}}
+struct Sweep <: AbstractTransform{3}
+	path::AbstractGeometry{2}
+# 	path::Vector{SVector{2,T}}
 	child::AbstractGeometry{2}
-	closed::Bool
+# 	closed::Bool
 	join::Symbol
 	miter_limit::Float64
-	@inline PathExtrude(path::AbstractVector{<:AbstractVector{T}}, child;
-		closed=false, join=:round, miter_limit=2.0) where{T} =
-		new{T}(SVector{2,T}.(path), child, closed, join, miter_limit)
+	@inline Sweep(path, child; join=:round, miter_limit=2.0) =
+		new(path, child, join, miter_limit)
 end
 
-function (g::Mesh)(s::PathExtrude)
-	polyxor = g(s.child)
-	rmax = sqrt(maximum(norm².(s.path)))
-	ε = max(get_parameter(g, :accuracy), get_parameter(g, :precision)*rmax)
-	v = [ VolumeMesh(g, Shapes.path_extrude(s.path, p;
-		closed=s.closed, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
-		for p in paths(polyxor) ]
-	return reduce(symdiff, v)
+function (g::Mesh)(s::Sweep)
+	plist = paths(g(s.child)) # profile paths
+	tlist = paths(g(s.path)) # trajectory paths
+	m = nothing
+	for t in tlist # each loop in the trajectory
+		rmax = sqrt(maximum(norm².(t)))
+		ε = max(get_parameter(g, :accuracy), get_parameter(g, :precision)*rmax)
+		v = [ VolumeMesh(g, Shapes.path_extrude(t, p;
+			closed=true, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
+			for p in plist ]
+		r = reduce(symdiff, v)
+		m = (m == nothing) ? r : csgunion(m, r)
+	end
+	return m
 end
 
 # Offset««2
@@ -1349,7 +1356,7 @@ Similar to OpenSCAD's `rotate_extrude` primitive.
 @inline rotate_extrude(s...) = rotate_extrude(360, s...)
 
 """
-    path_extrude(path, shape...)
+    sweep(path, shape...)
 
 Extrudes the given `shape` by
 1) rotating the unit *y*-vector to the direction *z*, and 
@@ -1358,8 +1365,8 @@ Extrudes the given `shape` by
 FIXME: open-path extrusion is broken because `ClipperLib` currently
 does not support the `etOpenSingle` offset style.
 """
-@inline path_extrude(path, s...; kwargs...) =
-	operator(PathExtrude, (path,), s...; kwargs...)
+@inline sweep(path, s...; kwargs...) =
+	operator(Sweep, (path,), s...; kwargs...)
 
 # offset««2
 """
@@ -1561,8 +1568,8 @@ be used.
 	mult_matrix(Reflection(v), s...; kwargs...)
 # rotate««2
 # FIXME: add a method Angle2d*StaticVector{3}
-@inline rotation(θ::Real, ::Nothing) = Rotations.Angle2d(θ)
-@inline rotation(θ::Real, axis) = Rotations.AngleAxis(θ, axis)
+@inline rotation(θ::Number, ::Nothing) = Rotations.Angle2d(θ)
+@inline rotation(θ::Number, axis) = Rotations.AngleAxis(θ, axis)
 """
     rotate(θ, {center=center}, {solid...})
     rotate(θ, axis=axis, {center=center}, {solid...})
@@ -2207,7 +2214,7 @@ export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, mirror, raise, lower
 export project, slice, half_space
 export decimate, loop_subdivide
-export linear_extrude, rotate_extrude, path_extrude
+export linear_extrude, rotate_extrude, sweep
 export color, set_parameters
 export mesh, stl, svg
 # don't export include, of course

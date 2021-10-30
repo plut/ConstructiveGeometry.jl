@@ -1,5 +1,9 @@
 # By order of priority
- - [ ] swung surfaces (`path_extrude`)
+ - [x] swept surfaces (`path_extrude`)
+  - [ ] allow planar sweep too?
+  - [ ] volume sweep (use `swept_volume`) ?
+  - [ ] fix Clipper's missing sweep? (e.g. adding a few extra points far
+    away (preserving tangents) and removing anything close to those points)
  - [x] rewrite affine transforms
    either use 3x3+3 matrices internally in all places (ugly)
    or use any types of transform (Julia-esque) and instantiate on meshing
