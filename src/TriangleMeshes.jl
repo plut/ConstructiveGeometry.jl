@@ -2,7 +2,7 @@ module TriangleMeshes
 using StaticArrays
 using FastClosures
 using IGLWrap_jll
-libiglwrap="/home/jerome/src/iglwrap/local/libiglwrap.so"
+# libiglwrap="/home/jerome/src/iglwrap/local/libiglwrap.so"
 const Vec3d = MVector{3,Cdouble}
 const Mat3d = MMatrix{3,3,Cdouble,9}
 
