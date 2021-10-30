@@ -1061,7 +1061,10 @@ not `(h,r,0)` as in OpenSCAD. For a cone, using `(cone(h,r))` instead is recomme
 
 FIXME: currently only `cylinder(h,r)` works (the general case needs scaled extrusion).
 """
-@inline cylinder(h::Real, r::Real) = linear_extrude(h)*circle(r)
+@inline cylinder(h::Real, r::Real;center::Bool=false) =
+	let c = linear_extrude(h)*circle(r)
+	center ? lower(one_half(h))*c : c
+	end
 
 """
     cone(h, r)
@@ -1372,10 +1375,10 @@ Parameters for 2d shapes:
     miter_limit=2.0
 
 Parameter for 3d solids:
-    npoints = 10 # how to subdivide segments
+    npoints = 16 # how to subdivide segments
 """
 @inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.,
-	npoints = 10) =
+	npoints = 16) =
 	operator(Offset,(r,ends,join,miter_limit, npoints),s...)
 
 """
@@ -1410,7 +1413,7 @@ instead, it tends to “round out” the solid.
 """
 @inline loop_subdivide(n::Integer, s...) = operator(LoopSubdivide, (n,), s...)
 
-# set_parameters««2
+# set_parameters, color, highlight««2
 """
     set_parameters(;accuracy, precision, symmetry, ε, type) * solid...
 
@@ -1457,9 +1460,13 @@ Marks an object as highlighted.
 This means that the base object will be displayed (in the specified color)
 at the same time as all results of operations built from this object.
 """
-@inline highlight(c::Colorant, s...) = operator(Highlight, (c,), s...)
+@inline highlight(c::Colors.RGBA, s...) = operator(Highlight, (c,), s...)
 @inline highlight(c::Union{Symbol,AbstractString}, s...) =
-	highlight(Colors.coloralpha(parse(Colorant, c), .25), s...)
+	highlight(Colors.parse(Colorant, c), s...)
+@inline highlight(c::Colors.RGB, s...) =
+	highlight(Colors.RGBA(c, _HIGHLIGHT_ALPHA), s...)
+
+const _HIGHLIGHT_ALPHA=.25
 
 function (g::Mesh{T})(c::Highlight{2}) where{T}
 	m = g(c.child)
@@ -1635,6 +1642,7 @@ TODO: more flexible syntax
 @inline Base.:*(a::Transform,z::Complex) = a*mult_matrix(_to_matrix(z))
 
 @inline Base.:*(c::Symbol, x::AbstractGeometry) = color(String(c), x)
+@inline Base.:*(c::Colorant, x::AbstractGeometry) = color(c, x)
 @inline Base.:%(c::Symbol, x::AbstractGeometry) = highlight(String(c), x)
 @inline Base.:%(c::Colorant, x::AbstractGeometry) = highlight(c, x)
 

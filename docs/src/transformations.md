@@ -93,10 +93,13 @@ The following operators are overloaded.
 offset
 ```
 ```@repl 0
-s = offset(10)*[square(100,50), square(50,100)];
-png("offset", s); # hide
+s1 = offset(10)*[square(100,50), square(50,100)];
+s2 = offset(3,npoints=32)*cube(30);
+png("offset_L", s1); # hide
+png("offset_cube", s2); # hide
 ```
-![example: an offset L-shape](offset.png)
+![example: an offset L-shape](offset_L.png)
+![example: an offset cube](offset_cube.png)
 ```@docs
 opening
 ```
@@ -120,7 +123,7 @@ png("closing", s); # hide
 linear_extrude
 ```
 ```@repl 0
-s = linear_extrude(10)*[square(10,5), square(5,15)]
+s = linear_extrude(10)*[square(10,5), square(5,15)];
 png("linear_extrude", s); # hide
 ```
 ![example: linear extrusion of a L-shape](linear_extrude.png)
@@ -128,7 +131,7 @@ png("linear_extrude", s); # hide
 rotate_extrude
 ```
 ```@repl 0
-s = rotate_extrude(245)*[square(10,5), square(5,15)]
+s = rotate_extrude(245)*[square(10,5), square(5,15)];
 png("rotate_extrude", s); # hide
 ```
 ![example: rotation extrusion of a L-shape](rotate_extrude.png)

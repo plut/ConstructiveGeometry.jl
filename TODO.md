@@ -1,4 +1,5 @@
 # By order of priority
+ - [ ] swung surfaces (`path_extrude`)
  - [x] rewrite affine transforms
    either use 3x3+3 matrices internally in all places (ugly)
    or use any types of transform (Julia-esque) and instantiate on meshing
@@ -15,9 +16,9 @@
    - [x] `loop`
    - [x] `minkowski_sum` (might need tetrahedralize)
    - [ ] `upsample` (only useful once we have deformations)
-   - [ ] `swept_volume`
+   - [x] `swept_volume`
    - [x] `centroid`
- - [ ] `cylinder(..., center)`
+ - [x] `cylinder(..., center)`
  - [ ] `cylinder(h, r1, r2)`
  - [ ] add a parameter to circles, spheres and cylinders to mesh them as
    circumscribed
@@ -30,25 +31,25 @@
  - [ ] also in 2d, regularize polygons (e.g. one backwards loop)
  - [x] libigl contains `offset_surface`
  - [x] `intersect_with_half_space`
- - [x] add some way of marking individual objects
+ - [x] add some way of marking/highlighting individual objects
    - [x] this requires expanding the mesh types to include marked objects
    - [x] as well as new syntax, e.g. `!object` or `mark()*object`
+   - [ ] fixme: remove actual object from highlighted boxes
+   - [ ] todo: write something more generic (=> ensure that any operation, e.g.`offset`, preserves highlighted items)
  - [x] half-space intersection
   - [ ] clarify parameters for `halfspace`
   - [ ] overload `left_half` etc. for 2d children
  - [x] plane intersection: `slice`
  - [x] projection
  - [ ] define a path type (for Minkowski + stroke) ?
- - [ ] overload `color*object` for `color::Colorant`
+ - [x] overload `color*object` for `color::Colorant`
  - [x] add examples (with images) in documentation
  - [x] clarify priority: `linear_extrude(8)*(5*object)`
  - [ ] `text`
    - [ ] use `Pango` for text and `FreeType` for fonts
- - [ ] move doc examples to `WGLMakie`
  - [ ] swept surfaces
- - [ ] swung surfaces (`path_extrude`)
  - [ ] wrapped volumes
- - [ ] projection of hollow sphere does not work: replace the temporary
+ - [x] projection of hollow sphere does not work: replace the temporary
    fix by something better (but this is likely Clipper's fault)
  - [ ] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
  - [ ] get a better syntax for transforms, e.g.
@@ -87,6 +88,7 @@
     # when meshing, produces
     Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))
  - [ ] import `.stl` and `.ply`
+ - [ ] move doc examples to `WGLMakie`
 # Basic types
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
    types
