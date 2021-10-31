@@ -12,7 +12,7 @@ png(name, s) = save(name*".png", Makie.plot(s));
 `ConstructiveGeometry.jl` supports two basic families of objects:
 two-dimensional shapes and three-dimensional volumes.
 
-## Two-dimensional objects
+## Two-dimensional shapes
 ### Square
 ```@docs
 square
@@ -55,7 +55,7 @@ png("polygon", s); # hide
 ```
 ![example: a polygon](polygon.png)
 
-## Three-dimensional objects
+## Three-dimensional volumes
 
 ### Cube
 ```@docs

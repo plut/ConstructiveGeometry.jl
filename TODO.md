@@ -1,5 +1,6 @@
 # By order of priority
  - [ ] check whether `translate(highlight()*s)` works
+   * it should be enough to check that all transformations apply to highlights
  - [x] swept surfaces (`path_extrude`)
   - [ ] allow planar sweep too?
   - [x] volume sweep (use `swept_volume`) ?

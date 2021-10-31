@@ -1,4 +1,4 @@
-# Mesh I/O
+# [Mesh I/O](@id io)
 
 ## STL output
 

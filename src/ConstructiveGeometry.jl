@@ -1481,8 +1481,8 @@ end
 
 Colors objects `s...` in the given color.
 """
-# @inline color(c::Colorant, s...) = operator(Color, (c,), s...)
 @inline color(c::Colors.RGBA, s...) = operator(Color, (c,), s...)
+# @inline color(c::Colorant, s...) = operator(Color, (c,), s...)
 @inline color(c::Colors.RGB, s...) = color(Colors.RGBA(c,1.), s...)
 @inline color(c::Union{Symbol,AbstractString}, s...) =
 	color(parse(MeshColor, c), s...)
@@ -1585,7 +1585,7 @@ Equivalent to `translate([0,0,-z], s...)`.
 """
     scale(a, s...; center=0)
     scale(a; center=0) * s
-		a * s
+    a * s
 Scales solids `s` by factor `a`. If `center` is given then this will be
 the invariant point.
 
@@ -1799,7 +1799,7 @@ end
 # SVG ««1
 function svg(io::IO, m::ShapeMesh)
 	(x,y) = paths(m)[1][1]; rect = MVector(x, x, y, y)
-	for (x,y) in Shapes.vertices(m)
+	for (x,y) in Shapes.vertices(m.poly)
 		x < rect[1] && (rect[1] = x)
 		x > rect[2] && (rect[2] = x)
 		y < rect[3] && (rect[3] = y)

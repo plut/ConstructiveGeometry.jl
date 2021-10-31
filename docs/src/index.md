@@ -8,14 +8,11 @@ using ConstructiveGeometry
 using CairoMakie
 
 hexagon = polygon([[cospi(t/3),sinpi(t/3)] for t in 0:5])
-c1,c2,c3 = ("#cb3c33", "#9558b2", "#389826")
+c1, c2, c3 = parse.(ConstructiveGeometry.Colorant, ( "#cb3c33", "#9558b2", "#389826"))
 
 bolt = linear_extrude(5)*(8*hexagon) ∪ cylinder(15,4)
 
-m = union(
-  color(c1)*bolt,
-	[20,0,0]+color(c2)*bolt,
-	[10,17,0]+color(c3)*bolt)
+m = union(c1*bolt, [20,0,0]+c2*bolt, [10,17,0]+c3*bolt)
 
 save("logo.png", Makie.plot(m))
 ```
@@ -33,7 +30,7 @@ This package defines three kinds of abstract geometric objects
  - [CSG operations](@ref operations) combining several objects,
    such as boolean operations or Minkowski sum.
 
-Any geometric object defined in this way may then be instantiated as an
-explicit mesh. The mesh can be visualized directly within Julia (using
-`Makie`) or exported as an STL (for 3d objects) or SVG (for 2d objects)
-file.
+Any geometric object defined in this way can then be
+[instantiated as an explicit mesh](@ref meshing).
+The mesh may be visualized directly within Julia (using `Makie`)
+or [exported](@ref io) as an STL (for 3d objects) or SVG (for 2d objects) file.

@@ -87,6 +87,8 @@ The following operators are overloaded.
  - `complex * 2dshape` is a similitude.
  - `matrix * solid` is a linear transformation.
  - `vector * solid` is a multiplication by a diagonal matrix.
+ - `color * solid` is a `color` operation.
+ - `color % solid` is a `highlight` operation.
 
 ## Two-dimensional drawing
 ```@docs
@@ -185,7 +187,7 @@ png("loop_subdivide", s); # hide
 color
 ```
 ```@repl 0
-green, red = parse(G.Colorant, ("green", "red"))
+green, red = parse.(ConstructiveGeometry.Colorant, ("green", "red"))
 s = union(green * cube(10), [10,0,0]+red*sphere(10));
 png("color", s); # hide
 ```
