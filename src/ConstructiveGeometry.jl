@@ -921,19 +921,19 @@ function (g::Mesh{T})(s::RotateExtrude) where{T}
 	return VolumeMesh(g, pts3, triangles)
 end
 
-# Path extrusion««2
-struct Sweep <: AbstractTransform{3}
+# Sweep (surface and volume)««2
+struct SurfaceSweep <: AbstractTransform{3}
 	path::AbstractGeometry{2}
 # 	path::Vector{SVector{2,T}}
 	child::AbstractGeometry{2}
 # 	closed::Bool
 	join::Symbol
 	miter_limit::Float64
-	@inline Sweep(path, child; join=:round, miter_limit=2.0) =
+	@inline SurfaceSweep(path, child; join=:round, miter_limit=2.0) =
 		new(path, child, join, miter_limit)
 end
 
-function (g::Mesh)(s::Sweep)
+function (g::Mesh)(s::SurfaceSweep)
 	plist = paths(g(s.child)) # profile paths
 	tlist = paths(g(s.path)) # trajectory paths
 	m = nothing
@@ -947,6 +947,20 @@ function (g::Mesh)(s::Sweep)
 		m = (m == nothing) ? r : csgunion(m, r)
 	end
 	return m
+end
+
+struct VolumeSweep <: AbstractGeometry{3}
+	transform::Function
+	nsteps::Int
+	grid::Int
+	isolevel::Float64
+	child::AbstractGeometry{3}
+end
+
+function (g::Mesh)(s::VolumeSweep)
+	vol = g(s.child).mesh
+	return VolumeMesh(TriangleMeshes.swept_volume(vol, s.transform,
+		s.nsteps, s.grid, s.isolevel))
 end
 
 # Offset««2
@@ -1359,14 +1373,39 @@ Similar to OpenSCAD's `rotate_extrude` primitive.
     sweep(path, shape...)
 
 Extrudes the given `shape` by
-1) rotating the unit *y*-vector to the direction *z*, and 
-2) moving it so that the origin follows the `path`.
+1) rotating perpendicular to the path (rotating the unit *y*-vector
+to the direction *z*), and 
+2) sweeping it along the `path`, with the origin on the path.
 
 FIXME: open-path extrusion is broken because `ClipperLib` currently
 does not support the `etOpenSingle` offset style.
 """
 @inline sweep(path, s...; kwargs...) =
-	operator(Sweep, (path,), s...; kwargs...)
+# @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
+	operator(_Sweep, (path,), s...; kwargs...)
+
+"""
+    sweep(transform, volume)
+
+Sweeps the given `volume` by applying the `transform`:
+
+  V' = ⋃ { f(t) ⋅ V | t ∈ [0,1] }
+
+`f` is a function mapping a real number in [0,1] to a pair (matrix, vector)
+defining an affine transform.
+
+ - nsteps:  number of steps for subdividing the [0,1] interval
+ - gridsize: subdivision for marching cubes
+ - isolevel: optional distance to add/subtract from swept volume
+"""
+function sweep end
+
+@inline _Sweep(path, s::AbstractGeometry{2}; kwargs...) =
+	SurfaceSweep(path, s)
+@inline _Sweep(transform, s::AbstractGeometry{3};
+	nsteps=20, gridsize=32, isolevel=0) =
+	VolumeSweep(transform, nsteps, gridsize, isolevel, s)
+
 
 # offset««2
 """
@@ -1460,8 +1499,8 @@ end
 
 """
     highlight(c::Colorant, s)
-		highlight(c::AbstractString, s)
-		(c::Colorant) % s
+    highlight(c::AbstractString, s)
+    (c::Colorant) % s
 
 Marks an object as highlighted.
 This means that the base object will be displayed (in the specified color)
@@ -1631,9 +1670,10 @@ TODO: more flexible syntax
 	tail::AbstractGeometry...) = setdiff(x, union(y, tail...))
 # this purposely does not define a method for -(x::AbstractGeometry).
 # (complement could be defined as ~x)
-@inline Base.:-(x::AbstractGeometry{D}) where{D} = difference(intersect(), x)
+@inline Base.:-(x::AbstractGeometry{D}) where{D} = setdiff(intersect(), x)
 @inline Base.:-(x::AbstractVector{<:AbstractGeometry},
-                y::AbstractVector{<:AbstractGeometry}) = difference(x, y)
+                y::AbstractVector{<:AbstractGeometry}) =
+	setdiff(union(x), union(y))
 
 @inline Base.:+(v::AbstractVector, x::AbstractGeometry) = translate(v, x)
 @inline Base.:+(x::AbstractGeometry, v::AbstractVector) = translate(v, x)
@@ -1733,8 +1773,8 @@ or the `set_parameters` object.
 """
 function stl(io::IO, m::VolumeMesh)
 	println(io, "solid Julia_ConstructiveGeometry_jl_model")
-	points = TriangleMeshes.vertices(m)
-	faces = TriangleMeshes.faces(m)
+	points = TriangleMeshes.vertices(m.mesh)
+	faces = TriangleMeshes.faces(m.mesh)
 	for f in faces
 		tri = (points[f[1]], points[f[2]], points[f[3]])
 		n = cross(tri[2]-tri[1], tri[3]-tri[1])

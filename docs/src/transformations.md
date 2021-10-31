@@ -143,10 +143,9 @@ A swept surface is similar to a (closed) path extrusion:
 
 ```@repl 0
 s = sweep(square(50))*circle(5);
-png("sweep", s); # hide
+png("swept_circle", s); # hide
 ```
-![example: a circle swept along a square](sweep.png)
-
+![example: a circle swept along a square](swept_circle.png)
 !!! warning "Swept surfaces"
 
     A surface may only be swept along a closed loop
@@ -154,6 +153,13 @@ png("sweep", s); # hide
     this is a limitation of the `clipper` library,
     which [does not support single-path extrusion](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm)
     for now (and this is unlikely to change in the near future).
+```@repl 0
+f(t) =([ cospi(t) -sinpi(t) 0;sinpi(t) cospi(t) 0;0 0 1],[0 0 10*t]);
+s = sweep(f)*cube(20);
+png("swept_cube", s);
+
+```
+![example: a cube swept along a helix](swept_cube.png)
 
 ## 3d → 2d transformations: slicing and projection
 
