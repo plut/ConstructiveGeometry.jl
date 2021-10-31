@@ -1461,7 +1461,7 @@ instead, it tends to “round out” the solid.
 
 # set_parameters, color, highlight««2
 """
-    set_parameters(;accuracy, precision, symmetry, ε, type) * solid...
+    set_parameters(;accuracy, precision, symmetry) * solid...
 
 A transformation which passes down the specified parameter values to its
 child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
@@ -1481,7 +1481,9 @@ end
 
 Colors objects `s...` in the given color.
 """
-@inline color(c::Colorant, s...) = operator(Color, (c,), s...)
+# @inline color(c::Colorant, s...) = operator(Color, (c,), s...)
+@inline color(c::Colors.RGBA, s...) = operator(Color, (c,), s...)
+@inline color(c::Colors.RGB, s...) = color(Colors.RGBA(c,1.), s...)
 @inline color(c::Union{Symbol,AbstractString}, s...) =
 	color(parse(MeshColor, c), s...)
 @inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =

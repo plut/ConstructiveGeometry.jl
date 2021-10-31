@@ -84,3 +84,44 @@ Minkowski sum between a volume and a polygon is also allowed;
 here the polygon is a triangle in the horizontal plane:
 ![example: Minkowski sum of a cube and a polygon](minkowski_cube_polygon.png)
 
+## Slicing and projection
+
+Slicing and projection convert a volume to a shape.
+These transformations are only defined with respect to horizontal planes,
+since these are the only planes in which canonical `(x,y)` coordinates
+are defined.
+
+To use another plane, say the image of the horizontal plane by a rotation
+`R`, apply the inverse rotation of `R` to the object to bring the
+situation back to the horizontal plane.
+
+### `slice`
+```@docs
+slice
+```
+```@repl 0
+s = slice()*setdiff(sphere(20),sphere(18));
+png("slice", s); # hide
+```
+![example: slicing a hollow sphere](slice.png)
+
+### `project`
+```@docs
+project
+```
+```@repl 0
+s = project()*setdiff(sphere(20),sphere(18));
+png("project", s); # hide
+```
+![example: projecting a hollow sphere](project.png)
+
+## Intersection with half-space
+```@docs
+half_space
+```
+```@repl 0
+s = half_space([0,0,-1],[0,0,0])*setdiff(sphere(20),sphere(18));
+png("halfspace", s); # hide
+```
+![example: one half of a hollow sphere](halfspace.png)
+

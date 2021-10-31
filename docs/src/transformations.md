@@ -67,7 +67,7 @@ scale
 rotate
 ```
 ```@repl 0
-s = rotate(30)*square(20)
+s = rotate(30)*square(20);
 png("rotate", s); # hide
 ```
 ![a rotated square](rotate.png)
@@ -153,52 +153,14 @@ png("swept_circle", s); # hide
     this is a limitation of the `clipper` library,
     which [does not support single-path extrusion](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm)
     for now (and this is unlikely to change in the near future).
+
 ```@repl 0
 f(t) =([ cospi(t) -sinpi(t) 0;sinpi(t) cospi(t) 0;0 0 1],[0 0 10*t]);
-s = sweep(f)*cube(20);
-png("swept_cube", s);
+s = sweep(f; nsteps=100,gridsize=100)*cube(20);
+png("swept_cube", s); # hide
 
 ```
 ![example: a cube swept along a helix](swept_cube.png)
-
-## 3d → 2d transformations: slicing and projection
-
-Slicing and projection convert a volume to a shape.
-These transformations are only defined with respect to horizontal planes,
-since these are the only planes in which canonical `(x,y)` coordinates
-are defined.
-
-To use another plane, say the image of the horizontal plane by a rotation
-`R`, apply the inverse rotation of `R` to the object to bring the
-situation back to the horizontal plane.
-
-### `slice`
-```@docs
-slice
-```
-```@repl 0
-s = slice()*setdiff(sphere(20),sphere(18));
-png("slice", s); # hide
-```
-![example: slicing a hollow sphere](slice.png)
-
-### `project`
-```@docs
-project
-```
-```@repl 0
-s = project()*setdiff(sphere(20),sphere(18));
-png("project", s); # hide
-```
-![example: projecting a hollow sphere](project.png)
-```@docs
-half_space
-```
-```@repl 0
-s = half_space([0,0,-1],[0,0,0])*setdiff(sphere(20),sphere(18));
-png("halfspace", s); # hide
-```
-![example: one half of a hollow sphere](halfspace.png)
 
 ## Decimation
 
@@ -217,25 +179,28 @@ png("loop_subdivide", s); # hide
 ```
 ![example: loop subdivision of a cube](loop_subdivide.png)
 
-## Inserting metadata
-
-A couple of transformations attach metadata to objects.
-These are defined using the same base types as affine transforms
-and can therefore be applied using the same syntax,
-i.e. either as `transform(parameters, s...)`
-or as a product `transform(parameters) * s`.
+## Coloring objects
 
 ```@docs
 color
 ```
+```@repl 0
+green, red = parse(G.Colorant, ("green", "red"))
+s = union(green * cube(10), [10,0,0]+red*sphere(10));
+png("color", s); # hide
+```
+![example: union of a sphere and a cube](color.png)
+
 ```@docs
 highlight
 ```
 ```@repl 0
-s = intersect(:green % cube(10), :red % ([10,0,0]+sphere(10)));
+s = intersect(green % cube(10), red % ([10,0,0]+sphere(10)));
 png("highlight", s); # hide
 ```
 ![example: intersection of a highlighted sphere and a highlighted cube](highlight.png)
+
+## Modifying meshing parameters
 ```@docs
 set_parameters
 ```
@@ -243,3 +208,6 @@ set_parameters
 The `set_parameters` transformation allows attaching arbitrary metadata.
 This is on purpose (although there currently exists no easy way
 for an user to recover these metadata while meshing an object).
+
+The values for these parameters are explained in [Accuracy and
+precision](@ref accuracy_precision).

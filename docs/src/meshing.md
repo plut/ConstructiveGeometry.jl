@@ -7,10 +7,6 @@
 The meshing of objects is governed by a few parameters:
  - `accuracy` and `precision` determine the number of faces inserted in the mesh;
  - `symmetry` allows to impose a given rotational symmetry to circles;
- - `type` dictates the coordinate type of the returned mesh (e.g.
-	 `Float64` or `Rational{Int}`);
- - `ε` (experimental) is a value of thickness of planes, i.e. any point
-	 closer than `ε` from a plane is considered as belonging to the plane.
 
 To set values other than the defaults for an object,
 apply the `set_parameters` transform to that object:
@@ -21,7 +17,7 @@ circle(2)
 ```
 
 
-## Accuracy and precision
+## [Accuracy and precision](@id accuracy_precision)
 
  - `accuracy` is the maximum absolute deviation allowed when meshing an object.
  This is the maximum distance between the mesh and the ideal shape.
@@ -108,6 +104,9 @@ In addition to `accuracy` and `precision`,
 the `symmetry` parameter allows forcing the number of vertices
 of a circle to be a multiple of a defined value
 (by rounding up, if needed, to a multiple of `symmetry`).
+
+This parameter currently has no effect on spheres
+(this is on the to-do list).
 
 # Mesh types and orientation
 

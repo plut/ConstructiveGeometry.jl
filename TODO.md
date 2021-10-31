@@ -1,9 +1,11 @@
 # By order of priority
+ - [ ] check whether `translate(highlight()*s)` works
  - [x] swept surfaces (`path_extrude`)
   - [ ] allow planar sweep too?
-  - [ ] volume sweep (use `swept_volume`) ?
+  - [x] volume sweep (use `swept_volume`) ?
   - [ ] fix Clipper's missing sweep? (e.g. adding a few extra points far
     away (preserving tangents) and removing anything close to those points)
+    [ ] or write a patch for the C++ library?
  - [x] rewrite affine transforms
    either use 3x3+3 matrices internally in all places (ugly)
    or use any types of transform (Julia-esque) and instantiate on meshing
@@ -51,7 +53,6 @@
  - [x] clarify priority: `linear_extrude(8)*(5*object)`
  - [ ] `text`
    - [ ] use `Pango` for text and `FreeType` for fonts
- - [ ] swept surfaces
  - [ ] wrapped volumes
  - [x] projection of hollow sphere does not work: replace the temporary
    fix by something better (but this is likely Clipper's fault)
@@ -124,9 +125,9 @@
 ```
  - [ ] `symmetrize(m, s...) = union(s..., mirror(m, s...))`
    find some easy syntax allowing also `symmetrize(m)*s`
- - [ ] find something like OpenSCAD' # ! % operators.
+ - [x] find something like OpenSCAD' # ! % operators.
   - [ ] integer%solid (with various highlight colors)
-  - [ ] and find a way to propagate this through the hierarchy
+  - [x] and find a way to propagate this through the hierarchy
    (a) prefix multiplication by integer constant
    (b) unary operators: + - ! √ ~ ¬
    (c) ad-hoc `Transform` with one-letter name, e.g. `H*square(1)`
@@ -136,7 +137,7 @@
  - [ ] `object ± real` = offset
  - [ ] `- ⊖` Minkowski difference
  - [ ] `:` convex hull ?
- - [ ] `~` complement
+ - [x] `~` complement
  - [ ] `×` extrusion (scalar => linear_extrude; interval =>
    rotate_extrude; path => path_extrude)
  - [x] `*` multmatrix; scaling
