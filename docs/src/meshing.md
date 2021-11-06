@@ -1,8 +1,20 @@
 # [Meshing](@id meshing)
 
+Objects are converted to explicit meshes
+for display or export as STL or SVG files.
+
+The `plot`, `stl`, `svg` commands all perform
+implicit conversion to meshes;
+the package is useable without explicit call to the meshing functions.
+However, working with explicit meshes
+allows to e.g. perform arbitrary (non-linear)
+coordinate transformations on the objects.
+
 ## Interface
 
-`mesh(object, parameters...)`
+```@docs
+mainmesh
+```
 
 The meshing of objects is governed by a few parameters:
  - `accuracy` and `precision` determine the number of faces inserted in the mesh;
@@ -16,6 +28,12 @@ set_parameters(accuracy=1)*
 circle(2)
 ```
 
+### Auxiliary meshes
+
+These are the meshes of any `highlight`()ed parts of the objects.
+Auxiliary meshes are only used for displaying
+(whether interactively with GLMakie, or as an image with CairoMakie);
+they are ignored when exporting the object to STL or SVG format.
 
 ## [Accuracy and precision](@id accuracy_precision)
 

@@ -1,12 +1,32 @@
 # By order of priority
- - [ ] check whether `translate(highlight()*s)` works
+ - [x] check whether `translate(highlight()*s)` works
    * it should be enough to check that all transformations apply to highlights
+ - [x] replace (::Mesh)(::ConstructiveGeometry) by three functions
+  2 recursive calls:
+   `mainmesh`: main mesh only (used for STL, SVG)
+   `fullmesh`: everything including auxiliaries
+
+  2 interfaces:
+   (1) compute `mainmesh` from `mainmesh`
+   (2) compute `fullmesh` from `fullmesh`
+  call for (2) includes call for (1)
+     this means that fullmeshes are
+ `mainmesh` realizes the mesh of the object itself
+ `auxmeshes` (with a sensible default value:
+   union of all auxmeshes of all children)
+  (and this default value is superseded for AffineTransform)
+ `mesh` is mainmesh + setdiff(auxmeshes, mainmesh)
+ !! ensure that aux meshing does not lead to recomputing the tree
+* rename `Mesh` -> `MeshOptions`
+
+ - [ ] make it faster (check `@code_warntype` everywhere for a start)
  - [x] swept surfaces (`path_extrude`)
   - [ ] allow planar sweep too?
   - [x] volume sweep (use `swept_volume`) ?
   - [ ] fix Clipper's missing sweep? (e.g. adding a few extra points far
     away (preserving tangents) and removing anything close to those points)
     [ ] or write a patch for the C++ library?
+ - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] rewrite affine transforms
    either use 3x3+3 matrices internally in all places (ugly)
    or use any types of transform (Julia-esque) and instantiate on meshing
@@ -93,6 +113,7 @@
     [1,0,0] + annotate("blah", (.5,.5,5))* sphere(3);
     # when meshing, produces
     Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))
+    - [ ] hook them in existing highlight procedure
  - [ ] import `.stl` and `.ply`
  - [ ] move doc examples to `WGLMakie`
 # Basic types
