@@ -330,8 +330,8 @@ NOTE: for now, only `Float64` is possible,
 struct MeshOptions{T<:Real,C}
 	parameters::NamedTuple
 	color::C
-	@inline MeshOptions{T,C}(parameters) where{T,C} =
-		new{T,C}(parameters, parameters.color)
+	@inline MeshOptions{T,C}(p, c) where{T,C} = new{T,C}(p, c)
+	@inline MeshOptions{T,C}(p) where{T,C} = new{T,C}(p, p.color)
 	@inline MeshOptions{T}(parameters) where{T} =
 		MeshOptions{T,typeof(parameters.color)}(parameters)
 	@inline MeshOptions(parameters::NamedTuple) =
@@ -341,6 +341,8 @@ struct MeshOptions{T<:Real,C}
 end
 @inline coordtype(::MeshOptions{T}) where{T} = T
 
+@inline MeshOptions(g::M, p::NamedTuple) where{M<:MeshOptions} =
+	M(merge(g.parameters, p), g.color)
 @inline Base.get(g::MeshOptions, name) = get_parameter(g.parameters, name)
 
 """
@@ -768,7 +770,10 @@ struct SetParameters{D} <: AbstractTransform{D}
 end
 
 # FIXME: special case for compute_mainmesh here!
-@inline mainmesh(g::MeshOptions, s::SetParameters, (m,)) = m
+compute_mainmesh(g::MeshOptions, s::SetParameters) =
+	compute_mainmesh(MeshOptions(g, s.parameters), s.child)
+compute_fullmesh(g::MeshOptions, s::SetParameters) =
+	compute_fullmesh(MeshOptions(g, s.parameters), s.child)
 # Linear extrusion««2
 struct LinearExtrude{T} <: AbstractTransform{3}
 	height::T
@@ -991,6 +996,9 @@ from the (possibly empty) list of meshes of its children.
 """
 function mainmesh end
 
+# TODO: merge mainmesh and fullmesh
+# by including the switch in `MeshOptions` structure
+
 """
     compute_maimmesh(g::MeshOptions, object)
 
@@ -1102,9 +1110,9 @@ A sphere with diameter `r`, centered at the origin.
 @inline sphere(a::Real) = Sphere(a)
 
 # Cylinders and cones««2
-"""
 #     cylinder(h, r1, r2 [, center=false])
 #     cylinder(h, (r1, r2) [, center=false])
+"""
     cylinder(h, r [, center=false])
 
 A cylinder (or cone frustum)
