@@ -932,7 +932,7 @@ struct Offset{D} <: AbstractTransform{D}
 	# and the child:
 	child::AbstractGeometry{D}
 	@inline Offset(radius::Real, ends::Symbol, join::Symbol, miter_limit::Real,
-		npoints::Integer, child::AbstractGeometry{D}) where{D} =
+		npoints::Real, child::AbstractGeometry{D}) where{D} =
 		new{D}(radius, ends, join, miter_limit, npoints, child)
 end
 
@@ -1462,26 +1462,34 @@ Parameters for 2d shapes:
 
 Parameter for 3d solids:
     npoints = 16 # how to subdivide segments
+
+!!! warning "Complexity"
+    Offset of a volume is a costly operation;
+    it is realized using a marching cubes algorithm on a grid defined
+    by `npoints`.
+		Thus, its complexity is **cubic** in the parameter `npoints`.
 """
 @inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.,
 	npoints = 16) =
 	operator(Offset,(r,ends,join,miter_limit, npoints),s...)
 
 """
-    opening(r, shape...)
+    opening(r, shape...; kwargs...)
 
 [Morphological opening](https://en.wikipedia.org/wiki/Opening_(morphology)):
 offset(-r) followed by offset(r).
 Removes small appendages and rounds convex corners.
 """
-@inline opening(r::Real, s...) = offset(r)*offset(-r, s...)
+@inline opening(r::Real, s...;kwargs...) =
+	offset(r;kwargs...)*offset(-r, s...; kwargs...)
 """
-    closing(r, shape...)
+    closing(r, shape...; kwargs...)
 
-Morphological closing: offset(r) followed by offset(-r).
+[Morphological closing](https://en.wikipedia.org/wiki/Closing_(morphology)):
+offset(r) followed by offset(-r).
 Removes small holes and rounds concave corners.
 """
-@inline closing(r::Real, s...) = offset(-r)*offset(r, s...)
+@inline closing(r::Real, s...; kwargs...) = opening(-r, s...; kwargs...)
 
 """
     decimate(n, surface...)

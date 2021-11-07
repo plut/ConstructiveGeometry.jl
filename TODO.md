@@ -1,4 +1,5 @@
 # By order of priority
+ - [ ] auto-compute `offset` npoints from accuracy+precision
  - [x] check whether `translate(highlight()*s)` works
    * it should be enough to check that all transformations apply to highlights
  - [x] replace (::Mesh)(::ConstructiveGeometry) by three functions
@@ -71,6 +72,7 @@
  - [ ] define a path type (for Minkowski + stroke) ?
  - [x] overload `color*object` for `color::Colorant`
  - [x] add examples (with images) in documentation
+  - [ ] more sophisticated/real examples
  - [x] clarify priority: `linear_extrude(8)*(5*object)`
  - [ ] `text`
    - [ ] use `Pango` for text and `FreeType` for fonts

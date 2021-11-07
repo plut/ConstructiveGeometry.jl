@@ -24,14 +24,16 @@ The following features should be mostly working now:
  - boolean operations, linear transformations;
  - 2d->3d extrusions (linear, revolution, curvilinear);
  - 3d->2d projection and slicing;
- - 2d Minkowski sum and offset;
- - 3d offset, Minkowski sum (partly) and surface decimation.
+ - Minkowski sum (2d and 3d);
+ - offset (2d and 3d);
+ - surface decimation and Loop subdivision;
+ - export to SVG (for shapes) and STL (for volumes).
 
 ## Global philosophy
 
 This package defines both a structure for abstract­geometric objects
-and a way to convert such “perfect” object to concrete meshes.
-This conversion is implemented as triangulated surfaces
+and a way to convert such “ideal” objects to concrete meshes.
+These meshes are implemented as triangulated surfaces
 using the IGL graphics library.
 
 ## Why write this when OpenSCAD exists?
@@ -54,21 +56,19 @@ We believe that using Julia could provide following advantages:
    hard, and some form of splines should be possible too), whereas such
    attempts in OpenSCAD often lead to “rewriting OpenSCAD in OpenSCAD”;
  - file I/O is easier to implement (and in more formats);
- - IGL's triangulated surfaces are likely faster than CGAL's Nef
-   polyedra, although this package has not reached the “speed benchmarks”
-   phase yet.
+ - IGL's triangulated surfaces are likely faster (and more adapted to
+   CAD) than CGAL's Nef polyedra, although this package has not reached
+   the “speed benchmarks” phase yet.
 
 On the other hand, one notable drawback of Julia (in particular with many
 dependencies) is the long “time-to-first-plot”. Once everything is loaded
-howerver, the second, third plots etc. are much faster.
-
+however, the second, third plots etc. are much faster.
 
 Reaching feature-parity (at least for static designs)
 is one of the first goals of this package.
-The next few steps in this direction include:
- - include the missing primitives: `import`, `text`;
- - include some way of highlighting parts of the design
-   (OpenSCAD's `#` and `!` operators)
+The main missing parts for this are the primitives `import` and `text`.
+On the other hand, this package already provides a few constructions
+absent from (base) OpenSCAD, such as 3d offsetting or surface sweep.
 
 
 ## Future goals
