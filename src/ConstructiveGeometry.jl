@@ -928,12 +928,12 @@ struct Offset{D} <: AbstractTransform{D}
 	join::Symbol
 	miter_limit::Float64
 	# this value is used only for 3d children:
-	npoints::Int
+	maxgrid::Int
 	# and the child:
 	child::AbstractGeometry{D}
 	@inline Offset(radius::Real, ends::Symbol, join::Symbol, miter_limit::Real,
-		npoints::Real, child::AbstractGeometry{D}) where{D} =
-		new{D}(radius, ends, join, miter_limit, npoints, child)
+		maxgrid::Real, child::AbstractGeometry{D}) where{D} =
+		new{D}(radius, ends, join, miter_limit, maxgrid, child)
 end
 
 function mainmesh(g::MeshOptions, s::Offset{2}, (m,))
@@ -942,8 +942,14 @@ function mainmesh(g::MeshOptions, s::Offset{2}, (m,))
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
 end
 
-@inline mainmesh(g::MeshOptions, s::Offset{3}, (m,)) =
-	VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius, s.npoints))
+function mainmesh(g::MeshOptions, s::Offset{3}, (m,))
+	bbox = [ extrema(v[i] for v in vertices(m)) for i in SOneTo(3)]
+	width= maximum(x[2]-x[1] for x in bbox)
+	# theoretical number of points needed:
+	N = ceil(Int, min(1/get(g, :precision), width/get(g,:accuracy)))
+	np = s.maxgrid > 0 ? min(s.maxgrid, N) : N
+	return VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius, np))
+end
 
 # Decimate««2
 struct Decimate <: AbstractTransform{3}
@@ -1456,22 +1462,24 @@ Offsets by given radius.
 Positive radius is outside the shape, negative radius is inside.
 
 Parameters for 2d shapes:
+
     ends=:round|:square|:butt|:loop
     join=:round|:miter|:square
     miter_limit=2.0
 
 Parameter for 3d solids:
-    npoints = 16 # how to subdivide segments
+
+    maxgrid = 32 # upper bound on the number of cubes used in one direction
 
 !!! warning "Complexity"
     Offset of a volume is a costly operation;
     it is realized using a marching cubes algorithm on a grid defined
-    by `npoints`.
-		Thus, its complexity is **cubic** in the parameter `npoints`.
+    by `maxgrid`.
+		Thus, its complexity is **cubic** in the parameter `maxgrid`.
 """
 @inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.,
-	npoints = 16) =
-	operator(Offset,(r,ends,join,miter_limit, npoints),s...)
+	maxgrid = 32) =
+	operator(Offset,(r,ends,join,miter_limit, maxgrid),s...)
 
 """
     opening(r, shape...; kwargs...)

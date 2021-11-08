@@ -1,5 +1,8 @@
-# By order of priority
- - [ ] auto-compute `offset` npoints from accuracy+precision
+# Main points
+ - [ ] replace `accuracy` and `precision` by better names (e.g.
+   `absolute` and `relative`, `fragment` and `error`, `epsilon`... ?
+   `atol`/`rtol` ?
+ - [x] auto-compute `offset` npoints from meshing options
  - [x] check whether `translate(highlight()*s)` works
    * it should be enough to check that all transformations apply to highlights
  - [x] replace (::Mesh)(::ConstructiveGeometry) by three functions
@@ -18,15 +21,20 @@
   (and this default value is superseded for AffineTransform)
  `mesh` is mainmesh + setdiff(auxmeshes, mainmesh)
  !! ensure that aux meshing does not lead to recomputing the tree
+ - [ ] find better names for `mainmesh`, `compute_mainmesh`,
+   `compute_fullmesh`, `auxmeshes`
+ - [ ] see if modifying `MeshOptions` can merge `fullmesh` and `mainmesh`
 * rename `Mesh` -> `MeshOptions`
 
  - [ ] make it faster (check `@code_warntype` everywhere for a start)
+  - [ ] make objects mutable to store computed mesh
  - [x] swept surfaces (`path_extrude`)
   - [ ] allow planar sweep too?
   - [x] volume sweep (use `swept_volume`) ?
   - [ ] fix Clipper's missing sweep? (e.g. adding a few extra points far
     away (preserving tangents) and removing anything close to those points)
     [ ] or write a patch for the C++ library?
+ - [ ] lofting/skinning
  - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] rewrite affine transforms
    either use 3x3+3 matrices internally in all places (ugly)
@@ -62,14 +70,14 @@
  - [x] add some way of marking/highlighting individual objects
    - [x] this requires expanding the mesh types to include marked objects
    - [x] as well as new syntax, e.g. `!object` or `mark()*object`
-   - [ ] fixme: remove actual object from highlighted boxes
-   - [ ] todo: write something more generic (=> ensure that any operation, e.g.`offset`, preserves highlighted items)
+   - [x] fixme: remove actual object from highlighted boxes
+   - [x] todo: write something more generic (=> ensure that any operation, e.g.`offset`, preserves highlighted items)
  - [x] half-space intersection
   - [ ] clarify parameters for `halfspace`
   - [ ] overload `left_half` etc. for 2d children
+   - [ ] this needs a type for symbolic directions (6 names)
  - [x] plane intersection: `slice`
  - [x] projection
- - [ ] define a path type (for Minkowski + stroke) ?
  - [x] overload `color*object` for `color::Colorant`
  - [x] add examples (with images) in documentation
   - [ ] more sophisticated/real examples
@@ -87,12 +95,14 @@
  - [ ] 2d Minkowski difference
  - [ ] `linear_extrude` with twist and scale
  - [ ] `rotate_extrude` with slide (per-turn) along the axis
+ - [ ] rename all extrusions as `extrude`
  - [ ] find a way to fix path extrusion? either
    - [ ] cut “by hand” the result of a “butt” extrusion;
    - [ ] intersect the result of a custom “fill” extrusion;
+   - [ ] patch the `clipper` library...
  - [ ] bring back some `Angle` types (with degrees) to allow overloading
    of `extrude`, e.g. `extrude(90°)`; likewise, use `cospi` and `sinpi`
-   - [ ] `using Unitful.°` is probably (almost) enough
+   - [ ] `using Unitful: °` is probably (almost) enough
  - [ ] compute center of gravity (and use it for scaling etc.)
  - [ ] `color`: add more properties (e.g. shininess) to be able to show
    e.g. metal parts
@@ -108,12 +118,11 @@
     circle(1)
   and it should be “open” for adding new keywords, e.g.
     circle(1, center=[0,0]) # => translate([0,0])* circle(1)
-    square(3, round=1) # => calls rounded_square(3, 1)
+    square(3, closing=1) # => calls closing(1)*square(3)
   - [ ] path wrapping
  - **Definitions of geometric objects**
  - [ ] Annotations:
     [1,0,0] + annotate("blah", (.5,.5,5))* sphere(3);
-    # when meshing, produces
     Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))
     - [ ] hook them in existing highlight procedure
  - [ ] import `.stl` and `.ply`
@@ -123,16 +132,19 @@
    types
     [ ] probably requires making `Vec` a separate type from `SArray`
     (to avoid piracy)
+ - [ ] think of using `LabelledArrays.jl` (`SLArray`) as an alternative to
+   `StaticVector` for `Vec` types
  - [x] add a `symmetry` parameter for circles
    - [ ] (and spheres?)
  - [ ] this needs a plane object type (which could be the image by a 2x3
    multmatrix of `:full`), for intersections etc.
- - [ ] think of using `LabelledArrays.jl` (`SLArray`) as an alternative to
-   `StaticVector` for `Vec` types
  - [ ] add a 1d type (points, segments; paths) for minkowski (/ extrusions)?
    - [ ] this makes sense; `Clipper.jl` seems happy to do Minkowski with a path
+ - [ ] define a path type (for Minkowski + stroke) ?
+  - [ ] probably useful for 3d paths at least
  - [ ] abstract directions (`up`, `left`) etc., interpreted differently
    depending on the dimension.
+  - [ ] used for either intersections (half) or anchors
  - [ ] add a LineNode reference to constructors
    (i.e. first thing in call stack outside module).
 # Primitives
@@ -157,7 +169,8 @@
    (c) ad-hoc `Transform` with one-letter name, e.g. `H*square(1)`
  - [ ] think of replacing parameters by kwargs
  - [x]  `∪`, `∩`, `\`: booleans
- - [x] `+ ⊕` Minkowski sum; translation
+ - [x] `+` translation
+ - [ ]  `⊕` Minkowski sum
  - [ ] `object ± real` = offset
  - [ ] `- ⊖` Minkowski difference
  - [ ] `:` convex hull ?
@@ -171,9 +184,9 @@
  - [ ] make transformations even lazier, so that they are evaluated only once
    their subjects (and more importantly, their dimension) are known
  - [ ] : overload extrude() (for paths, angles, numbers)
- - [?] a move system (= a representation of abstract affine rotations)
-   - [ ] allow `NamedTuple` for this
- - [ ] possible via `move(origin, s...; direction, spin)`
+ - [ ] a move system (= a representation of abstract affine rotations)
+  - [ ] allow `NamedTuple` for this
+  - [ ] possible via `move(origin, s...; direction, spin)`
  - [ ] anchor/attachment system
     anchor(square(…), [-1,0])
     anchor(square(…), :left)
@@ -184,16 +197,16 @@
     attach(X) * [
       :left => Y, :right => Z,
     ] # as array *or* tuple
- - [ ] 3d Minkowski
+ - [x] 3d Minkowski
  - [ ] replace minkowski with circle by an offset
 # Issues in other packages
  - [ ] `Rotations.jl`: using the same type for angles and coordinates is not
    terribly useful (in particular with angles in radians).
 # Packaging
- - [?] write a full doc about how to define a new transform
- - [ ] complete the list of exports
+ - [ ] write a full doc about how to define a new transform
+ - [ ] check the list of exports
  - [x] write a minimal regression test
-   - [ ] the doc is the test
+   - [x] the doc is the test
    - [ ] add some more complicated examples in the doc to expand the tests
  - [ ] distinguish between core and sub-packages (implementing BOSL2 stuff)?
 # Future
@@ -210,8 +223,8 @@
  - [ ] improve `unit_n_gon` to take advantage of symmetries
  - [ ] Annotations in 2d
  - [ ] Annotations in 3d (this might depend on the visualizer though)
- - [?] rewrite Annotations in terms of `Transform`
- - [x] (more generally, metadata)
+ - [ ] rewrite Annotations in terms of `Transform`
+ - [ ] (more generally, metadata)
  - [ ] add an Annotation type, which passes through all transformations
  - [?] things from BOSL2 to look at:
  - [ ] transforms, distributors, mutators,
