@@ -60,6 +60,7 @@
  - [ ] `cylinder(h, r1, r2)`
  - [ ] add a parameter to circles, spheres and cylinders to mesh them as
    circumscribed
+ - [ ] document how to extend (e.g. new object type)
  - [x] Minkowski sum for holed polygons: slice a connected, holed polygon
    as an almost-simple loop (by connecting outer + inner paths)
    and call binary Minkowski sum

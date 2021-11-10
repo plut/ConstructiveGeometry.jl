@@ -327,7 +327,7 @@ end
 Recursively compute the main mesh of this object,
 calling the `mainmesh` and `auxmeshes` functions as needed.
 """
-mesh(g::MeshOptions{false}, s::AbstractGeometry) =
+mesh(g::MeshOptions{false}, s::AbstractGeometry)::MeshType(g,s) =
 	mainmesh(g, s, [ mesh(g, x) for x in children(s) ])
 
 function mesh(g::MeshOptions{true}, s::AbstractGeometry)
@@ -454,7 +454,8 @@ end
 @inline MeshType(::MeshOptions{true ,T,C},::AbstractGeometry{2}) where{T,C} =
 	FullMesh{ShapeMesh{T},Shapes.PolygonXor{T},C}
 @inline raw(m::ShapeMesh) = m.poly
-
+@inline Base.empty(::Type{<:ShapeMesh{T}}) where{T} =
+	ShapeMesh{T}(Shapes.PolygonXor{T}([]))
 
 # Square««2
 struct Square{T} <: AbstractGeometryCoord{2,T}
@@ -505,6 +506,8 @@ end
 @inline vertices(s::VolumeMesh) = TriangleMeshes.vertices(s.mesh)
 @inline faces(s::VolumeMesh) = TriangleMeshes.faces(s.mesh)
 @inline attributes(s::VolumeMesh) = TriangleMeshes.attributes(s.mesh)
+@inline empty(::Type{VolumeMesh{T,A}}) where{T,A} =
+	VolumeMesh(TriangleMesh{T,A}([],[],[]))
 
 function apply(f::AffineMap, m::TriangleMesh{T,A}, d=signdet(f.a, 3)) where{T,A}
 	iszero(d) && throw(SingularException(3))
@@ -532,7 +535,6 @@ end
 
 @inline scad_info(s::VolumeMesh) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
-
 
 # Cube««2
 struct Cube{T} <: AbstractGeometryCoord{3,T}
@@ -616,7 +618,7 @@ iscomplement(::AbstractGeometry) = false
 # Union««2
 CSGUnion = constructed_solid_type(:union)
 function mainmesh(g::MeshOptions,s::CSGUnion, mlist)#::MeshType(g,s)
-	isempty(mlist) && return EmptyUnion() # FIXME
+	isempty(mlist) && return empty(MeshType(g,s)) # FIXME
 	(m1, mt...) = mlist
 	(i1, ct...) = iscomplement.(children(s))
 	for (m2,i2) in zip(mt, ct)
@@ -650,10 +652,8 @@ end
 
 # Intersection««2
 CSGInter = constructed_solid_type(:intersection)
-# @inline mainmesh(g::MeshOptions, s::CSGInter{2})= clip(:intersection, g.(s.children)...)
-# @inline mainmesh(g::MeshOptions, s::CSGInter{3}) = reduce(csginter, g.(s.children))
 function mainmesh(g::MeshOptions, s::CSGInter, mlist)#::MeshType(g,s)
-	isempty(mlist) && return EmptyUnion() # FIXME
+	isempty(mlist) && return empty(MeshType(g,s))
 	(m1, mt...) = mlist
 	(i1, ct...) = iscomplement.(children(s))
 	for (m2,i2) in zip(mt,ct)
@@ -837,7 +837,6 @@ mainmesh(g::MeshOptions, s::Halfspace, (m,)) =
 	s.direction, s.origin, m.mesh,g.color))
 
 # SetParameters««2
-# (including colors)
 struct SetParameters{D} <: AbstractTransform{D}
 	parameters
 	child::AbstractGeometry{D}
@@ -851,6 +850,17 @@ mesh(g::MeshOptions{true}, s::SetParameters) =
 	mesh(MeshOptions(g, s.parameters), s.child)
 mesh(g::MeshOptions{false}, s::SetParameters) =
 	mesh(MeshOptions(g, s.parameters), s.child)
+
+struct Color{D,C<:Colorant} <: AbstractTransform{D}
+	color::C
+	child::AbstractGeometry{D}
+end
+
+struct Highlight{D,C<:Colorant} <: AbstractTransform{D}
+	color::C
+	child::AbstractGeometry{D}
+end
+
 
 # Linear extrusion««2
 struct LinearExtrude{T} <: AbstractTransform{3}
@@ -1513,10 +1523,6 @@ child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
 @inline set_parameters(s...; parameters...) =
 	operator(SetParameters, (parameters.data,), s...)
 
-struct Color{D,C<:Colorant} <: AbstractTransform{D}
-	color::C
-	child::AbstractGeometry{D}
-end
 """
     color(c::Colorant, s...)
     color(c::AbstractString, s...)
@@ -1536,12 +1542,6 @@ Colors objects `s...` in the given color.
 @inline mainmesh(g::MeshOptions, c::Color{2}, (m,)) = m
 @inline mainmesh(g::MeshOptions, c::Color{3}, (m,)) =
 	VolumeMesh(TriangleMesh(vertices(m), faces(m), fill(c.color, size(faces(m)))))
-
-struct Highlight{D,C<:Colorant} <: AbstractTransform{D}
-	color::C
-	child::AbstractGeometry{D}
-end
-
 
 """
     highlight(c::Colorant, s)
