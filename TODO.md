@@ -1,5 +1,5 @@
 # Main points
- - [ ] check if `coordtype` is ever used/remove it
+ - [x] check if `coordtype` is ever used/remove it
  - [x] fix problem of triangulating tangent polygons: separately
    triangulate each connected component
  - [x] `atol`/`rtol` ?
@@ -28,7 +28,7 @@
  - [x] see if modifying `MeshOptions` can merge `fullmesh` and `mainmesh`
 * rename `Mesh` -> `MeshOptions`
 
- - [ ] make it faster (check `@code_warntype` everywhere for a start)
+ - [x] make it faster (check `@code_warntype` everywhere for a start)
   - [ ] make objects mutable to store computed mesh
  - [x] swept surfaces (`path_extrude`)
   - [ ] allow planar sweep too?

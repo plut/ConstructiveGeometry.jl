@@ -237,15 +237,11 @@ end
 A `D`-dimensional geometric object.
 Interface:
  - `children`
- - `coordtype`: coordinate type (if applicable).
 """
 
 abstract type AbstractGeometry{D} end
 @inline Base.ndims(::AbstractGeometry{D}) where{D} = D
 @inline children(::AbstractGeometry) = AbstractGeometry[]
-
-abstract type AbstractGeometryCoord{D,T} <: AbstractGeometry{D} end
-@inline coordtype(::AbstractGeometryCoord{D,T}) where{D,T} = T
 
 """
     AbstractMesh{D,T}
@@ -257,7 +253,7 @@ Derived types should implement the following methods:
 
 FIXME: this type is currently unused, should it be removed?
 """
-abstract type AbstractMesh{D,T} <: AbstractGeometryCoord{D,T} end
+abstract type AbstractMesh{D,T} <: AbstractGeometry{D} end
 @inline Base.map!(f, m::AbstractMesh) = vertices(m) .= f.(vertices(m))
 
 # Meshing options««1
@@ -286,7 +282,6 @@ struct MeshOptions{F,T<:Real,C}
 	@inline MeshOptions{F,T}(;kwargs...) where{F,T} =
 		MeshOptions{F,T}(merge(_DEFAULT_PARAMETERS, kwargs.data))
 end
-@inline coordtype(::MeshOptions{F,T}) where{F,T} = T
 
 const MeshColor = Colors.RGBA{N0f8}
 const _DEFAULT_PARAMETERS = (
@@ -328,7 +323,7 @@ Recursively compute the main mesh of this object,
 calling the `mainmesh` and `auxmeshes` functions as needed.
 """
 mesh(g::MeshOptions{false}, s::AbstractGeometry)::MeshType(g,s) =
-	mainmesh(g, s, [ mesh(g, x) for x in children(s) ])
+	mainmesh(g, s, ( mesh(g, x) for x in children(s) ))
 
 function mesh(g::MeshOptions{true}, s::AbstractGeometry)
 	l = [ mesh(g, x) for x in children(s) ]
@@ -458,7 +453,7 @@ end
 	ShapeMesh{T}(Shapes.PolygonXor{T}([]))
 
 # Square««2
-struct Square{T} <: AbstractGeometryCoord{2,T}
+struct Square{T} <: AbstractGeometry{2}
 	size::SVector{2,T}
 end
 @inline scad_info(s::Square) = (:square, (size=s.size,))
@@ -468,7 +463,7 @@ end
 	ShapeMesh(g, [square_vertices(T(s.size[1]), T(s.size[2]))])
 
 # Circle««2
-struct Circle{T} <: AbstractGeometryCoord{2,T}
+struct Circle{T} <: AbstractGeometry{2}
 	radius::T
 end
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
@@ -476,7 +471,7 @@ end
 	ShapeMesh(g, [unit_n_gon(g, T(s.radius))])
 
 # Stroke ««2
-struct Stroke{T} <: AbstractGeometryCoord{2,T}
+struct Stroke{T} <: AbstractGeometry{2}
 	points::Vector{SVector{2,T}}
 	width::Float64
 	ends::Symbol
@@ -537,7 +532,7 @@ end
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
 
 # Cube««2
-struct Cube{T} <: AbstractGeometryCoord{3,T}
+struct Cube{T} <: AbstractGeometry{3}
 	size::SVector{3,T}
 end
 @inline scad_info(s::Cube) = (:cube, (size=s.size,))
@@ -556,7 +551,7 @@ mainmesh(g::MeshOptions{F,T}, s::Cube, _) where{F,T} =
 	]))
 
 # Sphere««2
-struct Sphere{T} <: AbstractGeometryCoord{3,T}
+struct Sphere{T} <: AbstractGeometry{3}
 	radius::T
 end
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
