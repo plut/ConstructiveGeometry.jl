@@ -19,7 +19,7 @@ The second, multiplicative form allows easy chaining of transformations:
     transform1(param1) * transform2(param2) * solid
 ```
 This form may also be applied to several solids by either wrapping them in a
-`union`, or equivalently, by applying it to a `Vector` of ConstructiveGeometry:
+`union`, or equivalently, by applying it to a `Vector` of such objects:
 ```julia
     transform(parameters) * [ solid1, solid2, ... ]
 ```
@@ -94,9 +94,14 @@ The following operators are overloaded.
 ```@docs
 offset
 ```
+The grid size used for offsetting
+is derived from the `atol` and `rtol` parameters,
+and upper bounded by the optional `maxgrid` parameter
+(if this is different from zero).
+
 ```@repl 0
 s1 = offset(10)*[square(100,50), square(50,100)];
-s2 = offset(3,npoints=32)*cube(30);
+s2 = offset(3)*cube(30);
 png("offset_L", s1); # hide
 png("offset_cube", s2); # hide
 ```
@@ -158,7 +163,7 @@ png("swept_circle", s); # hide
 
 ```@repl 0
 f(t) =([ cospi(t) -sinpi(t) 0;sinpi(t) cospi(t) 0;0 0 1],[0 0 10*t]);
-s = sweep(f; nsteps=100,gridsize=100)*cube(20);
+s = sweep(f; nsteps=100,maxgrid=100)*cube(20);
 png("swept_cube", s); # hide
 
 ```
@@ -212,4 +217,5 @@ This is on purpose (although there currently exists no easy way
 for an user to recover these metadata while meshing an object).
 
 The values for these parameters are explained in [Accuracy and
-precision](@ref accuracy_precision).
+precision](@ref atol_rtol).
+

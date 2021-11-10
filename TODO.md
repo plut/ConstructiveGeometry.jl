@@ -1,8 +1,9 @@
 # Main points
- - [ ] replace `accuracy` and `precision` by better names (e.g.
-   `absolute` and `relative`, `fragment` and `error`, `epsilon`... ?
-   `atol`/`rtol` ?
+ - [x] fix problem of triangulating tangent polygons: separately
+   triangulate each connected component
+ - [x] `atol`/`rtol` ?
  - [x] auto-compute `offset` npoints from meshing options
+ - [x] likewise for `sweep` (volume case)
  - [x] check whether `translate(highlight()*s)` works
    * it should be enough to check that all transformations apply to highlights
  - [x] replace (::Mesh)(::ConstructiveGeometry) by three functions

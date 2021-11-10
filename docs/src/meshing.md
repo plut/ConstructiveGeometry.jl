@@ -12,21 +12,25 @@ coordinate transformations on the objects.
 
 ## Interface
 
-```@docs
-mainmesh
-```
-
 The meshing of objects is governed by a few parameters:
- - `accuracy` and `precision` determine the number of faces inserted in the mesh;
+ - `atol` and `rtol` determine the number of faces inserted in the mesh;
  - `symmetry` allows to impose a given rotational symmetry to circles;
 
 To set values other than the defaults for an object,
 apply the `set_parameters` transform to that object:
 
 ```julia
-set_parameters(accuracy=1)*
+set_parameters(atol=1)*
 circle(2)
 ```
+
+```@repl 0
+s = union(set_parameters(atol=1,symmetry=1)*circle(1),
+[2,0]+set_parameters(atol=1,symmetry=8)*circle(1),
+[4,0]+set_parameters(atol=1e-3)*circle(1));
+png("circles", s); # hide
+```
+![example: circles with various parameters](circles.png)
 
 ### Auxiliary meshes
 
@@ -35,29 +39,29 @@ Auxiliary meshes are only used for displaying
 (whether interactively with GLMakie, or as an image with CairoMakie);
 they are ignored when exporting the object to STL or SVG format.
 
-## [Accuracy and precision](@id accuracy_precision)
+## [Accuracy and rtol](@id atol_rtol)
 
- - `accuracy` is the maximum absolute deviation allowed when meshing an object.
+ - `atol` is the maximum absolute deviation allowed when meshing an object.
  This is the maximum distance between the mesh and the ideal shape.
  Its dimensionality is the same as basic length units for the object
  (*i.e.* it will be understood as millimeters by most 3d slicers).
 
- - `precision` is the maximum relative deviation allowed when meshing.
+ - `rtol` is the maximum relative deviation allowed when meshing.
  This is a dimensionless number.
 
 When meshing an object, the minimum value will be used
 between those given by these two definitions.
-This means that `precision` gives an absolute maximum
+This means that `rtol` gives an absolute maximum
 on the number of vertices for large objects,
-while `accuracy` governs the number of vertices for small objects.
+while `atol` governs the number of vertices for small objects.
 
 ### Default values
 
 The default values are
-`accuracy = 0.1` and `precision = 1/200`.
+`atol = 0.1` and `rtol = 1/200`.
 The first value means that a circle will deviate by at most 0.1mm from
-the ideal circle, and 
-the latter value corresponds to the fact
+a perfect circle,
+and the latter value corresponds to the fact
 that large circles have 32 sides (see below).
 
 ### Circles
@@ -69,11 +73,11 @@ segment](https://en.wikipedia.org/wiki/Circular_segment)
 with radius ``r`` and central angle ``2π/n``;
 its value is hence ``s = r(1-\cos(π/n)) ≈ \frac{π^2 r}{2 n^2}``.
 
-By definition, ``\texttt{accuracy} = s``
-while ``\texttt{precision} = s/r \approx \frac{π^2}{2 n^2}``.
+By definition, ``\texttt{atol} = s``
+while ``\texttt{rtol} = s/r \approx \frac{π^2}{2 n^2}``.
 This gives
 ```math
-n = \min(π √{r/(2\texttt{accuracy})}, π/ √{\texttt{precision})}).
+n = \min(π √{r/(2\texttt{atol})}, π/ √{\texttt{rtol})}).
 ```
 
 In addition, the number of sides is bounded below to always be at least 4.
@@ -108,17 +112,17 @@ The sagitta for a chord of length ``d`` is given by
 Hence we find
 
 ```math
-n ≈ 2 + (π/√3)/(\textt{max}(\texttt{precision},\textt{accuracy}/r)).
+n ≈ 2 + (π/√3)/(\textt{max}(\texttt{rtol},\textt{atol}/r)).
 ```
 
-With the default values for `accuracy` and `precision`:
+With the default values for `atol` and `rtol`:
  - small spheres have approximately ``2+18r`` vertices (and always at least 6 vertices);
  - large spheres have 365 vertices.
 
 
 ## Symmetry
 
-In addition to `accuracy` and `precision`,
+In addition to `atol` and `rtol`,
 the `symmetry` parameter allows forcing the number of vertices
 of a circle to be a multiple of a defined value
 (by rounding up, if needed, to a multiple of `symmetry`).

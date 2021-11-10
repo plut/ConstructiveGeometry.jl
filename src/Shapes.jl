@@ -271,12 +271,12 @@ end
 @inline simplify(p::P) where{P<:PolygonXor} = P(simplify_paths(paths(p)))
 
 """
-    perimeters(::PolygonXor)
+    loops(::PolygonXor)
 
-Returns a list of perimeters and holes for this region.
+Returns the lists of indexes for each loop.
 Perimeters are oriented ↺ and holes ↻.
 """
-function perimeters(p::PolygonXor)
+function loops(p::PolygonXor)
 	firstindex = zeros(Int, length(p.paths))
 	firstindex[1] = 0
 	for i in 1:length(p.paths)-1
@@ -292,7 +292,7 @@ end
 Given a `PolygonXor` defined as the exclusive union of polygons and holes,
 returns a vector mapping individual polygons of `s` to:
  - positive indices 1, 2, 3... for the exterior polygons of `s`;
- - negative indices for the holes, indicating in which exterior polygon is the corresponding hole.
+ - negative indices for the holes, indicating in which perimeter polygon is the corresponding hole.
 """
 function identify_polygons(s::PolygonXor)
 	n = length(paths(s))
@@ -453,26 +453,38 @@ function triangulate(v::AbstractVector{<:SVector{2,<:Real}})
 	 [(t[1], t[3], t[2]) for t in tri ]
 end
 function triangulate(m::PolygonXor)#««
-	v = vertices(m)
+# 	v = vertices(m)
 	id = identify_polygons(m)
-	edges = Matrix{Int}(undef, sum(length.(paths(m))), 2)
-	# find an inner point for each hole:
-	holes = [ point_in_polygon(p; orientation=false)
-		for (i, p) in pairs(paths(m)) if id[i] < 0 ]
-	c = 0
-	for p in paths(m)
-		n = length(p)
-		for i in 1:n-1
-			edges[c+i,:] = [c+i,c+i+1]
+# 	edges = Matrix{Int}(undef, sum(length.(paths(m))), 2)
+	tri = NTuple{3,Int}[]
+	peri = loops(m)
+	# triangulate each loop separately
+	for (l, k) in pairs(id)
+		k > 0 || continue
+		# l is outer loop, h is list of holes
+		h = filter((@closure j->id[j] == -k), eachindex(id))
+		holes = [ point_in_polygon(p; orientation=false) for p in paths(m)[h] ]
+		push!(h, k)
+		plist = paths(m)[h]
+		edges = Matrix{Int}(undef, sum(length.(plist)), 2)
+		c = 0
+		labels = [peri[h]...;]
+		for p in plist
+			n = length(p)
+			for i in 1:n-1
+				edges[c+i,:] = labels[[c+i,c+i+1]]
+			end
+			edges[c+n,:] = labels[[c+n,c+1]]
+			c+= n
 		end
-		edges[c+n,:] = [c+n,c+1]
-		c+= n
+		v = [plist...;]
+		triangles = constrained_triangulation(
+			Matrix{Float64}([transpose.(v)...;]),
+			labels, edges, fill(true, size(edges,1)),
+			[ p[i] for p in holes, i in 1:2 ])
+		tri = [tri; [ (t[1], t[2], t[3]) for t in triangles ]]
 	end
-	tri = constrained_triangulation(
-		Matrix{Float64}([transpose.(v)...;]),
-		collect(1:length(v)), edges, fill(true, size(edges,1)),
-		[ p[i] for p in holes, i in 1:2 ])
-	return [ (t[1], t[2], t[3]) for t in tri ]
+	return tri
 end#»»
 # reconstruction from triangles
 # this is used by 3d->2d projection:

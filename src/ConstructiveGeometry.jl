@@ -38,18 +38,9 @@ Base.getindex(c::Consecutives, i::Integer) =
 Base.size(c::Consecutives) = size(c.parent)
 
 @inline one_half(x::Real) = x/2
-
-# Parameters««1
-# Definitions««2
-const MeshColor = Colors.RGBA{N0f8}
-const _DEFAULT_PARAMETERS = (
-	accuracy = 0.1, precision = .005, symmetry = 1,
-	type = Float64,
-	color = MeshColor(.3,.4,.5), # bluish gray
-)
-
-@inline get_parameter(parameters, name) =
-	get(parameters, name, _DEFAULT_PARAMETERS[name])
+@inline norm²(p) = sum(p .* p)
+# round to a multiple of `m`:
+@inline round(m::Integer, x::Integer, ::typeof(RoundUp)) = x + m - mod1(x, m)
 
 #————————————————————— Geometry —————————————————————————————— ««1
 
@@ -145,25 +136,6 @@ StaticArrays.similar_type(::Vector, T::Type) = Vector{T} # piracy!
 # Circles and spheres««1
 # Circles««2
 
-round(m::Integer, x::Integer, ::typeof(RoundUp)) = x + m - mod1(x, m)
-"""
-    sides(radius, parameters)
-
-Returns the number of sides used to draw a circle (arc) of given angle.
-The base value `n` is given by the minimum of:
- - accuracy: each sagitta (s= r(1-cos 2π/n)) must not be smaller
- than `accuracy`, or n = π √(r/2 accuracy);
- - precision: s/r = 1-cos(2π/n)  not smaller than precision,
- or n = π /√(2*precision).
-"""
-function sides(r::Real, parameters)
-	ε = max(get_parameter(parameters,:precision),
-		get_parameter(parameters,:accuracy)/r)
-	base = ceil(Int, π/√(2*ε))
-	# a circle always has at least 4 sides
-	return round(get_parameter(parameters,:symmetry), max(4, base), RoundUp)
-end
-
 
 """
     unit_n_gon(T::Type, n::Int)
@@ -195,24 +167,8 @@ function unit_n_gon(r::T, n::Int) where{T<:Real}
 end
 @inline unit_n_gon(r::Rational{BigInt}, n::Int) =
 	SVector{2,Rational{BigInt}}.(unit_n_gon(Float32(r), n))
-@inline unit_n_gon(r, parameters::NamedTuple)= unit_n_gon(r,sides(r,parameters))
 
 # Spheres««2
-"""
-    sphere_nvertices(r::Real, parameters::NamedTuple)
-
-Returns the number `n` of points on a sphere according to these
-parameters.
-
-"""
-function sphere_nvertices(r::Real, parameters)
-	ε = max(get_parameter(parameters,:precision),
-		get_parameter(parameters,:accuracy)/r)
-	base = 2 + ceil(Int, (π/√3)/ε)
-	# a sphere always has at least 6 vertices
-	return max(6, base)
-end
-
 const golden_angle = 2π/MathConstants.φ
 """
     fibonacci_sphere_points(T::Type{<:Real}, n::Int)
@@ -238,31 +194,7 @@ function fibonacci_sphere_points(r::T, n::Int) where{T<:Real}
 end
 @inline fibonacci_sphere_points(r::Rational{BigInt}, n::Int) =
 	SVector{3,Rational{BigInt}}.(fibonacci_sphere_points(Float32(r), n))
-@inline fibonacci_sphere_points(r::Real, parameters::NamedTuple) =
-	fibonacci_sphere_points(r, sphere_nvertices(r, parameters))
-# tools for rotate extrusion««2
-"""
-    _rotate_extrude(point, data, parameters)
-
-Extrudes a single point, returning a vector of 3d points
-(x,y) ↦ (x cosθ, x sinθ, y).
-"""
-function _rotate_extrude(p::StaticVector{2,T}, angle, parameters) where{T}
-	@assert p[1] ≥ 0
-	# special case: point is on the y-axis; returns a single point:
-	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
-	n = Int(cld(sides(p[1], parameters) * angle, 360))
-
-	ω = Complex{T}(cosd(angle/n), sind(angle/n))
-	z = Vector{Complex{T}}(undef, n+1)
-	z[1] = one(T)
-	for i in 2:n
-		@inbounds z[i] = z[i-1]*ω; z[i]/= abs(z[i])
-	end
-	# close the loop:
-	z[n+1] = Complex{T}(cosd(angle), sind(angle))
-	return [SA[p[1]*real(u), p[1]*imag(u), p[2]] for u in z]
-end
+# ladder triangles ««2
 """
     ladder_triangles(n1, n2, start1, start2)
 
@@ -295,8 +227,6 @@ function ladder_triangles(n1, n2, start1, start2)
 	return triangles
 end
 
-@inline norm²(p) = sum(p .* p)
-
 #————————————————————— Objects and meshing —————————————————————————————— ««1
 
 #»»1
@@ -318,6 +248,21 @@ abstract type AbstractGeometryCoord{D,T} <: AbstractGeometry{D} end
 @inline coordtype(::AbstractGeometryCoord{D,T}) where{D,T} = T
 
 """
+    AbstractMesh{D,T}
+
+Base type for fully-explicit objects with dimension `D` and coordinate type `T`.
+Derived types should implement the following methods:
+ - `plot`
+ - `points`
+
+FIXME: this type is currently unused, should it be removed?
+"""
+abstract type AbstractMesh{D,T} <: AbstractGeometryCoord{D,T} end
+@inline Base.map!(f, m::AbstractMesh) = vertices(m) .= f.(vertices(m))
+
+# Meshing options««1
+# MeshOptions type««2
+"""
     MeshOptions{T}
 
 A structure storing the parameters for the (abstract object)->(mesh) conversion.
@@ -325,9 +270,10 @@ The coordinate type determines the Julia type of the returned object;
 therefore, it is stored as a type parameter of `MeshOptions`
 instead as data.
 
-NOTE: for now, only `Float64` is possible,
+NOTE: for now, only `Float64` is possible.
 """
 struct MeshOptions{T<:Real,C}
+	# at least `atol`, `rtol` and `symmetry`, but user data is allowed here:
 	parameters::NamedTuple
 	color::C
 	@inline MeshOptions{T,C}(p, c) where{T,C} = new{T,C}(p, c)
@@ -341,20 +287,92 @@ struct MeshOptions{T<:Real,C}
 end
 @inline coordtype(::MeshOptions{T}) where{T} = T
 
+const MeshColor = Colors.RGBA{N0f8}
+const _DEFAULT_PARAMETERS = (
+	type = Float64, color = MeshColor(.3,.4,.5), # bluish gray
+	atol = 0.1, rtol = .005, symmetry = 1,
+)
+
 @inline MeshOptions(g::M, p::NamedTuple) where{M<:MeshOptions} =
 	M(merge(g.parameters, p), g.color)
-@inline Base.get(g::MeshOptions, name) = get_parameter(g.parameters, name)
+@inline Base.get(g::MeshOptions, name) =
+	get(g.parameters, name, _DEFAULT_PARAMETERS[name])
+
+# number of sides of a circle ««2
 
 """
-    AbstractMesh{D,T}
+    circle_nvertices(g::MeshOptions, radius)
 
-Base type for fully-explicit objects with dimension `D` and coordinate type `T`.
-Derived types should implement the following methods:
- - `plot`
- - `points`
+Returns the number of sides used to draw a circle (arc) of given angle.
+The base value `n` is given by the minimum of:
+ - atol: each sagitta (s= r(1-cos 2π/n)) must not be smaller
+ than `atol`, or n = π √(r/2 atol);
+ - rtol: s/r = 1-cos(2π/n)  not smaller than rtol,
+ or n = π /√(2*rtol).
 """
-abstract type AbstractMesh{D,T} <: AbstractGeometryCoord{D,T} end
-@inline Base.map!(f, m::AbstractMesh) = vertices(m) .= f.(vertices(m))
+function circle_nvertices(g::MeshOptions, r)
+	ε = max(get(g,:rtol), get(g,:atol)/r)
+	base = ceil(Int, π/√(2ε))
+	# a circle always has at least 4 sides
+	return round(get(g,:symmetry), max(4, base), RoundUp)
+end
+@inline unit_n_gon(g::MeshOptions, r)= unit_n_gon(r,circle_nvertices(g, r))
+
+# number of vertices of a sphere ««2
+"""
+    sphere_nvertices(g::MeshOptions, r::Real)
+
+Returns the number `n` of points on a sphere according to these
+parameters.
+
+"""
+function sphere_nvertices(g::MeshOptions, r)
+	ε = max(get(g,:rtol), get(g,:atol)/r)
+	base = 2 + ceil(Int, (π/√3)/ε)
+	# a sphere always has at least 6 vertices
+	return max(6, base)
+end
+@inline fibonacci_sphere_points(g::MeshOptions, r) =
+	fibonacci_sphere_points(r, sphere_nvertices(g, r))
+
+# tools for rotate extrusion««2
+"""
+    _rotate_extrude(point, data, parameters)
+
+Extrudes a single point, returning a vector of 3d points
+(x,y) ↦ (x cosθ, x sinθ, y).
+"""
+function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle) where{T}
+	@assert p[1] ≥ 0
+	# special case: point is on the y-axis; returns a single point:
+	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
+	n = Int(cld(circle_nvertices(g, p[1]) * angle, 360))
+
+	ω = Complex{T}(cosd(angle/n), sind(angle/n))
+	z = Vector{Complex{T}}(undef, n+1)
+	z[1] = one(T)
+	for i in 2:n
+		@inbounds z[i] = z[i-1]*ω; z[i]/= abs(z[i])
+	end
+	# close the loop:
+	z[n+1] = Complex{T}(cosd(angle), sind(angle))
+	return [SA[p[1]*real(u), p[1]*imag(u), p[2]] for u in z]
+end
+# gridcells ««2
+"""
+    gridcells(g::MeshOptions, vertices, maxgrid)
+
+Returns the number of cells subdividing `vertices`,
+with a maximum of `maxgrid` (if it is nonzero).
+"""
+
+function gridcells(g::MeshOptions, vertices, maxgrid)
+	bbox = [ extrema(v[i] for v in vertices) for i in SOneTo(3)]
+	width= maximum(x[2]-x[1] for x in bbox)
+	# theoretical number of points needed:
+	N = ceil(Int, min(1/get(g, :rtol), width/get(g,:atol)))
+	return maxgrid > 0 ? min(maxgrid, N) : N
+end
 
 include("scad.jl")
 # 2d primitives««1
@@ -401,7 +419,7 @@ struct Circle{T} <: AbstractGeometryCoord{2,T}
 end
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
 @inline mainmesh(g::MeshOptions{T}, s::Circle, _) where{T} =
-	ShapeMesh(g, [unit_n_gon(T(s.radius), g.parameters)])
+	ShapeMesh(g, [unit_n_gon(g, T(s.radius))])
 
 # Stroke ««2
 struct Stroke{T} <: AbstractGeometryCoord{2,T}
@@ -416,7 +434,7 @@ Stroke(points, width; ends=:round, join=:round, miter_limit=2.) =
 
 function mainmesh(g::MeshOptions{T}, s::Stroke, _) where{T}
 	r = one_half(T(s.width))
-	ε = max(get(g,:accuracy), get(g,:precision) * r)
+	ε = max(get(g,:atol), get(g,:rtol) * r)
 	return ShapeMesh(g, Shapes.offset([s.points], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit))
 end
@@ -484,7 +502,7 @@ end
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
 
 function mainmesh(g::MeshOptions{T}, s::Sphere, _) where{T}
-	plist = fibonacci_sphere_points(T(s.radius), g.parameters)
+	plist = fibonacci_sphere_points(g, T(s.radius))
 	(pts, faces) = convex_hull(plist)
 	return VolumeMesh(g, pts, faces)
 end
@@ -784,7 +802,7 @@ function mainmesh(g::MeshOptions, s::LinearExtrude, (m,))
 	@assert m isa ShapeMesh
 	pts2 = Shapes.vertices(m.poly)
 	tri = Shapes.triangulate(m.poly)
-	peri = Shapes.perimeters(m.poly)
+	peri = Shapes.loops(m.poly)
 	# perimeters are oriented ↺, holes ↻
 
 	n = length(pts2)
@@ -813,7 +831,7 @@ end
 function mainmesh(g::MeshOptions{T}, s::Cone, (m,)) where{T}
 	pts2 = Shapes.vertices(m.poly)
 	tri = Shapes.triangulate(m.poly)
-	peri = Shapes.perimeters(m.poly)
+	peri = Shapes.loops(m.poly)
 	n = length(pts2)
 	pts3 = [SA[p[1],p[2], 0] for p in pts2]
 	push!(pts3, SVector{3,T}(s.apex))
@@ -832,16 +850,16 @@ function mainmesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
 	m1 = intersect(Shapes.HalfPlane(SA[1,0],0), m.poly)
 	pts2 = Shapes.vertices(m1)
 	tri = Shapes.triangulate(m1)
-	peri = Shapes.perimeters(m1) # oriented ↺
+	peri = Shapes.loops(m1) # oriented ↺
 	n = length(pts2)
 	
-	pts3 = _rotate_extrude(pts2[1], s.angle, g.parameters)
+	pts3 = _rotate_extrude(g, pts2[1], s.angle)
 	firstindex = [1]
 	arclength = Int[length(pts3)]
 	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
 	for p in pts2[2:end]
 		push!(firstindex, length(pts3)+1)
-		newpoints = _rotate_extrude(p, s.angle, g.parameters)
+		newpoints = _rotate_extrude(g, p, s.angle)
 		@debug "newpoints[$p] = $(length(newpoints))"
 		push!(arclength, length(newpoints))
 		pts3 = vcat(pts3, newpoints)
@@ -896,7 +914,7 @@ function mainmesh(g::MeshOptions, s::SurfaceSweep, (m,))
 	m = nothing
 	for t in tlist # each loop in the trajectory
 		rmax = sqrt(maximum(norm².(t)))
-		ε = max(get(g, :accuracy), get(g, :precision)*rmax)
+		ε = max(get(g, :atol), get(g, :rtol)*rmax)
 		v = [ surface(Shapes.path_extrude(t, p;
 			closed=true, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
 			for p in plist ]
@@ -909,14 +927,15 @@ end
 struct VolumeSweep <: AbstractTransform{3}
 	transform::Function
 	nsteps::Int
-	grid::Int
+	maxgrid::Int
 	isolevel::Float64
 	child::AbstractGeometry{3}
 end
 
 function mainmesh(g::MeshOptions, s::VolumeSweep, (m,))
 	return VolumeMesh(TriangleMeshes.swept_volume(m.mesh, s.transform,
-		s.nsteps, s.grid, s.isolevel))
+		min(ceil(Int,1/get(g,:rtol)),s.nsteps),
+		gridcells(g, vertices(m), s.maxgrid), s.isolevel))
 end
 
 # Offset««2
@@ -937,19 +956,14 @@ struct Offset{D} <: AbstractTransform{D}
 end
 
 function mainmesh(g::MeshOptions, s::Offset{2}, (m,))
-	ε = max(get(g,:accuracy), get(g,:precision) * s.radius)
+	ε = max(get(g,:atol), get(g,:rtol) * s.radius)
 	return ShapeMesh(Shapes.offset(poly(m), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
 end
 
-function mainmesh(g::MeshOptions, s::Offset{3}, (m,))
-	bbox = [ extrema(v[i] for v in vertices(m)) for i in SOneTo(3)]
-	width= maximum(x[2]-x[1] for x in bbox)
-	# theoretical number of points needed:
-	N = ceil(Int, min(1/get(g, :precision), width/get(g,:accuracy)))
-	np = s.maxgrid > 0 ? min(s.maxgrid, N) : N
-	return VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius, np))
-end
+mainmesh(g::MeshOptions, s::Offset{3}, (m,)) =
+	VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius,
+		gridcells(g, vertices(m), s.maxgrid)))
 
 # Decimate««2
 struct Decimate <: AbstractTransform{3}
@@ -1415,6 +1429,7 @@ Similar to OpenSCAD's `rotate_extrude` primitive.
 	operator(RotateExtrude, (angle,), s...)
 @inline rotate_extrude(s...) = rotate_extrude(360, s...)
 
+# sweeps ««2
 """
     sweep(path, shape...)
 
@@ -1440,7 +1455,7 @@ Sweeps the given `volume` by applying the `transform`:
 `f` is a function mapping a real number in [0,1] to a pair (matrix, vector)
 defining an affine transform.
 
- - nsteps:  number of steps for subdividing the [0,1] interval
+ - nsteps:  upper bound on the number of steps for subdividing the [0,1] interval
  - gridsize: subdivision for marching cubes
  - isolevel: optional distance to add/subtract from swept volume
 """
@@ -1449,8 +1464,8 @@ function sweep end
 @inline _Sweep(path, s::AbstractGeometry{2}; kwargs...) =
 	SurfaceSweep(path, s)
 @inline _Sweep(transform, s::AbstractGeometry{3};
-	nsteps=20, gridsize=32, isolevel=0) =
-	VolumeSweep(transform, nsteps, gridsize, isolevel, s)
+	nsteps=32, maxgrid=32, isolevel=0) =
+	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
 
 
 # offset««2
@@ -1517,7 +1532,7 @@ instead, it tends to “round out” the solid.
 
 # set_parameters, color, highlight««2
 """
-    set_parameters(;accuracy, precision, symmetry) * solid...
+    set_parameters(;atol, rtol, symmetry) * solid...
 
 A transformation which passes down the specified parameter values to its
 child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
