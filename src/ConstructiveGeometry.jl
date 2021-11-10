@@ -263,33 +263,34 @@ abstract type AbstractMesh{D,T} <: AbstractGeometryCoord{D,T} end
 # Meshing options««1
 # MeshOptions type««2
 """
-    MeshOptions{T}
+    MeshOptions{F,T,C}
 
 A structure storing the parameters for the (abstract object)->(mesh) conversion.
 The coordinate type determines the Julia type of the returned object;
 therefore, it is stored as a type parameter of `MeshOptions`
 instead as data.
 
+ - `T`: coordinate type of returned object
+ - `C`: color type of returned object
+ - `F`: boolean flag = is this a full mesh?
+
 NOTE: for now, only `Float64` is possible.
 """
-struct MeshOptions{T<:Real,C}
+struct MeshOptions{F,T<:Real,C}
 	# at least `atol`, `rtol` and `symmetry`, but user data is allowed here:
 	parameters::NamedTuple
 	color::C
-	@inline MeshOptions{T,C}(p, c) where{T,C} = new{T,C}(p, c)
-	@inline MeshOptions{T,C}(p) where{T,C} = new{T,C}(p, p.color)
-	@inline MeshOptions{T}(parameters) where{T} =
-		MeshOptions{T,typeof(parameters.color)}(parameters)
-	@inline MeshOptions(parameters::NamedTuple) =
-		MeshOptions{parameters.type}(parameters)
-	@inline MeshOptions(;kwargs...) =
-		MeshOptions(merge(_DEFAULT_PARAMETERS, kwargs.data))
+	@inline MeshOptions{F,T,C}(p, c) where{F,T,C} = new{F,T,C}(p, c)
+	@inline MeshOptions{F,T,C}(p) where{F,T,C} = new{F,T,C}(p, p.color)
+	@inline MeshOptions{F,T}(p) where{F,T} = MeshOptions{F,T,typeof(p.color)}(p)
+	@inline MeshOptions{F,T}(;kwargs...) where{F,T} =
+		MeshOptions{F,T}(merge(_DEFAULT_PARAMETERS, kwargs.data))
 end
-@inline coordtype(::MeshOptions{T}) where{T} = T
+@inline coordtype(::MeshOptions{F,T}) where{F,T} = T
 
 const MeshColor = Colors.RGBA{N0f8}
 const _DEFAULT_PARAMETERS = (
-	type = Float64, color = MeshColor(.3,.4,.5), # bluish gray
+	color = MeshColor(.3,.4,.5), # bluish gray
 	atol = 0.1, rtol = .005, symmetry = 1,
 )
 
@@ -297,6 +298,54 @@ const _DEFAULT_PARAMETERS = (
 	M(merge(g.parameters, p), g.color)
 @inline Base.get(g::MeshOptions, name) =
 	get(g.parameters, name, _DEFAULT_PARAMETERS[name])
+
+# meshing functions ««2
+# the mesh types (ShapeMesh, VolumeMesh) are defined below
+# this is the infrastructure for recursive meshing:
+"""
+    mainmesh(opt::MeshOptions, object, children_meshes)
+
+This is the main function used by each concrete `AbstractGeometry` subtype
+to compute the main mesh for this object type
+from the (possibly empty) list of meshes of its children.
+"""
+function mainmesh end
+
+struct FullMesh{T,U,A}
+	main::T
+	aux::Vector{Pair{A,U}}
+end
+
+@inline compute_mainmesh(s::AbstractGeometry; kwargs...) =
+	mesh(MeshOptions{false,Float64}(;kwargs...), s)
+@inline compute_fullmesh(s::AbstractGeometry; kwargs...) =
+	mesh(MeshOptions{true,Float64}(;kwargs...), s)
+
+"""
+    mesh(g::MeshOptions, object)
+
+Recursively compute the main mesh of this object,
+calling the `mainmesh` and `auxmeshes` functions as needed.
+"""
+mesh(g::MeshOptions{false}, s::AbstractGeometry) =
+	mainmesh(g, s, [ mesh(g, x) for x in children(s) ])
+
+function mesh(g::MeshOptions{true}, s::AbstractGeometry)
+	l = [ mesh(g, x) for x in children(s) ]
+	m = mainmesh(g, s, [ x.main for x in l ])
+	a = auxmeshes(g, s, m, [ x.aux for x in l ])
+	return MeshType(g,s)(m, a)
+end
+# special cases: set_parameters
+
+"""
+    auxmeshes(opt::MeshOptions, object, children_mains, children_auxes)
+
+Returns only auxiliary meshes for this object.
+"""
+@inline auxmeshes(g::MeshOptions, s::AbstractGeometry, m, l) = [l...; ]
+# special cases below: highlight
+
 
 # number of sides of a circle ««2
 
@@ -391,9 +440,7 @@ struct ShapeMesh{T} <: AbstractMesh{2,T}
 	@inline ShapeMesh{T}(s::Shapes.PolygonXor, f=I) where{T}= new{T}(s,f)
 	@inline ShapeMesh(s::Shapes.PolygonXor{T}, f=I) where{T}= new{T}(s,f)
 end
-@inline MeshType(::MeshOptions{T},::AbstractGeometry{2}) where{T} = ShapeMesh{T}
-
-@inline ShapeMesh(::MeshOptions{T}, paths, f=I) where{T} =
+@inline ShapeMesh(::MeshOptions{F,T}, paths, f=I) where{F,T} =
 	ShapeMesh(Shapes.PolygonXor{T}(paths), f)
 @inline poly(s::ShapeMesh) = s.poly
 @inline paths(s::ShapeMesh) = poly(s).paths
@@ -401,7 +448,13 @@ end
 @inline vertices(s::ShapeMesh) = Shapes.vertices(poly(s))
 
 @inline mainmesh(g::MeshOptions, m::ShapeMesh, _) = ShapeMesh(g, paths(m))
-# @inline mainmesh(g::MeshOptions, m::ShapeMesh)::MeshType(g,m) = ShapeMesh(g, paths(m))
+
+@inline MeshType(::MeshOptions{false,T,C},::AbstractGeometry{2}) where{T,C} =
+	ShapeMesh{T}
+@inline MeshType(::MeshOptions{true ,T,C},::AbstractGeometry{2}) where{T,C} =
+	FullMesh{ShapeMesh{T},Shapes.PolygonXor{T},C}
+@inline raw(m::ShapeMesh) = m.poly
+
 
 # Square««2
 struct Square{T} <: AbstractGeometryCoord{2,T}
@@ -410,7 +463,7 @@ end
 @inline scad_info(s::Square) = (:square, (size=s.size,))
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
-@inline mainmesh(g::MeshOptions{T}, s::Square, _) where{T} =
+@inline mainmesh(g::MeshOptions{F,T}, s::Square, _) where{F,T} =
 	ShapeMesh(g, [square_vertices(T(s.size[1]), T(s.size[2]))])
 
 # Circle««2
@@ -418,7 +471,7 @@ struct Circle{T} <: AbstractGeometryCoord{2,T}
 	radius::T
 end
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
-@inline mainmesh(g::MeshOptions{T}, s::Circle, _) where{T} =
+@inline mainmesh(g::MeshOptions{F,T}, s::Circle, _) where{F,T} =
 	ShapeMesh(g, [unit_n_gon(g, T(s.radius))])
 
 # Stroke ««2
@@ -432,7 +485,7 @@ end
 Stroke(points, width; ends=:round, join=:round, miter_limit=2.) =
 	Stroke{Float64}(points, width, ends, join, miter_limit)
 
-function mainmesh(g::MeshOptions{T}, s::Stroke, _) where{T}
+function mainmesh(g::MeshOptions{F,T}, s::Stroke, _) where{F,T}
 	r = one_half(T(s.width))
 	ε = max(get(g,:atol), get(g,:rtol) * r)
 	return ShapeMesh(g, Shapes.offset([s.points], r;
@@ -449,9 +502,6 @@ struct VolumeMesh{T,A} <: AbstractMesh{3,T}
 	mesh::TriangleMesh{T,A}
 	@inline VolumeMesh(m::TriangleMesh{T,A}) where{T,A} = new{T,A}(m)
 end
-@inline MeshType(::MeshOptions{T},::AbstractGeometry{3}) where{T} =
-	VolumeMesh{T,MeshColor}
-
 @inline vertices(s::VolumeMesh) = TriangleMeshes.vertices(s.mesh)
 @inline faces(s::VolumeMesh) = TriangleMeshes.faces(s.mesh)
 @inline attributes(s::VolumeMesh) = TriangleMeshes.attributes(s.mesh)
@@ -464,14 +514,21 @@ end
 @inline apply(f::AffineMap, m::VolumeMesh, d=signdet(f.a, 3)) =
 	VolumeMesh(apply(f, m.mesh, d))
 
-@inline TriangleMesh(g::MeshOptions{T}, points, faces,
-	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{T,A} =
+@inline TriangleMesh(g::MeshOptions{F,T}, points, faces,
+	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{F,T,A} =
 	TriangleMesh{T,A}(SVector{3,T}.(points), faces, attrs)
-@inline VolumeMesh(g::MeshOptions{T}, points, faces) where{T} =
-	VolumeMesh(TriangleMesh{T,MeshColor}(SVector{3,T}.(points), faces,
+@inline VolumeMesh(g::MeshOptions{F,T,C}, points, faces) where{F,T,C} =
+	VolumeMesh(TriangleMesh{T,C}(SVector{3,T}.(points), faces,
 		fill(g.color, size(faces))))
 @inline mainmesh(g::MeshOptions, s::VolumeMesh, _) =
 	VolumeMesh(g, vertices(s), faces(s))
+
+@inline MeshType(::MeshOptions{false,T,C},::AbstractGeometry{3}) where{T,C} =
+	VolumeMesh{T,C}
+@inline MeshType(::MeshOptions{true ,T,C},::AbstractGeometry{3}) where{T,C} =
+	FullMesh{VolumeMesh{T},TriangleMesh{T,Nothing},C}
+@inline raw(m::VolumeMesh) = TriangleMesh{Float64,Nothing}(
+	m.mesh.vertices, m.mesh.faces, fill(nothing, size(m.mesh.faces)))
 
 @inline scad_info(s::VolumeMesh) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
@@ -487,7 +544,8 @@ end
 		SA[0,0,0], SA[0,0,w], SA[0,v,0], SA[0,v,w],
 		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
 
-mainmesh(g::MeshOptions{T}, s::Cube, _) where{T} = VolumeMesh(TriangleMesh(g,
+mainmesh(g::MeshOptions{F,T}, s::Cube, _) where{F,T} =
+	VolumeMesh(TriangleMesh(g,
 	cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
 	[ # 12 triangular faces:
 	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
@@ -501,7 +559,7 @@ struct Sphere{T} <: AbstractGeometryCoord{3,T}
 end
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
 
-function mainmesh(g::MeshOptions{T}, s::Sphere, _) where{T}
+function mainmesh(g::MeshOptions{F,T}, s::Sphere, _) where{F,T}
 	plist = fibonacci_sphere_points(g, T(s.radius))
 	(pts, faces) = convex_hull(plist)
 	return VolumeMesh(g, pts, faces)
@@ -539,7 +597,7 @@ constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
 # this (which Clipper does not implement) would be to affect winding
 # number +1 to the point at infinity.
 #
-# So we must instead represent complementation symbolically,
+# So we instead represent complementation symbolically,
 # using the Boolean rules:
 # ~(~A) = A
 # A ∩ (~B) = A ∖ B
@@ -557,7 +615,7 @@ iscomplement(::AbstractGeometry) = false
 
 # Union««2
 CSGUnion = constructed_solid_type(:union)
-function mainmesh(g::MeshOptions,s::CSGUnion, mlist)::MeshType(g,s)
+function mainmesh(g::MeshOptions,s::CSGUnion, mlist)#::MeshType(g,s)
 	isempty(mlist) && return EmptyUnion() # FIXME
 	(m1, mt...) = mlist
 	(i1, ct...) = iscomplement.(children(s))
@@ -594,7 +652,7 @@ end
 CSGInter = constructed_solid_type(:intersection)
 # @inline mainmesh(g::MeshOptions, s::CSGInter{2})= clip(:intersection, g.(s.children)...)
 # @inline mainmesh(g::MeshOptions, s::CSGInter{3}) = reduce(csginter, g.(s.children))
-function mainmesh(g::MeshOptions, s::CSGInter, mlist)::MeshType(g,s)
+function mainmesh(g::MeshOptions, s::CSGInter, mlist)#::MeshType(g,s)
 	isempty(mlist) && return EmptyUnion() # FIXME
 	(m1, mt...) = mlist
 	(i1, ct...) = iscomplement.(children(s))
@@ -614,7 +672,7 @@ end
 # Difference««2
 # this is a binary operator:
 CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
-function mainmesh(g::MeshOptions, s::CSGDiff, mlist)::MeshType(g,s)
+function mainmesh(g::MeshOptions, s::CSGDiff, mlist)#::MeshType(g,s)
 	(i1,i2) = iscomplement.(children(s))
 	(m1,m2) = mlist
 	if i1
@@ -683,7 +741,7 @@ end
 @inline vertices3(m::VolumeMesh) = vertices(m)
 @inline vertices3(s::ShapeMesh) = (position(s)([v;0]) for v in vertices(s))
 
-function mainmesh(g::MeshOptions{T}, ::CSGHull{3}, mlist) where{T}
+function mainmesh(g::MeshOptions{F,T}, ::CSGHull{3}, mlist) where{F,T}
 	v = SVector{3,T}[]
 	for m in mlist; push!(v, vertices3(m)...); end
 	(p, f) = convex_hull(v)
@@ -705,7 +763,7 @@ end
 	ShapeMesh(Shapes.minkowski_sum(m1.poly, m2.poly))
 @inline mainmesh(g::MeshOptions, ::MinkowskiSum{3,3}, (m1,m2)) =
 	VolumeMesh(TriangleMeshes.minkowski_sum(m1.mesh, m2.mesh))
-function mainmesh(g::MeshOptions{T}, ::MinkowskiSum{3,2}, (m1,m2)) where{T}
+function mainmesh(g::MeshOptions{F,T}, ::MinkowskiSum{3,2}, (m1,m2)) where{F,T}
 	tri = Shapes.triangulate(poly(m2))
 	v2 = collect(vertices3(m2))
 	return VolumeMesh(TriangleMeshes.minkowski_sum(m1.mesh,
@@ -787,11 +845,13 @@ struct SetParameters{D} <: AbstractTransform{D}
 		new{D}(parameters, child)
 end
 
-# FIXME: special case for compute_mainmesh here!
-compute_mainmesh(g::MeshOptions, s::SetParameters) =
-	compute_mainmesh(MeshOptions(g, s.parameters), s.child)
-compute_fullmesh(g::MeshOptions, s::SetParameters) =
-	compute_fullmesh(MeshOptions(g, s.parameters), s.child)
+# this object introduces a special case for recursive meshing:
+# we need 2 methods (for disambiguation)
+mesh(g::MeshOptions{true}, s::SetParameters) =
+	mesh(MeshOptions(g, s.parameters), s.child)
+mesh(g::MeshOptions{false}, s::SetParameters) =
+	mesh(MeshOptions(g, s.parameters), s.child)
+
 # Linear extrusion««2
 struct LinearExtrude{T} <: AbstractTransform{3}
 	height::T
@@ -828,7 +888,7 @@ struct Cone{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
-function mainmesh(g::MeshOptions{T}, s::Cone, (m,)) where{T}
+function mainmesh(g::MeshOptions{F,T}, s::Cone, (m,)) where{F,T}
 	pts2 = Shapes.vertices(m.poly)
 	tri = Shapes.triangulate(m.poly)
 	peri = Shapes.loops(m.poly)
@@ -845,7 +905,7 @@ struct RotateExtrude{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
-function mainmesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
+function mainmesh(g::MeshOptions{F,T}, s::RotateExtrude, (m,)) where{F,T}
 	# right half of child:
 	m1 = intersect(Shapes.HalfPlane(SA[1,0],0), m.poly)
 	pts2 = Shapes.vertices(m1)
@@ -897,20 +957,20 @@ function mainmesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
 end
 
 # Sweep (surface and volume)««2
-struct SurfaceSweep <: AbstractTransform{3}
-	path::AbstractGeometry{2}
-	child::AbstractGeometry{2}
+struct SurfaceSweep <: AbstractGeometry{3}
+	trajectory::AbstractGeometry{2}
+	profile::AbstractGeometry{2}
 # 	closed::Bool
 	join::Symbol
 	miter_limit::Float64
 	@inline SurfaceSweep(path, child; join=:round, miter_limit=2.0) =
 		new(path, child, join, miter_limit)
 end
-# FIXME: SurfaceSweep has 2 children?
+@inline children(s::SurfaceSweep) = (s.trajectory, s.profile,)
 
-function mainmesh(g::MeshOptions, s::SurfaceSweep, (m,))
-	plist = paths(m) # profile paths
-	tlist = paths(compute_mainmesh(g, s.path)) # trajectory paths
+function mainmesh(g::MeshOptions, s::SurfaceSweep, (mt,mp,))
+	tlist = paths(mt) # trajectory paths
+	plist = paths(mp) # profile paths
 	m = nothing
 	for t in tlist # each loop in the trajectory
 		rmax = sqrt(maximum(norm².(t)))
@@ -981,93 +1041,6 @@ end
 
 @inline mainmesh(g::MeshOptions, s::LoopSubdivide, (m,)) =
 	VolumeMesh(TriangleMeshes.loop(m.mesh, s.count))
-
-# Meshing structures ««1
-# Two recursive calls:
-# (A) `mainmesh`: main mesh only (no annotations/hl) => stl, svg
-# (B) `fullmesh`: everything => interactive
-#
-# This means that objects have two interfaces:
-# (a) compute `mainmesh` from children `mainmesh`
-# (b) compute `fullmesh` from children `fullmesh`
-#
-# we want the following:
-#  - [no code duplication] means (b) reuses code from (a)
-#  - [no mesh recomputation] means children meshes are precomputed
-#  and passed to the (a), (b) code
-#
-# i.e (a) does not call `mesh(children(s))`, but these are passed as
-# arguments to the function instead
-#
-# thus, the interface for functions (a) and (b) is
-#   (obj, opt, children meshes) -> mesh
-#
-# Communication between full mesh and main/aux meshes:
-#  - full mesh => main + aux meshes (for plotting)
-#  - main + aux => full mesh (for recursing)
-#  - main => aux (for highlight + plotting)
-
-"""
-    mainmesh(opt::MeshOptions, object, children_meshes)
-
-This is the main function used by each concrete `AbstractGeometry` subtype
-to compute the main mesh for this object type
-from the (possibly empty) list of meshes of its children.
-"""
-function mainmesh end
-
-# TODO: merge mainmesh and fullmesh
-# by including the switch in `MeshOptions` structure
-
-"""
-    compute_maimmesh(g::MeshOptions, object)
-
-Recursively compute the main mesh of this object,
-calling the `mainmesh` function as needed.
-"""
-compute_mainmesh(s::AbstractGeometry; kwargs...) =
-	compute_mainmesh(MeshOptions(;kwargs...), s)
-function compute_mainmesh(g::MeshOptions, s::AbstractGeometry)
-	l = [ compute_mainmesh(g, x) for x in children(s) ]
-	return mainmesh(g, s, l)
-end
-
-struct FullMesh{T,U,A}
-	main::T
-	aux::Vector{Pair{A,U}}
-end
-
-const FullMesh2 =
-	FullMesh{ShapeMesh{Float64},Shapes.PolygonXor{Float64},MeshColor}
-const FullMesh3 =
-	FullMesh{VolumeMesh{Float64},TriangleMesh{Float64,Nothing},MeshColor}
-@inline FullMeshType(::AbstractGeometry{2}) = FullMesh2
-@inline FullMeshType(::AbstractGeometry{3}) = FullMesh3
-@inline raw(m::ShapeMesh) = m.poly
-@inline raw(m::VolumeMesh) = TriangleMesh{Float64,Nothing}(
-	m.mesh.vertices, m.mesh.faces, fill(nothing, size(m.mesh.faces)))
-
-compute_fullmesh(s::AbstractGeometry; kwargs...) =
-	compute_fullmesh(MeshOptions(;kwargs...), s)
-
-function compute_fullmesh(g::MeshOptions, s::AbstractGeometry{D}) where{D}
-	l = [ compute_fullmesh(g, x) for x in children(s) ]
-	m = mainmesh(g, s, [ x.main for x in l ])
-	a = auxmeshes(g, s, m, [ x.aux for x in l ])
-	return FullMeshType(s)(m, a)
-end
-
-@inline auxmeshes(g::MeshOptions, s::AbstractGeometry, m, l) = [l...; ]
-
-"""
-    auxmeshes(opt::MeshOptions, object)
-
-Returns only auxiliary meshes for this object.
-"""
-@inline auxmeshes(s::AbstractGeometry; kwargs...) =
-	auxmeshes(MeshOptions(;kwargs...), s)
-@inline auxmeshes(g::MeshOptions, s::AbstractGeometry) =
-	[(auxmeshes(g, u) for u in children(s))...;]
 
 #————————————————————— Front-end —————————————————————————————— ««1
 

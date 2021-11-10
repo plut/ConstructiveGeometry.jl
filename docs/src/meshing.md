@@ -1,4 +1,13 @@
 # [Meshing](@id meshing)
+```@meta
+CurrentModule = ConstructiveGeometry
+```
+```@setup 0
+using ConstructiveGeometry
+using Makie
+using CairoMakie
+png(name, s) = save(name*".png", Makie.plot(s));
+```
 
 Objects are converted to explicit meshes
 for display or export as STL or SVG files.
@@ -39,7 +48,7 @@ Auxiliary meshes are only used for displaying
 (whether interactively with GLMakie, or as an image with CairoMakie);
 they are ignored when exporting the object to STL or SVG format.
 
-## [Accuracy and rtol](@id atol_rtol)
+## [Precision: `atol` and `rtol`](@id atol_rtol)
 
  - `atol` is the maximum absolute deviation allowed when meshing an object.
  This is the maximum distance between the mesh and the ideal shape.

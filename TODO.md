@@ -1,4 +1,5 @@
 # Main points
+ - [ ] check if `coordtype` is ever used/remove it
  - [x] fix problem of triangulating tangent polygons: separately
    triangulate each connected component
  - [x] `atol`/`rtol` ?
@@ -22,9 +23,9 @@
   (and this default value is superseded for AffineTransform)
  `mesh` is mainmesh + setdiff(auxmeshes, mainmesh)
  !! ensure that aux meshing does not lead to recomputing the tree
- - [ ] find better names for `mainmesh`, `compute_mainmesh`,
+ - [x] find better names for `mainmesh`, `compute_mainmesh`,
    `compute_fullmesh`, `auxmeshes`
- - [ ] see if modifying `MeshOptions` can merge `fullmesh` and `mainmesh`
+ - [x] see if modifying `MeshOptions` can merge `fullmesh` and `mainmesh`
 * rename `Mesh` -> `MeshOptions`
 
  - [ ] make it faster (check `@code_warntype` everywhere for a start)
