@@ -338,7 +338,10 @@ end
 
 Returns only auxiliary meshes for this object.
 """
-@inline auxmeshes(g::MeshOptions, s::AbstractGeometry, m, l) = [l...; ]
+@inline auxmeshes(g::MeshOptions, s::AbstractGeometry, m, l) =
+	let T = MeshType(g,s)
+	eltype(l) == T ? [l...; ] : T[]
+end
 # special cases below: highlight
 
 
