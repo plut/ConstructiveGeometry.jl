@@ -216,6 +216,5 @@ The `set_parameters` transformation allows attaching arbitrary metadata.
 This is on purpose (although there currently exists no easy way
 for an user to recover these metadata while meshing an object).
 
-The values for these parameters are explained in [Accuracy and
-precision](@ref atol_rtol).
+The values for these parameters are explained in [`atol` and `rtol`](@ref atol_rtol).
 

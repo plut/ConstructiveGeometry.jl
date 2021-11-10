@@ -121,7 +121,7 @@ The sagitta for a chord of length ``d`` is given by
 Hence we find
 
 ```math
-n ≈ 2 + (π/√3)/(\textt{max}(\texttt{rtol},\textt{atol}/r)).
+n ≈ 2 + (π/√3)/(\texttt{max}(\texttt{rtol},\texttt{atol}/r)).
 ```
 
 With the default values for `atol` and `rtol`:

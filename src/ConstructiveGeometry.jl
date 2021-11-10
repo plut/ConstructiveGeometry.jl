@@ -1246,7 +1246,8 @@ Computes the union of several solids. The dimensions must match.
 
 Computes the intersection of several solids.
 Mismatched dimensions are allowed; 3d solids will be intersected
-with the (z=0) plane via the `slice()` operation.
+with the horizontal plane (as if by the `slice()` operation)
+and a 2d intersection will be returned.
 """
 @inline intersect(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGInter{D}(unroll2(a, b, Val(:intersection)))
@@ -1259,9 +1260,9 @@ with the (z=0) plane via the `slice()` operation.
     setdiff(a::AbstractGeometry, b::AbstractGeometry)
 
 Computes the difference of two solids.
-The following dimensions are allowed: (2,2), (3,3), and (2,3)
-(in the last case, the 3d object will be intersected with the (z=0)
-plane via the `slice()` operation).
+The following dimensions are allowed: (2,2), (3,3), and (2,3).
+In the latter case, the 3d object will be intersected with the horizontal
+plane via the `slice()` operation.
 
     setdiff([a...], [b...])
 
