@@ -311,6 +311,8 @@ struct FullMesh{T,U,A}
 	aux::Vector{Pair{A,U}}
 end
 
+@inline auxtype(::Type{FullMesh{T,U,A}}) where{T,U,A} = Pair{A,U}
+
 @inline compute_mainmesh(s::AbstractGeometry; kwargs...) =
 	mesh(MeshOptions{false,Float64}(;kwargs...), s)
 @inline compute_fullmesh(s::AbstractGeometry; kwargs...) =
@@ -339,8 +341,8 @@ end
 Returns only auxiliary meshes for this object.
 """
 @inline auxmeshes(g::MeshOptions, s::AbstractGeometry, m, l) =
-	let T = MeshType(g,s)
-	eltype(l) == T ? [l...; ] : T[]
+	let T = auxtype(MeshType(g,s))
+	eltype(eltype(l)) == T ? [l...; ] : T[]
 end
 # special cases below: highlight
 
@@ -1922,6 +1924,15 @@ end
 @inline plot!(scene::Makie.AbstractScene, s::ShapeMesh; kwargs...) =
 	plot!(scene, s.poly; kwargs...)
 
+
+# function Makie.convert_arguments(T::Type{<:Makie.Mesh},p::Shapes.PolygonXor)
+# 	# FIXME: what to do if `p.paths` is empty
+# 	v = Shapes.vertices(p)
+# 	tri = Shapes.triangulate(p)
+# 	f = [ t[j] for t in tri, j in 1:3 ]
+# 	return Makie.convert_arguments(T, v, f)
+# end
+# Makie.plottype(::Shapes.PolygonXor) = Makie.Mesh
 function plot!(scene::Makie.AbstractScene, p::Shapes.PolygonXor;
 		color=_DEFAULT_PARAMETERS.color, kwargs...)
 	isempty(p.paths) && return scene

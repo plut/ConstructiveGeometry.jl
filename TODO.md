@@ -1,4 +1,5 @@
 # Main points
+ - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] check if `coordtype` is ever used/remove it
  - [x] fix problem of triangulating tangent polygons: separately
    triangulate each connected component
@@ -27,8 +28,10 @@
    `compute_fullmesh`, `auxmeshes`
  - [x] rename `Mesh` -> `MeshOptions`
  - [x] see if modifying `MeshOptions` can merge `fullmesh` and `mainmesh`
- - [x] make it faster (check `@code_warntype` everywhere for a start)
-  - [ ] make objects mutable to store computed mesh
+ - [ ] make it faster
+   - [x] check `@code_warntype` everywhere for a start
+   - [ ] still slow; see if we can resurrect `CornerTables` (using `Clipper` for the hard 2d part).
+   - [ ] make objects mutable to store computed mesh
  - [x] swept surfaces (`path_extrude`)
   - [ ] allow planar sweep too?
   - [x] volume sweep (use `swept_volume`) ?
@@ -36,7 +39,6 @@
     away (preserving tangents) and removing anything close to those points)
     [ ] or write a patch for the C++ library?
  - [ ] lofting/skinning
- - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] rewrite affine transforms
    either use 3x3+3 matrices internally in all places (ugly)
    or use any types of transform (Julia-esque) and instantiate on meshing
