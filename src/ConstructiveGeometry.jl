@@ -13,7 +13,7 @@ using FastClosures
 
 import Rotations
 import Colors: Colors, Colorant
-import Makie: Makie, surface
+import Makie: Makie, surface, plot, plot!, SceneLike
 
 import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
@@ -1875,14 +1875,13 @@ Exports 2d `shape` as an SVG file.
 @inline Base.display(m::AbstractGeometry) = plot(m)
 
 # TODO: figure out how to rewrite the following using native Makie recipes
-import Makie: plot, plot!
 @inline plot(g::AbstractGeometry; kwargs...) =
 	plot!(Makie.Scene(), g; kwargs...)
 
-@inline plot!(scene::Makie.AbstractScene, s::AbstractGeometry; kwargs...)=
+@inline plot!(scene::SceneLike, s::AbstractGeometry; kwargs...)=
 	plot!(scene, compute_fullmesh(s); kwargs...)
 
-function plot!(scene::Makie.AbstractScene, m::FullMesh; kwargs...)
+function plot!(scene::SceneLike, m::FullMesh; kwargs...)
 	rawmain = raw(m.main)
 	for (c,s) in m.aux
 		plot!(scene, auxdiff(s, rawmain); color=c, kwargs...)
@@ -1892,13 +1891,13 @@ end
 
 @inline auxdiff(aux::TriangleMesh, main::TriangleMesh) =
 	TriangleMeshes.boolean(2, aux, main)
-@inline auxdiff(aux::Shapes.PolygonXor, main::ShapeMesh) =
+@inline auxdiff(aux::Shapes.PolygonXor, main::Shapes.PolygonXor) =
 	Shapes.clip(:difference, aux, main)
 
-@inline plot!(scene::Makie.AbstractScene, m::VolumeMesh; kwargs...) =
+@inline plot!(scene::SceneLike, m::VolumeMesh; kwargs...) =
 	plot!(scene, m.mesh; kwargs...)
 
-function plot!(scene::Makie.AbstractScene, m::TriangleMesh; kwargs...)
+function plot!(scene::SceneLike, m::TriangleMesh; kwargs...)
 	v = TriangleMeshes.vertices(m); f = TriangleMeshes.faces(m);
 	a = TriangleMeshes.attributes(m)
 	vmat = similar(first(v), 3*length(f), 3)
@@ -1912,8 +1911,10 @@ function plot!(scene::Makie.AbstractScene, m::TriangleMesh; kwargs...)
 	return scene
 end
 
-function plot!(scene::Makie.AbstractScene, m::TriangleMesh{<:Real,Nothing};
+function plot!(scene::SceneLike, m::TriangleMesh{<:Real,Nothing};
 		kwargs...)
+	# this is a special case for aux meshes: we plot them as transparent,
+	# and all vertices are the same color
 	v = TriangleMeshes.vertices(m); f = TriangleMeshes.faces(m);
 	vmat = [ p[j] for p in v, j in 1:3 ]
 	fmat = [ q[j] for q in f, j in 1:3 ]
@@ -1921,9 +1922,8 @@ function plot!(scene::Makie.AbstractScene, m::TriangleMesh{<:Real,Nothing};
 		lightposition=Makie.Vec3f0(5e3,1e3,10e3), kwargs...)
 end
 
-@inline plot!(scene::Makie.AbstractScene, s::ShapeMesh; kwargs...) =
+@inline plot!(scene::SceneLike, s::ShapeMesh; kwargs...) =
 	plot!(scene, s.poly; kwargs...)
-
 
 # function Makie.convert_arguments(T::Type{<:Makie.Mesh},p::Shapes.PolygonXor)
 # 	# FIXME: what to do if `p.paths` is empty
@@ -1933,7 +1933,7 @@ end
 # 	return Makie.convert_arguments(T, v, f)
 # end
 # Makie.plottype(::Shapes.PolygonXor) = Makie.Mesh
-function plot!(scene::Makie.AbstractScene, p::Shapes.PolygonXor;
+function plot!(scene::SceneLike, p::Shapes.PolygonXor;
 		color=_DEFAULT_PARAMETERS.color, kwargs...)
 	isempty(p.paths) && return scene
 	v = Shapes.vertices(p)
@@ -1967,7 +1967,7 @@ end
 @inline mainmesh(g::MeshOptions, a::Annotate) =
 	AnnotatedMesh(a.annotation, a.points, mainmesh(g, a.child))
 
-function plot!(scene::Makie.AbstractScene, m::AnnotatedMesh)
+function plot!(scene::SceneLike, m::AnnotatedMesh)
 	plot!(scene, m.child)
 	annotate!(scene, m.annotation, m.points)
 	return scene
@@ -1977,7 +1977,7 @@ end
 @inline annotate(s::AbstractString, p::AbstractVector{<:Real}, x...) =
 	operator(Annotate,(s,[p],), x...)
 
-function annotate!(scene::Makie.AbstractScene, s::AbstractString, points)
+function annotate!(scene::SceneLike, s::AbstractString, points)
 	text!(scene, [s]; position=[(points[1]...,)], align=(:center,:center))
 	return scene
 end
@@ -1989,7 +1989,7 @@ end
 # 	pos2::AbstractVector{<:Real}, x...) =
 # 	operator(Annotate,(ArrowAnnotation(s), [pos1,pos2]), x...)
 # 
-# function annotate!(scene::Makie.AbstractScene, a::ArrowAnnotation, points)
+# function annotate!(scene::SceneLike, a::ArrowAnnotation, points)
 # 	p1, p2 = points
 # 	c = (p1+p2)/2
 # 	v = (p2-p1)/2
