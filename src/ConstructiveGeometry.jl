@@ -47,20 +47,12 @@ Base.size(c::Consecutives) = size(c.parent)
 #————————————————————— Geometry tools —————————————————————————————— ««1
 
 # Angle types««1
+# All angles are internally stored as degrees: the user might (often)
+# want exact degrees angles and probably never exact radians angles.
 const _UNIT_DEGREE = typeof(°)
-const _UNIT_RADIAN = typeof(Unitful.rad)
-DegreeAngle{T} = Unitful.Quantity{T,Unitful.NoDims,_UNIT_DEGREE}
-RadianAngle{T} = Unitful.Quantity{T,Unitful.NoDims,_UNIT_RADIAN}
-struct OneTurn end
-@inline Base.div(x::Real, ::OneTurn, r) = div(x, 360, r)
-@inline Base.div(x::DegreeAngle, ::OneTurn, r) = div(x.val, 360, r)
-@inline Base.div(x::RadianAngle, ::OneTurn, r) = div(x.val, 2π, r)
-
-# Slight piracy here (`Unitful` forgot to define `cosd(radians)`,
-# and has `cosd(1°) == cosd(1rad)`...
-@inline Base.Math.cosd(u::RadianAngle) = cos(u)
-@inline Base.Math.sind(u::RadianAngle) = sin(u)
-@inline Base.Math.sincosd(u::RadianAngle) = sincos(u)
+Angle{X,T} = Unitful.Quantity{T,Unitful.NoDims,X}
+todegrees(x::Angle) = x
+todegrees(x::Real) = x*°
 
 # Affine transformations««1
 struct AffineMap{A,B}
@@ -401,7 +393,7 @@ function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle) where{T}
 	@assert p[1] ≥ 0
 	# special case: point is on the y-axis; returns a single point:
 	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
-	n = Int(cld(circle_nvertices(g, p[1])*angle, OneTurn()))
+	n = Int(cld(circle_nvertices(g, p[1])*angle, 360°))
 
 	ω = Complex{T}(cosd(angle/n), sind(angle/n))
 	z = Vector{Complex{T}}(undef, n+1)
@@ -780,7 +772,9 @@ Represents the affine operation `x -> a*x + b`.
     (3 × 3) multiplications, followed by a single (3 × n).
 """
 @inline mult_matrix(a, s...; center=ZeroVector()) =
+begin
 	operator(AffineTransform, (AffineMap(a, a*center-center),), s...)
+end
 # translate ««2
 """
     translate(v, s...)
@@ -831,9 +825,8 @@ be used.
 @inline reflect(v::AbstractVector, s...; kwargs...) =
 	mult_matrix(Reflection(v), s...; kwargs...)
 # rotate««2
-# FIXME: add a method Angle2d*StaticVector{3}
-@inline rotation(θ::Number, ::Nothing) = Rotations.Angle2d(θ)
-@inline rotation(θ::Number, axis) = Rotations.AngleAxis(θ, axis)
+# @inline rotation(θ::Number, ::Nothing) = Rotations.Angle2d(θ)
+# @inline rotation(θ::Number, axis) = Rotations.AngleAxis(θ, axis)
 """
     rotate(θ, {center=center}, {solid...})
     rotate(θ, axis=axis, {center=center}, {solid...})
@@ -842,14 +835,21 @@ Rotation around the Z-axis (in trigonometric direction, i.e.
 counter-clockwise).
 """
 @inline rotate(θ::Number, s...; axis=nothing, kwargs...) =
-	mult_matrix(rotation(float(θ), axis), s...; kwargs...)
+	operator(_rotate1, (todegrees(θ), axis,), s...; kwargs...)
+# we dispatch on the dimension of `s` to make (Angle2d) act on z-axis:
+@inline _rotate1(θ, ::Nothing, s::AbstractGeometry{2}; kwargs...) =
+	mult_matrix(Rotations.Angle2d(float(θ)), s; kwargs...)
+@inline _rotate1(θ, axis, s::AbstractGeometry{3}; kwargs...) =
+	mult_matrix(Rotations.AngleAxis(θ, axis), s; kwargs...)
+@inline _rotate1(θ, ::Nothing, s::AbstractGeometry{3}; kwargs...) =
+	mult_matrix(Rotations.RotZ(float(θ)), s; kwargs...)
 """
     rotate((θ,φ,ψ), {center=center}, {solid...})
 
 Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 """
 @inline rotate(angles, s...; kwargs...) =
-	mult_matrix(Rotations.RotZYX(angles...), s...; kwargs...)
+	mult_matrix(Rotations.RotZYX(todegrees.(angles)...), s...; kwargs...)
 
 
 # Projection««1
@@ -1055,7 +1055,7 @@ and radius `r` around the origin.
 
 # Rotate extrusion««1
 struct RotateExtrude{T} <: AbstractTransform{3}
-	angle::T
+	angle::Angle{T,_UNIT_DEGREE}
 	child::AbstractGeometry{2}
 end
 
@@ -1117,8 +1117,8 @@ end
 Similar to OpenSCAD's `rotate_extrude` primitive.
 """
 @inline rotate_extrude(angle::Number, s...) =
-	operator(RotateExtrude, (angle,), s...)
-@inline rotate_extrude(s...) = rotate_extrude(360, s...)
+	operator(RotateExtrude, (todegrees(angle),), s...)
+@inline rotate_extrude(s...) = rotate_extrude(360°, s...)
 
 
 # Sweep (surface and volume)««1
@@ -1750,6 +1750,8 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline Base.:-(x::AbstractVector{<:AbstractGeometry},
                 y::AbstractVector{<:AbstractGeometry}) =
 	setdiff(union(x), union(y))
+⋃ = Base.union
+⋂ = Base.intersect
 
 @inline Base.:+(v::AbstractVector, x::AbstractGeometry) = translate(v, x)
 @inline Base.:+(x::AbstractGeometry, v::AbstractVector) = translate(v, x)
@@ -1764,13 +1766,32 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline Base.:*(a::Transform,b::Real) = a*scale(b)
 @inline Base.:*(a::Transform,z::Complex) = a*mult_matrix(_to_matrix(z))
 
+@inline ×(a::Real, x::AbstractGeometry) = linear_extrude(a, x)
+×(a::AbstractVector{<:Real}, x::AbstractGeometry) =
+	if length(a) == 1
+		linear_extrude(a[1], x)
+	elseif length(a) == 2
+		raise(a[1], linear_extrude(a[2]-a[1], x))
+	else
+		throw("vector × AbstractGeometry only defined for lengths 1 and 2")
+	end
+
+@inline +(a::Angle, x::AbstractGeometry) = rotate(a, x)
+@inline ×(a::Angle, x::AbstractGeometry) = rotate_extrude(a, x)
+@inline ×(a::AbstractVector{<:Angle}, x::AbstractGeometry) =
+	if length(a) == 1
+		rotate_extrude(a[1], x)
+	elseif length(a) == 2
+		rotate(a[1], rotate_extrude(a[2]-a[1], x))
+	else
+		throw("vector{Angle} × AbstractGeometry only defined for lengths 1 and 2")
+	end
+
 @inline Base.:*(c::Symbol, x::AbstractGeometry) = color(String(c), x)
 @inline Base.:*(c::Colorant, x::AbstractGeometry) = color(c, x)
 @inline Base.:%(c::Symbol, x::AbstractGeometry) = highlight(String(c), x)
 @inline Base.:%(c::Colorant, x::AbstractGeometry) = highlight(c, x)
 
-⋃ = Base.union
-⋂ = Base.intersect
 #————————————————————— I/O —————————————————————————————— ««1
 
 # File inclusion««1
@@ -2358,6 +2379,7 @@ export decimate, loop_subdivide
 export linear_extrude, rotate_extrude, sweep
 export color, set_parameters
 export mesh, stl, svg
+export ×
 # don't export include, of course
 
 # »»1

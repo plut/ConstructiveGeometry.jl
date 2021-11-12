@@ -117,10 +117,10 @@ png("project", s); # hide
 
 ## Intersection with half-space
 ```@docs
-halfspace
+half
 ```
 ```@repl 0
-s = halfspace([0,0,-1],[0,0,0])*setdiff(sphere(20),sphere(18));
+s = half(:bottom)*setdiff(sphere(20),sphere(18));
 png("halfspace", s); # hide
 ```
 ![example: one half of a hollow sphere](halfspace.png)
