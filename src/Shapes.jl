@@ -282,7 +282,7 @@ function loops(p::PolygonXor)
 	for i in 1:length(p.paths)-1
 		firstindex[i+1] = firstindex[i] + length(p.paths[i])
 	end
-	return [[firstindex[i]+1 : firstindex[i] + length(p.paths[i]);]
+	return [firstindex[i]+1 : firstindex[i] + length(p.paths[i])
 		for i in eachindex(p.paths)]
 end
 

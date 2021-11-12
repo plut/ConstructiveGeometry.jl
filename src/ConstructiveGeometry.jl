@@ -948,9 +948,40 @@ with given `direction` and `origin`.
 	operator(Half, (dir, origin,), s...)
 
 # Linear extrusion (and cylinder)««1
+# Linear extrusion with matrix exponential:
+# f_t = affine function x ↦ a(t) x + b(t)
+# such that f_s f_t = f_{s+t}
+# i.e. a(s) (a(t) x + b(t)) + b(s) = a(s+t) x + b(s+t)
+# i.e. a(s) a(t) = a(s+t), i.e. a(t) = exp(t g)
+# and  a(s) b(t) + b(s) = b(s+t), i.e. exp(s g) b(t) + b(s) = b(s+t)
+# for small t: b(s+t)-b(s) = b(t) exp(s g)
+# i.e. b'(s) = exp(s g) b'(0); let h = b'(0)
+# b = ∫ exp(s g) h = exp(s g) g^-1 h
+# or b = exp(s g)*k; as defined by B = b(1) and A = exp(g),
+# B = A*k, or k = A^-1 B
+#
+# morale: let L = log(A), then
+# a(t) = exp(t L)
+# b(t) = exp(t L)*A^-1*B
 struct LinearExtrude{T} <: AbstractTransform{3}
 	height::T
 	child::AbstractGeometry{2}
+end
+
+function tube_mesh(loops, slices)
+	# this computes the combinatorial mesh of an open tube,
+	# given the loops of the base and the number of slices (≥ 1)
+	layer = sum(length.(loops)) # total number of points in a layer
+	faces = sizehint!(NTuple{3,Int}[], layer*2*slices)
+	p = 0
+	for s in 1:slices
+		q = p + layer
+		for l in loops, (i,j) in consecutives(l)
+			push!(faces, (i+p, j+p, i+q), (j+p,j+q,i+q))
+		end
+		p = q
+	end
+	return faces
 end
 
 function mesh(g::MeshOptions, s::LinearExtrude, (m,))
@@ -969,9 +1000,7 @@ function mesh(g::MeshOptions, s::LinearExtrude, (m,))
 	#  - top: reverse of tri + n
 	#  - sides:
 	faces = [ reverse.(tri); [ f .+ n for f in tri ];
-	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
-	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
-	]
+		tube_mesh(Shapes.loops(m.poly), 1) ]
 	return VolumeMesh(g, pts3, faces)
 end
 
@@ -983,7 +1012,7 @@ Linear extrusion to height `h`.
 """
 @inline linear_extrude(height, s...; center=false) =
 	operator(_linear_extrude, (height, center), s...)
-@inline function _linear_extrude(height, center, s)
+@inline function _linear_extrude(height, center, s::AbstractGeometry{2})
 	m = LinearExtrude(height, s)
 	center ? translate([0,0,-one_half(height)], m) : m
 end

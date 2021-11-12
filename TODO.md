@@ -47,6 +47,9 @@
 # New features
 ## Geometry
  - [x] equivalent of OpenSCAD's for loop?!
+ - [ ] `linear_extrude` with twist and scale
+ - [ ] `rotate_extrude` with slide (per-turn) along the axis
+ - [ ] compute center of gravity (and use it for scaling etc.)
  - [ ] add a 1d type (points, segments; paths) for minkowski (/ extrusions)?
    - [ ] this makes sense; `Clipper.jl` seems happy to do Minkowski with a path
  - [ ] define a path type (for Minkowski + stroke) ?
@@ -82,9 +85,6 @@
  - [ ] `symmetrize(m, s...) = union(s..., mirror(m, s...))`
    find some easy syntax allowing also `symmetrize(m)*s`
  - [ ] 2d Minkowski difference
- - [ ] `linear_extrude` with twist and scale
- - [ ] `rotate_extrude` with slide (per-turn) along the axis
- - [ ] compute center of gravity (and use it for scaling etc.)
 ## Attachments
  - [ ] anchor/attachment system
     attach(square(1),
