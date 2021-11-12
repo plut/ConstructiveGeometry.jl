@@ -86,11 +86,11 @@ lower
 
 The following operators are overloaded.
 
+ - `matrix * solid` is a linear transformation.
+ - `vector * solid` is a multiplication by a diagonal matrix.
  - `vector + solid` is a translation.
  - `real * solid` is a scaling.
  - `complex * 2dshape` is a similitude.
- - `matrix * solid` is a linear transformation.
- - `vector * solid` is a multiplication by a diagonal matrix.
  - `color * solid` is a `color` operation.
  - `color % solid` is a `highlight` operation.
 

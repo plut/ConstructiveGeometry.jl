@@ -46,6 +46,7 @@
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [x] equivalent of OpenSCAD's for loop?!
  - [ ] add a 1d type (points, segments; paths) for minkowski (/ extrusions)?
    - [ ] this makes sense; `Clipper.jl` seems happy to do Minkowski with a path
  - [ ] define a path type (for Minkowski + stroke) ?
@@ -86,9 +87,16 @@
  - [ ] compute center of gravity (and use it for scaling etc.)
 ## Attachments
  - [ ] anchor/attachment system
+    attach(square(1),
+    :left => circle(3),
+    )
     anchor(square(…), [-1,0])
     anchor(square(…), :left)
     square(…, anchor=:left)
+ - [ ] this needs allowing “children” for the primitives, e.g.
+    square(5)*[
+      position(:top) circle(5),
+    ]
  - [ ] check that it is easy for the user to define arbitrary `Transform`s.
  - [ ] rewrite `attach` using `Transform`
   - [ ] and allow:

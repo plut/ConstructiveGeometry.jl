@@ -1433,7 +1433,7 @@ symbols `sym1`, `sym2`..., `children(x)`.
 """
 @inline unroll(s::AbstractGeometry, ::Val, tail...) = unroll(s, tail...)
 @inline unroll(s::AbstractGeometry) = s
-@inline unroll(s::ConstructedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
+@inline unroll(s::ConstructedSolid{S}, ::Val{S}, tail...) where{S} =
 	children(s)
 @inline unroll2(s::AbstractGeometry, t::AbstractGeometry, tail...) =
 	[unroll(s, tail...); unroll(t, tail...)]
@@ -2374,7 +2374,7 @@ export square, circle, stroke, polygon
 export cube, sphere, cylinder, cone, surface
 export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, reflect, raise, lower
-export project, slice, halfspace
+export project, slice, half
 export decimate, loop_subdivide
 export linear_extrude, rotate_extrude, sweep
 export color, set_parameters

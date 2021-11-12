@@ -19,6 +19,12 @@ png("union", s); # hide
 ```
 ![example: union of a sphere and a cube](union.png)
 
+N-ary union may be performed in this way:
+```@repl 0
+s = union(([0,10i]+square(5) for i in 1:5)...);
+png("n-union", s); # hide
+```
+![example: n-ary union](n-union.png)
 ```@docs
 intersect(::AbstractGeometry{D},::AbstractGeometry{D}) where{D}
 ```
