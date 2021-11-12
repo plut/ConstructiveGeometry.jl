@@ -66,6 +66,10 @@ scale
 ```@docs
 rotate
 ```
+
+Angles are in degrees by default.
+Angles in radians are supported through the use of `Unitful.rad`.
+
 ```@repl 0
 s = rotate(30)*square(20);
 png("rotate", s); # hide

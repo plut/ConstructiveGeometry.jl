@@ -1055,7 +1055,7 @@ and radius `r` around the origin.
 
 # Rotate extrusion««1
 struct RotateExtrude{T} <: AbstractTransform{3}
-	angle::Angle{T,_UNIT_DEGREE}
+	angle::Angle{_UNIT_DEGREE,T}
 	child::AbstractGeometry{2}
 end
 
@@ -1178,7 +1178,7 @@ does not support the `etOpenSingle` offset style.
 """
 @inline sweep(path, s...; kwargs...) =
 # @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
-	operator(_Sweep, (path,), s...; kwargs...)
+	operator(_sweep, (path,), s...; kwargs...)
 
 """
     sweep(transform, volume)
@@ -1196,9 +1196,9 @@ defining an affine transform.
 """
 function sweep end
 
-@inline _Sweep(path, s::AbstractGeometry{2}; kwargs...) =
+@inline _sweep(path, s::AbstractGeometry{2}; kwargs...) =
 	SurfaceSweep(path, s)
-@inline _Sweep(transform, s::AbstractGeometry{3};
+@inline _sweep(transform, s::AbstractGeometry{3};
 	nsteps=32, maxgrid=32, isolevel=0) =
 	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
 
