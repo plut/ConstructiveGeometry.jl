@@ -104,9 +104,9 @@
    - [ ] cut “by hand” the result of a “butt” extrusion;
    - [ ] intersect the result of a custom “fill” extrusion;
    - [ ] patch the `clipper` library...
- - [ ] bring back some `Angle` types (with degrees) to allow overloading
+ - [x] bring back some `Angle` types (with degrees) to allow overloading
    of `extrude`, e.g. `extrude(90°)`; likewise, use `cospi` and `sinpi`
-   - [ ] `using Unitful: °` is probably (almost) enough
+   - [x] `using Unitful: °` is probably (almost) enough
  - [ ] compute center of gravity (and use it for scaling etc.)
  - [ ] `color`: add more properties (e.g. shininess) to be able to show
    e.g. metal parts

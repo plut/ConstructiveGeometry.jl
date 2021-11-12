@@ -9,7 +9,7 @@ import LinearAlgebra: det
 using StaticArrays
 using FixedPointNumbers
 using FastClosures
-# using Unitful: °
+using Unitful: Unitful, °
 
 import Rotations
 import Colors: Colors, Colorant
@@ -46,16 +46,21 @@ Base.size(c::Consecutives) = size(c.parent)
 
 #»»1
 # Angle types««1
-# to keep it simple, angles are just Float64 (in degrees).
-# Just in case we might change this in the future, we define two types:
-# Angle and AnyAngle (= input type).
-const Angle = Float64
-const AnyAngle = Real
-const ° = 1.
-@inline radians(x::Angle) = π/180*x
-@inline radians(x::AnyAngle) = radians(Angle(x))
-@inline degrees(x::Angle) = x
-@inline degrees(x::AnyAngle) = degrees(Angle(x))
+const _UNIT_DEGREE = typeof(°)
+const _UNIT_RADIAN = typeof(Unitful.rad)
+DegreeAngle{T} = Unitful.Quantity{T,Unitful.NoDims,_UNIT_DEGREE}
+RadianAngle{T} = Unitful.Quantity{T,Unitful.NoDims,_UNIT_RADIAN}
+struct OneTurn end
+@inline Base.div(x::Real, ::OneTurn, r) = div(x, 360, r)
+@inline Base.div(x::DegreeAngle, ::OneTurn, r) = div(x.val, 360, r)
+@inline Base.div(x::RadianAngle, ::OneTurn, r) = div(x.val, 2π, r)
+
+# Slight piracy here (`Unitful` forgot to define `cosd(radians)`,
+# and has `cosd(1°) == cosd(1rad)`...
+@inline Base.Math.cosd(u::RadianAngle) = cos(u)
+@inline Base.Math.sind(u::RadianAngle) = sin(u)
+@inline Base.Math.sincosd(u::RadianAngle) = sincos(u)
+
 # Affine transformations««1
 struct AffineMap{A,B}
 	a::A
@@ -395,7 +400,7 @@ function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle) where{T}
 	@assert p[1] ≥ 0
 	# special case: point is on the y-axis; returns a single point:
 	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
-	n = Int(cld(circle_nvertices(g, p[1]) * angle, 360))
+	n = Int(cld(circle_nvertices(g, p[1])*angle, OneTurn()))
 
 	ω = Complex{T}(cosd(angle/n), sind(angle/n))
 	z = Vector{Complex{T}}(undef, n+1)
@@ -1409,7 +1414,7 @@ Cone with arbitrary base.
 
 Similar to OpenSCAD's `rotate_extrude` primitive.
 """
-@inline rotate_extrude(angle::Real, s...) =
+@inline rotate_extrude(angle::Number, s...) =
 	operator(RotateExtrude, (angle,), s...)
 @inline rotate_extrude(s...) = rotate_extrude(360, s...)
 
