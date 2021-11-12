@@ -948,24 +948,13 @@ with given `direction` and `origin`.
 	operator(Half, (dir, origin,), s...)
 
 # Linear extrusion (and cylinder)««1
-# Linear extrusion with matrix exponential:
-# f_t = affine function x ↦ a(t) x + b(t)
-# such that f_s f_t = f_{s+t}
-# i.e. a(s) (a(t) x + b(t)) + b(s) = a(s+t) x + b(s+t)
-# i.e. a(s) a(t) = a(s+t), i.e. a(t) = exp(t g)
-# and  a(s) b(t) + b(s) = b(s+t), i.e. exp(s g) b(t) + b(s) = b(s+t)
-# for small t: b(s+t)-b(s) = b(t) exp(s g)
-# i.e. b'(s) = exp(s g) b'(0); let h = b'(0)
-# b = ∫ exp(s g) h = exp(s g) g^-1 h
-# or b = exp(s g)*k; as defined by B = b(1) and A = exp(g),
-# B = A*k, or k = A^-1 B
-#
-# morale: let L = log(A), then
-# a(t) = exp(t L)
-# b(t) = exp(t L)*A^-1*B
 struct LinearExtrude{T} <: AbstractTransform{3}
 	height::T
+	twist::Angle
+	scale::SVector{2,T}
 	child::AbstractGeometry{2}
+	@inline LinearExtrude(height::T, twist, scale::AbstractVector{S}, child) where{T,S} =
+		new{promote_type(T,S)}(height, todegrees(twist), scale, child)
 end
 
 function tube_mesh(loops, slices)
@@ -990,30 +979,43 @@ function mesh(g::MeshOptions, s::LinearExtrude, (m,))
 	tri = Shapes.triangulate(m.poly)
 	peri = Shapes.loops(m.poly)
 	# perimeters are oriented ↺, holes ↻
-
 	n = length(pts2)
-	pts3 = vcat([[SA[p..., z] for p in pts2] for z in [0, s.height]]...)
+
+	rmax = sqrt(maximum(norm².(pts2)))
+	nslices = max(Int(cld(circle_nvertices(g, rmax)*s.twist, 360°)), 1)
+	pts3 = sizehint!([SA[p..., 0] for p in pts2], nslices*n)
+	dz = s.height / nslices
+	dq = cis(s.twist/nslices)
+	dr = (s.scale .- 1)/nslices
+	z = 0; q = 1; r = SA[1.,1.]
+	for k in 1:nslices
+		z+= dz; q*= dq; r+= dr
+		push!(pts3, (SA[r[1]*(p[1]*real(q)-p[2]*imag(q)),
+			r[2]*(p[1]*imag(q)+p[2]*real(q)), z] for p in pts2)...)
+	end
 	# for a perimeter p=p1, p2, p3... outward: ↺
 	# with top vertices q1, q2, q3...
 	# faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
 	#  - bottom: identical to tri
 	#  - top: reverse of tri + n
 	#  - sides:
-	faces = [ reverse.(tri); [ f .+ n for f in tri ];
-		tube_mesh(Shapes.loops(m.poly), 1) ]
+	faces = [ reverse.(tri); [ f .+ n*nslices for f in tri ];
+		tube_mesh(Shapes.loops(m.poly), nslices) ]
 	return VolumeMesh(g, pts3, faces)
 end
 
 """
-    linear_extrude(h, s...)
+    linear_extrude(h, s...; twist, scale)
     linear_extrude(h) * s...
 
 Linear extrusion to height `h`.
 """
-@inline linear_extrude(height, s...; center=false) =
-	operator(_linear_extrude, (height, center), s...)
-@inline function _linear_extrude(height, center, s::AbstractGeometry{2})
-	m = LinearExtrude(height, s)
+@inline linear_extrude(height, s...; center=false, twist=0, scale=1) =
+	operator(_linear_extrude, (height, center, twist, scale), s...)
+@inline _linear_extrude(h,c,t,s::Real,x) = _linear_extrude(h,c,t,SA[s,s],x)
+@inline function _linear_extrude(height, center, twist, scale::AbstractVector,
+		s::AbstractGeometry{2})
+	m = LinearExtrude(height, twist, scale, s)
 	center ? translate([0,0,-one_half(height)], m) : m
 end
 

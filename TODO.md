@@ -47,7 +47,7 @@
 # New features
 ## Geometry
  - [x] equivalent of OpenSCAD's for loop?!
- - [ ] `linear_extrude` with twist and scale
+ - [x] `linear_extrude` with twist and scale
  - [ ] `rotate_extrude` with slide (per-turn) along the axis
  - [ ] compute center of gravity (and use it for scaling etc.)
  - [ ] add a 1d type (points, segments; paths) for minkowski (/ extrusions)?
