@@ -477,9 +477,6 @@ TODO: allow several paths and simplify crossing paths.
 struct Square{T} <: AbstractGeometry{2}
 	size::SVector{2,T}
 end
-# @inline AbstractTrees.printnode(io::IO, s::Square) =
-# 	print(io, "square(", s.size, ")")
-
 @inline scad_info(s::Square) = (:square, (size=s.size,))
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
@@ -761,6 +758,7 @@ end
     mult_matrix(a, [center=c], solid...)
     mult_matrix(a, b, solid...)
     mult_matrix(a, b) * solid
+    a * solid + b # preferred form
 
 Represents the affine operation `x -> a*x + b`.
 
@@ -821,16 +819,16 @@ the associated diagonal matrix.
 @inline scaling(a::Real) = a*I
 @inline scaling(a::AbstractVector) = Diagonal(a)
 
-# mirror««2
+# reflect««2
 """
-    mirror(v, s...; center=0)
-    mirror(v; center=0) * s
+    reflect(v, s...; center=0)
+    reflect(v; center=0) * s
 
 Reflection with axis given by the hyperplane normal to `v`.
 If `center` is given, then the affine hyperplane through this point will
 be used.
 """
-@inline mirror(v::AbstractVector, s...; kwargs...) =
+@inline reflect(v::AbstractVector, s...; kwargs...) =
 	mult_matrix(Reflection(v), s...; kwargs...)
 # rotate««2
 # FIXME: add a method Angle2d*StaticVector{3}
@@ -900,34 +898,54 @@ Computes the (3d to 2d) intersection of a shape and the given horizontal plane
 # TODO: slice at different z value
 
 
-# Half-space intersection ««1
-struct Halfspace <: AbstractTransform{3}
-	direction::SVector{3}
-	origin::SVector{3}
-	child::AbstractGeometry{3}
+# Half-plane and half-space intersection ««1
+"""
+    Half{D,T}
+
+Intersection with half-space `direction`*x == `origin`.
+"""
+struct Half{D,T}<: AbstractTransform{D}
+	direction::SVector{D,T}
+	origin::T
+	child::AbstractGeometry{D}
 end
 
-mesh(g::MeshOptions, s::Halfspace, (m,)) =
-	return VolumeMesh(TriangleMeshes.halfspace(
-	s.direction, s.origin, m.mesh,g.color))
+symbolic_dir = ( (), # 1 is ignored
+	(right = SA[1,0], left = SA[-1,0], top = SA[0,1], bottom=SA[0,-1],
+	 front = SA[0,-1], back=SA[0,1],),
+	(right = SA[1,0,0], left=SA[-1,0,0], top=SA[0,0,1], bottom=SA[0,0,-1],
+	 front = SA[0,-1,0], back=SA[0,1,0],),
+)
+@inline Half(dir::Symbol, origin, s::AbstractGeometry{D}) where{D} =
+	Half(symbolic_dir[D][dir], origin, s)
+@inline Half(dir::AbstractVector{T}, ::ZeroVector, s) where{T} =
+	Half(dir, zero(T), s)
+@inline Half(dir::AbstractVector{T}, origin::AbstractVector, s) where{T} =
+	Half(dir, dot(dir, origin), s)
+
+origin_vec(dir, off) = dir*(off / norm²(dir))
+
+mesh(g::MeshOptions, s::Half{3}, (m,)) =
+	VolumeMesh(TriangleMeshes.halfspace(
+	-s.direction, origin_vec(s.direction, s.origin), m.mesh,g.color))
+
+mesh(g::MeshOptions, s::Half{2}, (m,)) =
+	ShapeMesh(intersect(Shapes.HalfPlane(s.direction,-s.origin), m.poly))
 
 """
-    halfspace(direction, origin, s...)
+    half(direction, s...; origin = 0)
+    half(direction; origin = 0) * s
 
-Keeps only the part of 3d objects `s` lying in the halfspace
+Keeps only the part of 3d objects `s` lying in the halfspace/halfplane
 with given `direction` and `origin`.
 
-TODO: more flexible syntax
-"""
-@inline halfspace(direction, origin, s...) =
-	operator(Halfspace, (-direction, origin), s...)
-@inline left_half(s...) = halfspace(SA[-1,0,0],SA[0,0,0], s...)
-@inline right_half(s...) = halfspace(SA[1,0,0],SA[0,0,0], s...)
-@inline top_half(s...) = halfspace(SA[0,0,1],SA[0,0,0], s...)
-@inline bottom_half(s...) = halfspace(SA[0,0,-1],SA[0,0,0], s...)
-@inline front_half(s...) = halfspace(SA[0,-1,0],SA[0,0,0], s...)
-@inline back_half(s...) = halfspace(SA[0,1,0],SA[0,0,0], s...)
+`direction` may be either a vector, or one of the six symbols  `:top`, `:bottom`, `:left`, `:right`, `:front`, `:back`.
 
+`origin` may be either a point (i.e. one point of the hyperplane) or a scalar
+(b in the equation a*x=b of the hyperplane).
+"""
+@inline half(dir, s...; origin=ZeroVector()) =
+	operator(Half, (dir, origin,), s...)
 
 # Linear extrusion (and cylinder)««1
 struct LinearExtrude{T} <: AbstractTransform{3}
@@ -2334,7 +2352,7 @@ end
 export square, circle, stroke, polygon
 export cube, sphere, cylinder, cone, surface
 export offset, opening, closing, hull, minkowski
-export mult_matrix, translate, scale, rotate, mirror, raise, lower
+export mult_matrix, translate, scale, rotate, reflect, raise, lower
 export project, slice, halfspace
 export decimate, loop_subdivide
 export linear_extrude, rotate_extrude, sweep

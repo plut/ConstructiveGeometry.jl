@@ -72,7 +72,7 @@ png("rotate", s); # hide
 ```
 ![a rotated square](rotate.png)
 ```@docs
-mirror
+reflect
 ```
 ```@docs
 raise
@@ -212,6 +212,13 @@ when the object is represented as an image via the `plot` method
 (either interactively with `GLMakie`,
 or as an image with `CairoMakie`).
 For SVG and STL output, all highlighted parts are ignored.
+
+Highlighted objects are preserved only by CSG operations
+and (invertible) affine transformations. For other transformations:
+ - convex hull and Minkowski sum are generally increasing
+   transformations, and would cover highlighted parts anyway;
+ - projection, slicing and extrusion modify the dimension of object,
+   making it impossible to preserve highlighted parts.
 
 ## Modifying meshing parameters
 ```@docs

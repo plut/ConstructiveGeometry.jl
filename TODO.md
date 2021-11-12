@@ -1,4 +1,5 @@
 # Main points
+ - [x] add half-plane intersection
  - [x] simplify (again) full-meshing: aux meshes are not a problem
  - [ ] remove triangulation method from `ConvexHull.jl`
  - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
@@ -79,9 +80,9 @@
    - [x] fixme: remove actual object from highlighted boxes
    - [x] todo: write something more generic (=> ensure that any operation, e.g.`offset`, preserves highlighted items)
  - [x] half-space intersection
-  - [ ] clarify parameters for `halfspace`
-  - [ ] overload `left_half` etc. for 2d children
-   - [ ] this needs a type for symbolic directions (6 names)
+  - [x] clarify parameters for `halfspace`
+  - [x] overload `left_half` etc. for 2d children
+   - [x] this needs a type for symbolic directions (6 names)
  - [x] plane intersection: `slice`
  - [x] projection
  - [x] overload `color*object` for `color::Colorant`
@@ -131,7 +132,7 @@
     [1,0,0] + annotate("blah", (.5,.5,5))* sphere(3);
     Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))
     - [ ] hook them in existing highlight procedure
- - [ ] import `.stl` and `.ply`
+ - [ ] import `.stl`, `.amf` and `.ply`
  - [ ] move doc examples to `WGLMakie`
 # Basic types
  - [ ] find a way to access `.x`, `.y` and `.z` for `Point` and `Vec`
