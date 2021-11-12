@@ -13,7 +13,7 @@ using Unitful: Unitful, °
 
 import Rotations
 import Colors: Colors, Colorant
-import Makie: Makie, surface, plot, plot!, SceneLike
+import Makie: Makie, surface, plot, plot!, SceneLike, mesh
 
 import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
@@ -44,9 +44,8 @@ Base.size(c::Consecutives) = size(c.parent)
 # round to a multiple of `m`:
 @inline round(m::Integer, x::Integer, ::typeof(RoundUp)) = x + m - mod1(x, m)
 
-#————————————————————— Geometry —————————————————————————————— ««1
+#————————————————————— Geometry tools —————————————————————————————— ««1
 
-#»»1
 # Angle types««1
 const _UNIT_DEGREE = typeof(°)
 const _UNIT_RADIAN = typeof(Unitful.rad)
@@ -175,7 +174,7 @@ end
 @inline unit_n_gon(r::Rational{BigInt}, n::Int) =
 	SVector{2,Rational{BigInt}}.(unit_n_gon(Float32(r), n))
 
-# Spheres««2
+# Spheres««1
 const golden_angle = 2π/MathConstants.φ
 """
     fibonacci_sphere_points(T::Type{<:Real}, n::Int)
@@ -234,26 +233,34 @@ function ladder_triangles(n1, n2, start1, start2)
 	return triangles
 end
 
-#————————————————————— Objects and meshing —————————————————————————————— ««1
+#————————————————————— Basic structure —————————————————————————————— ««1
 
-#»»1
-# Abstract type««1
+# Abstract base type and interface««1
 """
     AbstractGeometry{D}
 
 A `D`-dimensional geometric object.
 Interface:
- - `children`
- - `mainmesh`
- - `auxmesh` (optional)
- - `printnode`
+ - `children(x)`
+ - `mesh(::MeshOptions, x)
+ - `auxmeshes(::MeshOptions, x)` (optional)
+ - `printnode(::IO, x)` (optional)
 """
 
 abstract type AbstractGeometry{D} end
-@inline Base.ndims(::AbstractGeometry{D}) where{D} = D
 @inline children(::AbstractGeometry) = AbstractGeometry[]
 @inline AbstractTrees.printnode(io::IO, s::AbstractGeometry) =
 	print(io, typeof(s).name.name)
+
+include("scad.jl")
+"""
+    mesh(opt::MeshOptions, object, children_meshes)
+
+This is the main function used by each concrete `AbstractGeometry` subtype
+to compute the main mesh for this object type
+from the (possibly empty) list of meshes of its children.
+"""
+function mesh end
 
 """
     AbstractMesh{D,T}
@@ -268,10 +275,10 @@ FIXME: this type is currently unused, should it be removed?
 abstract type AbstractMesh{D,T} <: AbstractGeometry{D} end
 @inline Base.map!(f, m::AbstractMesh) = vertices(m) .= f.(vertices(m))
 
-# Meshing options««1
+# Meshing««1
 # MeshOptions type««2
 """
-    MeshOptions{F,T,C}
+    MeshOptions{T,C}
 
 A structure storing the parameters for the (abstract object)->(mesh) conversion.
 The coordinate type determines the Julia type of the returned object;
@@ -280,19 +287,18 @@ instead as data.
 
  - `T`: coordinate type of returned object
  - `C`: color type of returned object
- - `F`: boolean flag = is this a full mesh?
 
 NOTE: for now, only `Float64` is possible.
 """
-struct MeshOptions{F,T<:Real,C}
+struct MeshOptions{T<:Real,C}
 	# at least `atol`, `rtol` and `symmetry`, but user data is allowed here:
 	parameters::NamedTuple
 	color::C
-	@inline MeshOptions{F,T,C}(p, c) where{F,T,C} = new{F,T,C}(p, c)
-	@inline MeshOptions{F,T,C}(p) where{F,T,C} = new{F,T,C}(p, p.color)
-	@inline MeshOptions{F,T}(p) where{F,T} = MeshOptions{F,T,typeof(p.color)}(p)
-	@inline MeshOptions{F,T}(;kwargs...) where{F,T} =
-		MeshOptions{F,T}(merge(_DEFAULT_PARAMETERS, kwargs.data))
+	@inline MeshOptions{T,C}(p, c) where{T,C} = new{T,C}(p, c)
+	@inline MeshOptions{T,C}(p) where{T,C} = new{T,C}(p, p.color)
+	@inline MeshOptions{T}(p) where{T} = MeshOptions{T,typeof(p.color)}(p)
+	@inline MeshOptions{T}(;kwargs...) where{T} =
+		MeshOptions{T}(merge(_DEFAULT_PARAMETERS, kwargs.data))
 end
 
 const MeshColor = Colors.RGBA{N0f8}
@@ -309,14 +315,6 @@ const _DEFAULT_PARAMETERS = (
 # meshing functions ««2
 # the mesh types (ShapeMesh, VolumeMesh) are defined below
 # this is the infrastructure for recursive meshing:
-"""
-    mainmesh(opt::MeshOptions, object, children_meshes)
-
-This is the main function used by each concrete `AbstractGeometry` subtype
-to compute the main mesh for this object type
-from the (possibly empty) list of meshes of its children.
-"""
-function mainmesh end
 
 struct FullMesh{T,U,A}
 	main::T
@@ -325,27 +323,23 @@ end
 
 @inline auxtype(::Type{FullMesh{T,U,A}}) where{T,U,A} = Pair{A,U}
 
-@inline compute_mainmesh(s::AbstractGeometry; kwargs...) =
-	mesh(MeshOptions{false,Float64}(;kwargs...), s)
-@inline compute_fullmesh(s::AbstractGeometry; kwargs...) =
-	mesh(MeshOptions{true,Float64}(;kwargs...), s)
+@inline fullmesh(s::AbstractGeometry; kwargs...) =
+	mesh(MeshOptions{Float64}(;kwargs...), s)
 
 """
     mesh(g::MeshOptions, object)
 
 Recursively compute the main mesh of this object,
-calling the `mainmesh` and `auxmeshes` functions as needed.
+calling the `mesh` and `auxmeshes` functions as needed.
 """
-mesh(g::MeshOptions{false}, s::AbstractGeometry)::MeshType(g,s) =
-	mainmesh(g, s, ( mesh(g, x) for x in children(s) ))
-
-function mesh(g::MeshOptions{true}, s::AbstractGeometry)
+function mesh(g::MeshOptions, s::AbstractGeometry)
+	# we only ever overload Makie.mesh(::MeshOptions, ...), promise!
 	l = [ mesh(g, x) for x in children(s) ]
-	m = mainmesh(g, s, [ x.main for x in l ])
+	m = mesh(g, s, [ x.main for x in l ])
 	a = auxmeshes(g, s, m, [ x.aux for x in l ])
 	return MeshType(g,s)(m, a)
 end
-# special cases: set_parameters
+# special cases below: set_parameters
 
 """
     auxmeshes(opt::MeshOptions, object, children_mains, children_auxes)
@@ -435,9 +429,9 @@ function gridcells(g::MeshOptions, vertices, maxgrid)
 	return maxgrid > 0 ? min(maxgrid, N) : N
 end
 
-include("scad.jl")
-# 2d primitives««1
-# Explicit case: ShapeMesh««2
+#————————————————————— Primitive objects —————————————————————————————— ««1
+
+# Explicit case: ShapeMesh««1
 """
     ShapeMesh{T}
 
@@ -452,7 +446,7 @@ struct ShapeMesh{T} <: AbstractMesh{2,T}
 	@inline ShapeMesh{T}(s::Shapes.PolygonXor, f=I) where{T}= new{T}(s,f)
 	@inline ShapeMesh(s::Shapes.PolygonXor{T}, f=I) where{T}= new{T}(s,f)
 end
-@inline ShapeMesh(::MeshOptions{F,T}, paths, f=I) where{F,T} =
+@inline ShapeMesh(::MeshOptions{T}, paths, f=I) where{T} =
 	ShapeMesh(Shapes.PolygonXor{T}(paths), f)
 @inline poly(s::ShapeMesh) = s.poly
 @inline paths(s::ShapeMesh) = poly(s).paths
@@ -462,17 +456,24 @@ end
 @inline AbstractTrees.printnode(io::IO, s::ShapeMesh) =
 	print(io, "ShapeMesh # ", length(paths(s)), " polygon(s), ",
 		sum(length.(paths(s))), " vertices")
-@inline mainmesh(g::MeshOptions, m::ShapeMesh, _) = ShapeMesh(g, paths(m))
+@inline mesh(g::MeshOptions, m::ShapeMesh, _) = ShapeMesh(g, paths(m))
 
-@inline MeshType(::MeshOptions{false,T,C},::AbstractGeometry{2}) where{T,C} =
-	ShapeMesh{T}
-@inline MeshType(::MeshOptions{true ,T,C},::AbstractGeometry{2}) where{T,C} =
+@inline MeshType(::MeshOptions{T,C},::AbstractGeometry{2}) where{T,C} =
 	FullMesh{ShapeMesh{T},Shapes.PolygonXor{T},C}
 @inline raw(m::ShapeMesh) = m.poly
 @inline Base.empty(::Type{<:ShapeMesh{T}}) where{T} =
 	ShapeMesh{T}(Shapes.PolygonXor{T}([]))
 
-# Square««2
+"""
+    polygon(path)
+
+Filled polygon delimitated by the given vertices.
+
+TODO: allow several paths and simplify crossing paths.
+"""
+@inline polygon(path) = ShapeMesh(Shapes.PolygonXor([path]))
+
+# Square««1
 struct Square{T} <: AbstractGeometry{2}
 	size::SVector{2,T}
 end
@@ -482,20 +483,45 @@ end
 @inline scad_info(s::Square) = (:square, (size=s.size,))
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
-@inline mainmesh(g::MeshOptions{F,T}, s::Square, _) where{F,T} =
+@inline mesh(g::MeshOptions{T}, s::Square, _) where{T} =
 	ShapeMesh(g, [square_vertices(T(s.size[1]), T(s.size[2]))])
 
-# Circle««2
+# TODO: add syntactic sugar (origin, center, etc.) here:
+"""
+    square(size; origin, center=false)
+    square(width, height; origin, center=false)
+
+An axis-parallel square or rectangle  with given `size`
+(scalar or vector of length 2).
+"""
+@inline square(a::Real, b::Real; center=nothing, anchor=nothing) =
+	_square(a, b, center, anchor)
+@inline square(a::Real; kwargs...) = square(a,a; kwargs...)
+@inline square(a::AbstractVector; kwargs...) = square(a...; kwargs...)
+
+@inline _square(a, b, ::Nothing, ::Nothing) = Square(SA[a, b])
+@inline _square(a, b, center::Bool, anchor) =
+	center ? _square(a,b,SA[0,0],anchor) : _square(a,b,nothing,anchor)
+@inline _square(a, b, center::AbstractVector, anchor) =
+	translate(center-SA[one_half(a),one_half(b)])*_square(a,b,nothing,anchor)
+
+# Circle««1
 struct Circle{T} <: AbstractGeometry{2}
 	radius::T
 end
-# @inline AbstractTrees.printnode(io::IO, s::Circle) =
-# 	print(io, "circle(", s.radius, ")")
+
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
-@inline mainmesh(g::MeshOptions{F,T}, s::Circle, _) where{F,T} =
+@inline mesh(g::MeshOptions{T}, s::Circle, _) where{T} =
 	ShapeMesh(g, [unit_n_gon(g, T(s.radius))])
 
-# Stroke ««2
+"""
+    circle(r::Real)
+
+A circle with diameter `r`, centered at the origin.
+"""
+@inline circle(a::Real) = Circle(a)
+
+# Stroke ««1
 struct Stroke{T} <: AbstractGeometry{2}
 	points::Vector{SVector{2,T}}
 	width::Float64
@@ -508,14 +534,25 @@ Stroke(points, width; ends=:round, join=:round, miter_limit=2.) =
 @inline AbstractTrees.printnode(io::IO, s::Stroke) =
 	print(io, "Stroke # ", length(s.points), " points")
 
-function mainmesh(g::MeshOptions{F,T}, s::Stroke, _) where{F,T}
+function mesh(g::MeshOptions{T}, s::Stroke, _) where{T}
 	r = one_half(T(s.width))
 	ε = max(get(g,:atol), get(g,:rtol) * r)
 	return ShapeMesh(g, Shapes.offset([s.points], r;
 		join=s.join, ends=s.ends, miter_limit = s.miter_limit))
 end
-# 3d primitives««1
-# VolumeMesh««2
+
+"""
+    stroke(points, width; kwargs)
+    ends = :loop|:butt|:square|:round
+    join = :round|:square|:miter
+    miter_limit = 2.0
+
+Draws a path of given width.
+"""
+stroke(points, width; kwargs...) = Stroke(points, width; kwargs...)
+
+
+# VolumeMesh««1
 """
     VolumeMesh{T}
 
@@ -542,18 +579,16 @@ end
 @inline apply(f::AffineMap, m::VolumeMesh, d=signdet(f.a, 3)) =
 	VolumeMesh(apply(f, m.mesh, d))
 
-@inline TriangleMesh(g::MeshOptions{F,T}, points, faces,
+@inline TriangleMesh(g::MeshOptions{T}, points, faces,
 	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{F,T,A} =
 	TriangleMesh{T,A}(SVector{3,T}.(points), faces, attrs)
-@inline VolumeMesh(g::MeshOptions{F,T,C}, points, faces) where{F,T,C} =
+@inline VolumeMesh(g::MeshOptions{T,C}, points, faces) where{T,C} =
 	VolumeMesh(TriangleMesh{T,C}(SVector{3,T}.(points), faces,
 		fill(g.color, size(faces))))
-@inline mainmesh(g::MeshOptions, s::VolumeMesh, _) =
+@inline mesh(g::MeshOptions, s::VolumeMesh, _) =
 	VolumeMesh(g, vertices(s), faces(s))
 
-@inline MeshType(::MeshOptions{false,T,C},::AbstractGeometry{3}) where{T,C} =
-	VolumeMesh{T,C}
-@inline MeshType(::MeshOptions{true ,T,C},::AbstractGeometry{3}) where{T,C} =
+@inline MeshType(::MeshOptions{T,C},::AbstractGeometry{3}) where{T,C} =
 	FullMesh{VolumeMesh{T},TriangleMesh{T,Nothing},C}
 @inline raw(m::VolumeMesh) = TriangleMesh{Float64,Nothing}(
 	m.mesh.vertices, m.mesh.faces, fill(nothing, size(m.mesh.faces)))
@@ -561,640 +596,6 @@ end
 @inline scad_info(s::VolumeMesh) =
 	(:surface, (points=s.points, faces = [ f .- 1 for f in s.faces ]))
 
-# Cube««2
-struct Cube{T} <: AbstractGeometry{3}
-	size::SVector{3,T}
-end
-@inline scad_info(s::Cube) = (:cube, (size=s.size,))
-
-@inline cube_vertices(u, v, w) = [
-		SA[0,0,0], SA[0,0,w], SA[0,v,0], SA[0,v,w],
-		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
-
-mainmesh(g::MeshOptions{F,T}, s::Cube, _) where{F,T} =
-	VolumeMesh(TriangleMesh(g,
-	cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
-	[ # 12 triangular faces:
-	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
-	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
-	 (2, 1, 5), (5, 6, 2), (3, 1, 2), (2, 4, 3),
-	]))
-
-# Sphere««2
-struct Sphere{T} <: AbstractGeometry{3}
-	radius::T
-end
-@inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
-
-function mainmesh(g::MeshOptions{F,T}, s::Sphere, _) where{F,T}
-	plist = fibonacci_sphere_points(g, T(s.radius))
-	(pts, faces) = convex_hull(plist)
-	return VolumeMesh(g, pts, faces)
-end
-
-# Cylinder is implemented as an extrusion
-
-# Constructive geometry operations««1
-# https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
-# Type definition««2
-abstract type AbstractConstructed{S,D} <: AbstractGeometry{D} end
-
-# default interface:
-@inline children(s::AbstractConstructed) = s.children
-@inline scad_info(::AbstractConstructed{S}) where{S} = (S, ())
-
-# """
-# 		ConstructedSolid{S,V,D}
-# 
-# A type representing CSG operations on solids. `D` is the dimension and
-# `S` is a symbol representing the operation (union, intersection etc.)
-# """
-struct ConstructedSolid{S,V,D} <: AbstractConstructed{S,D}
-	children::V # Vector{<:AbstractGeometry}, or tuple etc.
-end
-
-@inline AbstractTrees.printnode(io::IO, s::ConstructedSolid{S}) where{S} =
-	print(io, S)
-constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
-	ConstructedSolid{S,T(AbstractGeometry{D}),D} where{D}
-
-# Complement««2
-# It would be possible in theory to represent complementation as a
-# reversed mesh. However, the only reasonable fill-rule in `Clipper.jl`
-# (`positive`) understands a clockwise loop as an empty polygon (because
-# all points have either 0 or -1 as a winding number). A way to solve
-# this (which Clipper does not implement) would be to affect winding
-# number +1 to the point at infinity.
-#
-# So we instead represent complementation symbolically,
-# using the Boolean rules:
-# ~(~A) = A
-# A ∩ (~B) = A ∖ B
-# (~A) ∩ (~B) = ~(A ∪ B)
-# A ∪ (~B) = ∼(B ∖ A)
-# (~A) ∪ (~B) = ~(A ∩ B)
-# (~A) ∪ (~B) = A ⊕ (~B) = A ⊕ B
-#
-# This means that ad-hoc rules are defined for complements (see below),
-# so we need CSGComplement to be defined before the other types.
-CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
-iscomplement(::CSGComplement) = true
-iscomplement(::AbstractGeometry) = false
-@inline mainmesh(g::MeshOptions, ::CSGComplement, l) = first(l)
-
-# Union««2
-CSGUnion = constructed_solid_type(:union)
-function mainmesh(g::MeshOptions,s::CSGUnion, mlist)#::MeshType(g,s)
-	isempty(mlist) && return empty(MeshType(g,s)) # FIXME
-	(m1, mt...) = mlist
-	(i1, ct...) = iscomplement.(children(s))
-	for (m2,i2) in zip(mt, ct)
-		if i1
-			# (~A) ∪ (~B) = ~(A ∩ B): i1 ← true, m1 ← m1 ∩ m2
-			# (~A) ∪ B = ~(A ∖ B): i1 ← true, m1 ← m1∖m2
-			m1 = i2 ? csginter(m1,m2) : csgdiff(m1,m2)
-		else
-			(m1,i1) = i2 ? (csgdiff(m2,m1), true) : (csgunion(m1,m2), false)
-		end
-	end
-	return m1
-end
-
-@inline self_union(m::ShapeMesh) = ShapeMesh(Shapes.simplify(poly(m)))
-@inline self_union(m::VolumeMesh) = csgunion(m, m)
-
-@inline csgunion(s1::S, s2::S) where {S<:VolumeMesh} =
-	VolumeMesh(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
-@inline csginter(s1::S, s2::S) where {S<:VolumeMesh} =
-	VolumeMesh(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
-@inline csgdiff(s1::S, s2::S) where {S<:VolumeMesh} =
-	VolumeMesh(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
-
-@inline csgunion(s1::ShapeMesh, s2::ShapeMesh) =
-	ShapeMesh(Shapes.clip(:union, s1.poly, s2.poly), I)
-@inline csginter(s1::ShapeMesh, s2::ShapeMesh) =
-	ShapeMesh(Shapes.clip(:intersection, s1.poly, s2.poly), I)
-@inline csgdiff(s1::ShapeMesh, s2::ShapeMesh) =
-	ShapeMesh(Shapes.clip(:difference, s1.poly, s2.poly), I)
-
-# Intersection««2
-CSGInter = constructed_solid_type(:intersection)
-function mainmesh(g::MeshOptions, s::CSGInter, mlist)#::MeshType(g,s)
-	isempty(mlist) && return empty(MeshType(g,s))
-	(m1, mt...) = mlist
-	(i1, ct...) = iscomplement.(children(s))
-	for (m2,i2) in zip(mt,ct)
-		if i1
-			# (~A) ∩ (~B) = ~(A ∪ B)
-			# (~A) ∩ B =  B∖A
-			(m1,i1) = i2 ? (csgunion(m1,m2), true) : (csgdiff(m2,m1), false)
-		else
-			# A ∩ (~B) = A∖B
-			m1 = i2 ? csgdiff(m1,m2) : csginter(m1,m2)
-		end
-	end
-	return m1
-end
-
-# Difference««2
-# this is a binary operator:
-CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
-function mainmesh(g::MeshOptions, s::CSGDiff, mlist)#::MeshType(g,s)
-	(i1,i2) = iscomplement.(children(s))
-	(m1,m2) = mlist
-	if i1
-		return i2 ? csgdiff(m2,m1) : csgunion(m1,m2)
-	else
-		return i2 ? csgunion(m1,m2) : csgdiff(m1,m2)
-	end
-end
-
-# Xor (used by extrusion) ««2
-@inline symdiff(s1::S, s2::S) where {S<:VolumeMesh} =
-	VolumeMesh(TriangleMeshes.boolean(3, s1.mesh, s2.mesh))
-# Empty unions and intersects««2
-"""
-    EmptyUnion
-
-A convenience type representing the union of nothing.
-This is removed whenever it is `union()`-ed with anything else.
-
-This is *not* a subtype of AbtractGeometry or anything,
-since we overload `union()` (which is generally undefined) to this.
-"""
-struct EmptyUnion end
-"""
-    EmptyIntersect
-
-A convenience type representing the intersection of nothing.
-This is removed whenever it is `intersect()`-ed with anything else.
-
-This is *not* a subtype of AbtractGeometry or anything,
-since we overload `intersect()` (which is generally undefined) to this.
-"""
-struct EmptyIntersect end
-
-union() = EmptyUnion()
-intersect() = EmptyIntersect()
-Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
-Base.show(io::IO, ::EmptyIntersect) = print(io, "intersect())")
-
-macro define_neutral(op, what, result)
-	quote
-	@inline $(esc(op))(neutral, absorb::$what) = $result
-	@inline $(esc(op))(absorb::$what, neutral) = $result
-	@inline $(esc(op))(x::$what, ::$what) = x
-	end
-end
-function minkowski end
-function hull end
-@define_neutral union EmptyUnion neutral
-@define_neutral union EmptyIntersect  absorb
-@define_neutral intersect EmptyUnion absorb
-@define_neutral intersect EmptyIntersect  neutral
-@define_neutral minkowski EmptyUnion absorb
-@define_neutral minkowski EmptyIntersect  absorb
-@define_neutral hull EmptyUnion neutral
-@define_neutral hull EmptyIntersect  absorb
-
-# Convex hull (TODO)««2
-struct CSGHull{D} <: AbstractConstructed{:hull,D}
-	children::Vector{<:AbstractGeometry}
-end
-
-@inline mainmesh(g::MeshOptions, ::CSGHull{2}, mlist) =
-	ShapeMesh(g, [convex_hull(reduce(vcat, vertices.(mlist)))])
-
-@inline vertices3(m::VolumeMesh) = vertices(m)
-@inline vertices3(s::ShapeMesh) = (position(s)([v;0]) for v in vertices(s))
-
-function mainmesh(g::MeshOptions{F,T}, ::CSGHull{3}, mlist) where{F,T}
-	v = SVector{3,T}[]
-	for m in mlist; push!(v, vertices3(m)...); end
-	(p, f) = convex_hull(v)
-	return VolumeMesh(g, p, f)
-end
-
-# Minkowski sum and difference««2
-# Minkowski sum in unequal dimensions is allowed;
-# we place the higher-dimensional summand first,
-# and its dimension is equal to the dimension of the sum:
-struct MinkowskiSum{D,D2} <: AbstractGeometry{D}
-	first::AbstractGeometry{D}
-	second::AbstractGeometry{D2}
-end
-
-@inline children(m::MinkowskiSum) = (m.first, m.second,)
-
-@inline mainmesh(g::MeshOptions, ::MinkowskiSum{2,2}, (m1,m2)) =
-	ShapeMesh(Shapes.minkowski_sum(m1.poly, m2.poly))
-@inline mainmesh(g::MeshOptions, ::MinkowskiSum{3,3}, (m1,m2)) =
-	VolumeMesh(TriangleMeshes.minkowski_sum(m1.mesh, m2.mesh))
-function mainmesh(g::MeshOptions{F,T}, ::MinkowskiSum{3,2}, (m1,m2)) where{F,T}
-	tri = Shapes.triangulate(poly(m2))
-	v2 = collect(vertices3(m2))
-	return VolumeMesh(TriangleMeshes.minkowski_sum(m1.mesh,
-		TriangleMesh{T,MeshColor}(v2, tri,
-			fill(first(m1.mesh.attributes), size(tri)))))
-end
-# Transformations««1
-# `AbstractTransform` — subtype of `AbstractGeometry` for objects with
-# a single child
-abstract type AbstractTransform{D} <: AbstractGeometry{D} end
-@inline children(m::AbstractTransform) = (m.child,)
-
-# AffineTransform««2
-struct AffineTransform{D,A,B} <: AbstractTransform{D}
-	f::AffineMap{A,B}
-	child::AbstractGeometry{D}
-end
-# AffineTransform(f, child) constructor is defined
-@inline mainmesh(g::MeshOptions, s::AffineTransform{3}, (m,)) = apply(s.f, m)
-
-function mainmesh(g::MeshOptions, s::AffineTransform{2}, (m,))
-	if hassize(s.f, (2,2))
-		return ShapeMesh(s.f(poly(m)), m.position)
-	elseif hassize(s.f,(3,3))
-		return ShapeMesh(poly(m), compose(SAffineMap3(s.f), position(m)))
-	elseif hassize(s.f,(3,2)) # pad by one column:
-		f = SAffineMap3(AffineMap([s.f.a SA[0;0;1]], s.f.b))
-		return ShapeMesh(poly(m), compose(f, position(m)))
-	end
-	throw(DimensionMismatch("linear map * shape should have dimension (2,2) or (3,3)"))
-end
-
-function auxmeshes(g::MeshOptions, s::AffineTransform{3}, m, l)
-	d = signdet(s.f.a, 3) # precompute the determinant
-	return [ x => apply(s.f, y, d) for (x,y) in [l...;] ]
-end
-
-# Project and slice««2
-struct Project <: AbstractTransform{2}
-	child::AbstractGeometry{3}
-end
-
-function mainmesh(g::MeshOptions, ::Project, (m,))
-	triangles = TriangleMeshes.project(m.mesh)
-	# FIXME: strangely, this makes some tiny “holes”
-	# (projection should be exact?!). Could be Clipper's fault?
-	c = (Shapes.clip(:union,
-		[Shapes.PolygonXor([t]) for t in triangles]...))
-	filter!(p->abs(Shapes.area(p)) > 1e-9, c.paths)
-	return ShapeMesh(c)
-end
-
-struct Slice{T} <: AbstractTransform{2}
-	z::T
-	child::AbstractGeometry{3}
-end
-
-function mainmesh(g::MeshOptions, s::Slice, (m,))
-	(pts, seg) = TriangleMeshes.plane_slice(s.z, m.mesh)
-	return ShapeMesh(Shapes.glue_segments(pts, seg))
-end
-
-struct Halfspace <: AbstractTransform{3}
-	direction::SVector{3}
-	origin::SVector{3}
-	child::AbstractGeometry{3}
-end
-
-mainmesh(g::MeshOptions, s::Halfspace, (m,)) =
-	return VolumeMesh(TriangleMeshes.halfspace(
-	s.direction, s.origin, m.mesh,g.color))
-
-# SetParameters««2
-struct SetParameters{D} <: AbstractTransform{D}
-	parameters
-	child::AbstractGeometry{D}
-	@inline SetParameters(parameters, child::AbstractGeometry{D}) where{D} =
-		new{D}(parameters, child)
-end
-
-# this object introduces a special case for recursive meshing:
-# we need 2 methods (for disambiguation)
-mesh(g::MeshOptions{true}, s::SetParameters) =
-	mesh(MeshOptions(g, s.parameters), s.child)
-mesh(g::MeshOptions{false}, s::SetParameters) =
-	mesh(MeshOptions(g, s.parameters), s.child)
-
-struct Color{D,C<:Colorant} <: AbstractTransform{D}
-	color::C
-	child::AbstractGeometry{D}
-end
-
-struct Highlight{D,C<:Colorant} <: AbstractTransform{D}
-	color::C
-	child::AbstractGeometry{D}
-end
-
-
-# Linear extrusion««2
-struct LinearExtrude{T} <: AbstractTransform{3}
-	height::T
-	child::AbstractGeometry{2}
-end
-
-function mainmesh(g::MeshOptions, s::LinearExtrude, (m,))
-	@assert m isa ShapeMesh
-	pts2 = Shapes.vertices(m.poly)
-	tri = Shapes.triangulate(m.poly)
-	peri = Shapes.loops(m.poly)
-	# perimeters are oriented ↺, holes ↻
-
-	n = length(pts2)
-	pts3 = vcat([[SA[p..., z] for p in pts2] for z in [0, s.height]]...)
-	# for a perimeter p=p1, p2, p3... outward: ↺
-	# with top vertices q1, q2, q3...
-	# faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
-	#  - bottom: identical to tri
-	#  - top: reverse of tri + n
-	#  - sides:
-	faces = [ reverse.(tri); [ f .+ n for f in tri ];
-	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
-	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
-	]
-	return VolumeMesh(g, pts3, faces)
-end
-
-# Cone««2
-# Note: this is *not* a convex hull - a generic cone is not convex
-# (the base shape may be nonconvex, or even have holes).
-struct Cone{T} <: AbstractTransform{3}
-	apex::SVector{3,T}
-	child::AbstractGeometry{2}
-end
-
-function mainmesh(g::MeshOptions{F,T}, s::Cone, (m,)) where{F,T}
-	pts2 = Shapes.vertices(m.poly)
-	tri = Shapes.triangulate(m.poly)
-	peri = Shapes.loops(m.poly)
-	n = length(pts2)
-	pts3 = [SA[p[1],p[2], 0] for p in pts2]
-	push!(pts3, SVector{3,T}(s.apex))
-	faces = [ tri;
-		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
-	return VolumeMesh(g, pts3, faces)
-end
-# Rotate extrusion««2
-struct RotateExtrude{T} <: AbstractTransform{3}
-	angle::T
-	child::AbstractGeometry{2}
-end
-
-function mainmesh(g::MeshOptions{F,T}, s::RotateExtrude, (m,)) where{F,T}
-	# right half of child:
-	m1 = intersect(Shapes.HalfPlane(SA[1,0],0), m.poly)
-	pts2 = Shapes.vertices(m1)
-	tri = Shapes.triangulate(m1)
-	peri = Shapes.loops(m1) # oriented ↺
-	n = length(pts2)
-	
-	pts3 = _rotate_extrude(g, pts2[1], s.angle)
-	firstindex = [1]
-	arclength = Int[length(pts3)]
-	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
-	for p in pts2[2:end]
-		push!(firstindex, length(pts3)+1)
-		newpoints = _rotate_extrude(g, p, s.angle)
-		@debug "newpoints[$p] = $(length(newpoints))"
-		push!(arclength, length(newpoints))
-		pts3 = vcat(pts3, newpoints)
-	end
-	@debug "pts3: $pts3"
-	@debug "firstindex: $firstindex"
-	@debug "arclength: $arclength"
-	# point i ∈ polygonxor: firstindex[i]:(firstindex[i]-1+arclength[i])
-	get3 = @closure (a,t) -> (a[t[1]], a[t[2]], a[t[3]])
-	triangles = vcat(
-		[ get3(firstindex,t) for t in tri ],
-		[ get3(firstindex,t) .+ get3(arclength,t) .- 1 for t in reverse.(tri) ]
-	)
-	@debug "triangles: $(Vector.(triangles))"
-	for l in peri
-		@debug "triangulating perimeter l=$l««"
-		for (i1, p1) in pairs(l)
-			i2 = mod1(i1+1, length(l)); p2 = l[i2]
-			# point p1: firstindex[p1] .. firstindex[p1]-1+arclength[p1]
-			# point p2: etc.
-			@debug "triangulating between points $p1 and $p2:"
-			@debug "   $(firstindex[p1])..$(firstindex[p1]-1+arclength[p1])"
-			@debug "   $(firstindex[p2])..$(firstindex[p2]-1+arclength[p2])"
-			nt = ladder_triangles(
-				arclength[p2], arclength[p1],
-				firstindex[p2], firstindex[p1],
-				)
-			push!(triangles, nt...)
-			@debug "new triangles: $(nt)"
-		end
-		@debug "(end perimeter)»»"
-	end
-	@debug "triangles = $triangles"
-	return VolumeMesh(g, pts3, triangles)
-end
-
-# Sweep (surface and volume)««2
-struct SurfaceSweep <: AbstractGeometry{3}
-	trajectory::AbstractGeometry{2}
-	profile::AbstractGeometry{2}
-# 	closed::Bool
-	join::Symbol
-	miter_limit::Float64
-	@inline SurfaceSweep(path, child; join=:round, miter_limit=2.0) =
-		new(path, child, join, miter_limit)
-end
-@inline children(s::SurfaceSweep) = (s.trajectory, s.profile,)
-
-function mainmesh(g::MeshOptions, s::SurfaceSweep, (mt,mp,))
-	tlist = paths(mt) # trajectory paths
-	plist = paths(mp) # profile paths
-	m = nothing
-	for t in tlist # each loop in the trajectory
-		rmax = sqrt(maximum(norm².(t)))
-		ε = max(get(g, :atol), get(g, :rtol)*rmax)
-		v = [ surface(Shapes.path_extrude(t, p;
-			closed=true, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
-			for p in plist ]
-		r = reduce(symdiff, v)
-		m = (m == nothing) ? r : csgunion(m, r)
-	end
-	return m
-end
-
-struct VolumeSweep <: AbstractTransform{3}
-	transform::Function
-	nsteps::Int
-	maxgrid::Int
-	isolevel::Float64
-	child::AbstractGeometry{3}
-end
-
-function mainmesh(g::MeshOptions, s::VolumeSweep, (m,))
-	return VolumeMesh(TriangleMeshes.swept_volume(m.mesh, s.transform,
-		min(ceil(Int,1/get(g,:rtol)),s.nsteps),
-		gridcells(g, vertices(m), s.maxgrid), s.isolevel))
-end
-
-# Offset««2
-
-struct Offset{D} <: AbstractTransform{D}
-	radius::Float64
-	# these values are used only for 2d children:
-	ends::Symbol
-	join::Symbol
-	miter_limit::Float64
-	# this value is used only for 3d children:
-	maxgrid::Int
-	# and the child:
-	child::AbstractGeometry{D}
-	@inline Offset(radius::Real, ends::Symbol, join::Symbol, miter_limit::Real,
-		maxgrid::Real, child::AbstractGeometry{D}) where{D} =
-		new{D}(radius, ends, join, miter_limit, maxgrid, child)
-end
-
-function mainmesh(g::MeshOptions, s::Offset{2}, (m,))
-	ε = max(get(g,:atol), get(g,:rtol) * s.radius)
-	return ShapeMesh(Shapes.offset(poly(m), s.radius;
-	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
-end
-
-mainmesh(g::MeshOptions, s::Offset{3}, (m,)) =
-	VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius,
-		gridcells(g, vertices(m), s.maxgrid)))
-
-# Decimate««2
-struct Decimate <: AbstractTransform{3}
-	max_faces::Int
-	child::AbstractGeometry{3}
-end
-
-@inline mainmesh(g::MeshOptions, s::Decimate, (m,)) =
-	VolumeMesh(TriangleMeshes.decimate(m.mesh, s.max_faces))
-
-struct LoopSubdivide <: AbstractTransform{3}
-	count::Int
-	child::AbstractGeometry{3}
-end
-
-@inline mainmesh(g::MeshOptions, s::LoopSubdivide, (m,)) =
-	VolumeMesh(TriangleMeshes.loop(m.mesh, s.count))
-
-#————————————————————— Front-end —————————————————————————————— ««1
-
-# Constructors««1
-# Squares and cubes««2
-# TODO: add syntactic sugar (origin, center, etc.) here:
-"""
-    square(size; origin, center=false)
-    square(width, height; origin, center=false)
-
-An axis-parallel square or rectangle  with given `size`
-(scalar or vector of length 2).
-"""
-@inline square(a::Real, b::Real; center=nothing, anchor=nothing) =
-	_square(a, b, center, anchor)
-@inline square(a::Real; kwargs...) = square(a,a; kwargs...)
-@inline square(a::AbstractVector; kwargs...) = square(a...; kwargs...)
-
-@inline _square(a, b, ::Nothing, ::Nothing) = Square(SA[a, b])
-@inline _square(a, b, center::Bool, anchor) =
-	center ? _square(a,b,SA[0,0],anchor) : _square(a,b,nothing,anchor)
-@inline _square(a, b, center::AbstractVector, anchor) =
-	translate(center-SA[one_half(a),one_half(b)])*_square(a,b,nothing,anchor)
-
-"""
-    cube(size; origin, center=false)
-    cube(size_x, size_y, size_z; origin, center=false)
-
-An axis-parallel cube (or sett) with given `size`
-(scalar or vector of length 3).
-
-The first vertex is at the origin and all vertices have positive coordinates.
-If `center` is `true` then the cube is centered.
-"""
-@inline cube(a::Real, b::Real, c::Real; center=nothing, anchor=nothing) =
-	_cube(a, b, c, center, anchor)
-
-@inline _cube(a,b,c, ::Nothing, ::Nothing) = Cube(SA[a,b,c])
-@inline _cube(a,b,c, center::Bool, anchor) =
-	center ? _cube(a,b,c,SA[0,0,0],anchor) : _cube(a,b,c,nothing,anchor)
-@inline _cube(a,b,c, center::AbstractVector, anchor) =
-	translate(center-SA[one_half(a),one_half(b),one_half(c)])*
-	_cube(a,b,c,nothing,anchor)
-
-@inline cube(a::Real; kwargs...) = cube(a,a,a; kwargs...)
-@inline cube(a::AbstractVector; kwargs...) = cube(a...; kwargs...)
-
-# Circles and spheres««2
-"""
-    circle(r::Real)
-
-A circle with diameter `r`, centered at the origin.
-"""
-@inline circle(a::Real) = Circle(a)
-"""
-    sphere(r::Real)
-
-A sphere with diameter `r`, centered at the origin.
-"""
-@inline sphere(a::Real) = Sphere(a)
-
-# Cylinders and cones««2
-#     cylinder(h, r1, r2 [, center=false])
-#     cylinder(h, (r1, r2) [, center=false])
-"""
-    cylinder(h, r [, center=false])
-
-A cylinder (or cone frustum)
-with basis centered at the origin, lower radius `r1`, upper radius `r2`,
-and height `h`.
-
-**Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
-not `(h,r,0)` as in OpenSCAD. For a cone, using `(cone(h,r))` instead is recommended.
-
-FIXME: currently only `cylinder(h,r)` works (the general case needs scaled extrusion).
-"""
-@inline cylinder(h::Real, r::Real;center::Bool=false) =
-	let c = linear_extrude(h)*circle(r)
-	center ? lower(one_half(h))*c : c
-	end
-
-"""
-    cone(h, r)
-
-Circular right cone with basis centered at the origin,
-radius `r`, and height `h`.
-
-    cone(apex, r)
-
-Circular, possibly oblique, cone with given apex point
-and radius `r` around the origin.
-"""
-@inline cone(v::AbstractVector, r::Real) = Cone(v, circle(r))
-@inline cone(h::Real, r::Real) = cone(SA[0,0,h], r)
-
-# Polygon««2
-"""
-    polygon(path)
-
-Filled polygon delimitated by the given vertices.
-
-TODO: allow several paths and simplify crossing paths.
-"""
-@inline polygon(path) = ShapeMesh(Shapes.PolygonXor([path]))
-# Stroke««2
-"""
-    stroke(points, width; kwargs)
-    ends = :loop|:butt|:square|:round
-    join = :round|:square|:miter
-    miter_limit = 2.0
-
-Draws a path of given width.
-"""
-stroke(points, width; kwargs...) = Stroke(points, width; kwargs...)
-
-
-# VolumeMesh««2
 """
     surface(vertices, faces)
 
@@ -1227,152 +628,75 @@ function surface(vertices, faces)
 		fill(_DEFAULT_PARAMETERS.color, size(triangles))))
 end
 
-# CSG operations««1
-# Generic code for associativity etc.««2
-# make operators associative; see definition of + in operators.jl
-for op in (:union, :intersect, :minkowski, :hull)
-	Q=QuoteNode(op)
-	# union, intersection, minkowski are trivial on single objects:
-	op != :hull &&  @eval ($op)(a::AbstractGeometry) = a
-	@eval begin
-	# all of these are associative:
-	# we leave out the binary case, which will be defined on a case-by-case
-	# basis depending on the operators (see below).
-	($op)(a::AbstractGeometry, b::AbstractGeometry, c::AbstractGeometry, x...) =
-		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
-	end
+
+# Cube««1
+struct Cube{T} <: AbstractGeometry{3}
+	size::SVector{3,T}
+end
+@inline scad_info(s::Cube) = (:cube, (size=s.size,))
+
+@inline cube_vertices(u, v, w) = [
+		SA[0,0,0], SA[0,0,w], SA[0,v,0], SA[0,v,w],
+		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
+
+mesh(g::MeshOptions{T}, s::Cube, _) where{T} =
+	VolumeMesh(TriangleMesh(g,
+	cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
+	[ # 12 triangular faces:
+	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
+	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
+	 (2, 1, 5), (5, 6, 2), (3, 1, 2), (2, 4, 3),
+	]))
+
+"""
+    cube(size; origin, center=false)
+    cube(size_x, size_y, size_z; origin, center=false)
+
+An axis-parallel cube (or sett) with given `size`
+(scalar or vector of length 3).
+
+The first vertex is at the origin and all vertices have positive coordinates.
+If `center` is `true` then the cube is centered.
+"""
+@inline cube(a::Real, b::Real, c::Real; center=nothing, anchor=nothing) =
+	_cube(a, b, c, center, anchor)
+
+@inline _cube(a,b,c, ::Nothing, ::Nothing) = Cube(SA[a,b,c])
+@inline _cube(a,b,c, center::Bool, anchor) =
+	center ? _cube(a,b,c,SA[0,0,0],anchor) : _cube(a,b,c,nothing,anchor)
+@inline _cube(a,b,c, center::AbstractVector, anchor) =
+	translate(center-SA[one_half(a),one_half(b),one_half(c)])*
+	_cube(a,b,c,nothing,anchor)
+
+@inline cube(a::Real; kwargs...) = cube(a,a,a; kwargs...)
+@inline cube(a::AbstractVector; kwargs...) = cube(a...; kwargs...)
+
+
+# Sphere««1
+struct Sphere{T} <: AbstractGeometry{3}
+	radius::T
+end
+@inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
+
+function mesh(g::MeshOptions{T}, s::Sphere, _) where{T}
+	plist = fibonacci_sphere_points(g, T(s.radius))
+	(pts, faces) = convex_hull(plist)
+	return VolumeMesh(g, pts, faces)
 end
 
-# Unrolling: prevent nesting of similar constructions
 """
-		unroll(x::AbstractGeometry, Val(sym1), Val(sym2)...)
+    sphere(r::Real)
 
-Returns either `[x]` or, if `x` is a `ConstructedSolid` matching one of the
-symbols `sym1`, `sym2`..., `children(x)`.
+A sphere with diameter `r`, centered at the origin.
 """
-@inline unroll(s::AbstractGeometry, ::Val, tail...) = unroll(s, tail...)
-@inline unroll(s::AbstractGeometry) = s
-@inline unroll(s::ConstructedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
-	children(s)
-@inline unroll2(s::AbstractGeometry, t::AbstractGeometry, tail...) =
-	[unroll(s, tail...); unroll(t, tail...)]
+@inline sphere(a::Real) = Sphere(a)
+#————————————————————— Transformations —————————————————————————————— ««1
 
-# Booleans««2
-"""
-    union(a::AbstractGeometry...)
+# `AbstractTransform`:
+# subtype of `AbstractGeometry` for objects with a single child
+abstract type AbstractTransform{D} <: AbstractGeometry{D} end
+@inline children(m::AbstractTransform) = (m.child,)
 
-Computes the union of several solids. The dimensions must match.
-"""
-@inline union(a::AbstractGeometry, b::AbstractGeometry) =
-	throw(DimensionMismatch("union of 2d and 3d objects not allowed"))
-@inline union(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
-	CSGUnion{D}(unroll2(a, b, Val(:union)))
-
-"""
-    intersect(a::AbstractGeometry...)
-
-Computes the intersection of several solids.
-Mismatched dimensions are allowed; 3d solids will be intersected
-with the horizontal plane (as if by the `slice()` operation)
-and a 2d intersection will be returned.
-"""
-@inline intersect(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
-	CSGInter{D}(unroll2(a, b, Val(:intersection)))
-@inline Base.intersect(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
-	intersect(slice(a), b)
-@inline Base.intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
-	intersect(a, slice(b))
-
-"""
-    setdiff(a::AbstractGeometry, b::AbstractGeometry)
-
-Computes the difference of two solids.
-The following dimensions are allowed: (2,2), (3,3), and (2,3).
-In the latter case, the 3d object will be intersected with the horizontal
-plane via the `slice()` operation.
-
-    setdiff([a...], [b...])
-
-Shorthand for `setdiff(union(a...), union(b...))`.
-"""
-@inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
-	CSGDiff{D}((a,b))
-@inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
-	setdiff(a, slice(b))
-@inline setdiff(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
-	throw(DimensionMismatch("difference (3d) - (2d) not allowed"))
-
-# added interface: setdiff([x...], [y...])
-@inline setdiff(x::AbstractVector{<:AbstractGeometry},
-                y::AbstractVector{<:AbstractGeometry}) =
-	setdiff(union(x...), union(y...))
-
-"""
-    complement(x::AbstractGeometry)
-    ~x
-
-Returns the complement of `x`, i.e. an object X such that y ∩ X = y ∖ x.
-
-!!! note "Warning: complement"
-
-    Complements are not supported for all operations.
-    They would typically not make sense for convex hulls,
-    and Minkowski differences are not implemented (yet).
-   For now they only work with Boolean operations: ∪, ∩, ∖.
-
-"""
-@inline complement(x::AbstractGeometry{D}) where{D} = CSGComplement{D}((x,))
-# Convex hull««2
-"""
-    hull(s::AbstractGeometry...)
-    hull(s::AbstractGeometry | StaticVector...)
-
-Represents the convex hull of given solids (and, possibly, individual
-points).
-Mixing dimensions (and points) is allowed.
-"""
-@inline hull(s::AbstractGeometry{2}...) =
-	CSGHull{2}([unroll(t, Val.((:hull, :union))...) for t in s])
-
-function hull(s::Union{AbstractGeometry{2},StaticVector{2,<:Real}}...)
-	l = AbstractGeometry{2}[unroll(t, Val.((:hull, :union))...)
-		for t in s if t isa AbstractGeometry]
-	v = filter(x->x isa AbstractVector, s)
-	push!(l, polygon([v...]))
-	return CSGHull{2}(l)
-end
-
-function hull(s::Union{AbstractGeometry,AbstractVector}...)
-	l = AbstractGeometry[]
-	T = Bool; v = SVector{3,T}[]
-	for x in s
-		if x isa AbstractVector
-			y = (length(x) == 3) ? SVector{3}(x) :
-			    (length(x) == 2) ? SVector{3}(x[1], x[2], 0) :
-					error("bad point dimension: $(length(x))")
-			T = promote_type(T, eltype(y))
-			v = push!(SVector{3,T}.(v), y)
-		else
-			push!(l, x)
-		end
-	end
-	!isempty(v) && push!(l, surface(v, [(i,i,i) for i in 1:length(v)]))
-	return CSGHull{3}(l)
-end
-# Minkowski««2
-"""
-    minkowski(s1::AbstractGeometry, s2::AbstractGeometry)
-
-Represents the Minkowski sum of given solids.
-Mixing dimensions is allowed (and returns a three-dimensional object).
-"""
-@inline minkowski(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
-	MinkowskiSum{D,D}(a, b)
-@inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
-	MinkowskiSum{3,2}(a,b)
-@inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{3})=minkowski(b,a)
-
-# Transformations««1
 # Transform type««2
 # An operator F may be called in either full or currified form:
 # F(parameters, object) - applied
@@ -1405,194 +729,33 @@ end
 @inline assoc(::Transform, ::Transform) = :right
 @inline Base.:*(u::Transform, v::Transform) = compose(u, v)
 @inline compose(u::Transform, v::Transform) = Transform{typeof(∘)}(u.f∘v.f)
-# extrusions««2
-"""
-    linear_extrude(h, s...)
-    linear_extrude(h) * s...
 
-Linear extrusion to height `h`.
-"""
-@inline linear_extrude(height, s...; center=false) =
-	operator(_linear_extrude, (height, center), s...)
-@inline function _linear_extrude(height, center, s)
-	m = LinearExtrude(height, s)
-	center ? translate([0,0,-one_half(height)], m) : m
+# Affine transforms««1
+# AffineTransform type««2
+struct AffineTransform{D,A,B} <: AbstractTransform{D}
+	f::AffineMap{A,B}
+	child::AbstractGeometry{D}
+end
+# AffineTransform(f, child) constructor is defined
+@inline mesh(g::MeshOptions, s::AffineTransform{3}, (m,)) = apply(s.f, m)
+
+function mesh(g::MeshOptions, s::AffineTransform{2}, (m,))
+	if hassize(s.f, (2,2))
+		return ShapeMesh(s.f(poly(m)), m.position)
+	elseif hassize(s.f,(3,3))
+		return ShapeMesh(poly(m), compose(SAffineMap3(s.f), position(m)))
+	elseif hassize(s.f,(3,2)) # pad by one column:
+		f = SAffineMap3(AffineMap([s.f.a SA[0;0;1]], s.f.b))
+		return ShapeMesh(poly(m), compose(f, position(m)))
+	end
+	throw(DimensionMismatch("linear map * shape should have dimension (2,2) or (3,3)"))
 end
 
-"""
-    cone(h, shape)
-    cone(h)*shape
-    cone(apex, shape)
-    cone(apex)*shape
+function auxmeshes(g::MeshOptions, s::AffineTransform{3}, m, l)
+	d = signdet(s.f.a, 3) # precompute the determinant
+	return [ x => apply(s.f, y, d) for (x,y) in [l...;] ]
+end
 
-Cone with arbitrary base.
-"""
-@inline cone(v::AbstractVector, s...) = operator(Cone, (v,), s...)
-@inline cone(h::Real, s...) = cone(SA[0,0,h], s...)
-
-"""
-    rotate_extrude([angle = 360°], shape...)
-    rotate_extrude([angle = 360°]) * shape
-
-Similar to OpenSCAD's `rotate_extrude` primitive.
-"""
-@inline rotate_extrude(angle::Number, s...) =
-	operator(RotateExtrude, (angle,), s...)
-@inline rotate_extrude(s...) = rotate_extrude(360, s...)
-
-# sweeps ««2
-"""
-    sweep(path, shape...)
-
-Extrudes the given `shape` by
-1) rotating perpendicular to the path (rotating the unit *y*-vector
-to the direction *z*), and 
-2) sweeping it along the `path`, with the origin on the path.
-
-FIXME: open-path extrusion is broken because `ClipperLib` currently
-does not support the `etOpenSingle` offset style.
-"""
-@inline sweep(path, s...; kwargs...) =
-# @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
-	operator(_Sweep, (path,), s...; kwargs...)
-
-"""
-    sweep(transform, volume)
-
-Sweeps the given `volume` by applying the `transform`:
-
-  V' = ⋃ { f(t) ⋅ V | t ∈ [0,1] }
-
-`f` is a function mapping a real number in [0,1] to a pair (matrix, vector)
-defining an affine transform.
-
- - nsteps:  upper bound on the number of steps for subdividing the [0,1] interval
- - gridsize: subdivision for marching cubes
- - isolevel: optional distance to add/subtract from swept volume
-"""
-function sweep end
-
-@inline _Sweep(path, s::AbstractGeometry{2}; kwargs...) =
-	SurfaceSweep(path, s)
-@inline _Sweep(transform, s::AbstractGeometry{3};
-	nsteps=32, maxgrid=32, isolevel=0) =
-	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
-
-
-# offset««2
-"""
-    offset(r, solid...; kwargs...)
-    offset(r; kwargs...) * solid
-
-Offsets by given radius.
-Positive radius is outside the shape, negative radius is inside.
-
-Parameters for 2d shapes:
-
-    ends=:round|:square|:butt|:loop
-    join=:round|:miter|:square
-    miter_limit=2.0
-
-Parameter for 3d solids:
-
-    maxgrid = 32 # upper bound on the number of cubes used in one direction
-
-!!! warning "Complexity"
-    Offset of a volume is a costly operation;
-    it is realized using a marching cubes algorithm on a grid defined
-    by `maxgrid`.
-		Thus, its complexity is **cubic** in the parameter `maxgrid`.
-"""
-@inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.,
-	maxgrid = 32) =
-	operator(Offset,(r,ends,join,miter_limit, maxgrid),s...)
-
-"""
-    opening(r, shape...; kwargs...)
-
-[Morphological opening](https://en.wikipedia.org/wiki/Opening_(morphology)):
-offset(-r) followed by offset(r).
-Removes small appendages and rounds convex corners.
-"""
-@inline opening(r::Real, s...;kwargs...) =
-	offset(r;kwargs...)*offset(-r, s...; kwargs...)
-"""
-    closing(r, shape...; kwargs...)
-
-[Morphological closing](https://en.wikipedia.org/wiki/Closing_(morphology)):
-offset(r) followed by offset(-r).
-Removes small holes and rounds concave corners.
-"""
-@inline closing(r::Real, s...; kwargs...) = opening(-r, s...; kwargs...)
-
-"""
-    decimate(n, surface...)
-
-Decimates a 3d surface to at most `n` triangular faces.
-"""
-@inline decimate(n::Integer, s...) = operator(Decimate, (n,), s...)
-
-"""
-    loop_subdivide(n, shape...)
-
-Applies `n` iterations of loop subdivision to the solid.
-This does not preserve shape;
-instead, it tends to “round out” the solid.
-"""
-@inline loop_subdivide(n::Integer, s...) = operator(LoopSubdivide, (n,), s...)
-
-# set_parameters, color, highlight««2
-"""
-    set_parameters(;atol, rtol, symmetry) * solid...
-
-A transformation which passes down the specified parameter values to its
-child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
-"""
-@inline set_parameters(s...; parameters...) =
-	operator(SetParameters, (parameters.data,), s...)
-
-"""
-    color(c::Colorant, s...)
-    color(c::AbstractString, s...)
-    color(c::AbstractString, α::Real, s...)
-    color(c) * s...
-
-Colors objects `s...` in the given color.
-"""
-@inline color(c::Colors.RGBA, s...) = operator(Color, (c,), s...)
-@inline color(c::Colors.RGB, s...) = color(Colors.RGBA(c,1.), s...)
-@inline color(c::Union{Symbol,AbstractString}, s...) =
-	color(parse(MeshColor, c), s...)
-@inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
-	color(Colors.coloralpha(parse(Colorant, c), a), s...)
-
-# FIXME: `color` is ignored for shapes
-@inline mainmesh(g::MeshOptions, c::Color{2}, (m,)) = m
-@inline mainmesh(g::MeshOptions, c::Color{3}, (m,)) =
-	VolumeMesh(TriangleMesh(vertices(m), faces(m), fill(c.color, size(faces(m)))))
-
-"""
-    highlight(c::Colorant, s)
-    highlight(c::AbstractString, s)
-    (c::Colorant) % s
-
-Marks an object as highlighted.
-This means that the base object will be displayed (in the specified color)
-at the same time as all results of operations built from this object.
-"""
-@inline highlight(c::Colors.RGBA, s...) = operator(Highlight, (c,), s...)
-@inline highlight(c::Union{Symbol,AbstractString}, s...) =
-	highlight(Colors.parse(Colorant, c), s...)
-@inline highlight(c::Colors.RGB, s...) =
-	highlight(Colors.RGBA(c, _HIGHLIGHT_ALPHA), s...)
-
-const _HIGHLIGHT_ALPHA=.15
-
-@inline mainmesh(g::MeshOptions, c::Highlight, (m,)) = m
-@inline auxmeshes(g::MeshOptions, s::Highlight, m, l) =
-	[l...; s.color => raw(m) ]
-
-# Affine transformations««1
 # mult_matrix««2
 """
     mult_matrix(a, [center=c], solid...)
@@ -1690,15 +853,42 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 @inline rotate(angles, s...; kwargs...) =
 	mult_matrix(Rotations.RotZYX(angles...), s...; kwargs...)
 
-# project and slice««2
+
+# Projection««1
+struct Project <: AbstractTransform{2}
+	child::AbstractGeometry{3}
+end
+
+function mesh(g::MeshOptions, ::Project, (m,))
+	triangles = TriangleMeshes.project(m.mesh)
+	# FIXME: strangely, this makes some tiny “holes”
+	# (projection should be exact?!). Could be Clipper's fault?
+	c = (Shapes.clip(:union,
+		[Shapes.PolygonXor([t]) for t in triangles]...))
+	filter!(p->abs(Shapes.area(p)) > 1e-9, c.paths)
+	return ShapeMesh(c)
+end
+
 """
     project(s...)
 
 Computes the (3d to 2d) projection of a shape on the horizontal plane.
 """
 @inline project(s...) = operator(Project, (), s...)
+
+# Slicing ««1
+struct Slice{T} <: AbstractTransform{2}
+	z::T
+	child::AbstractGeometry{3}
+end
+
+function mesh(g::MeshOptions, s::Slice, (m,))
+	(pts, seg) = TriangleMeshes.plane_slice(s.z, m.mesh)
+	return ShapeMesh(Shapes.glue_segments(pts, seg))
+end
+
 """
-    slize(z, s...)
+    slice(z, s...)
     slice(s...)
 
 Computes the (3d to 2d) intersection of a shape and the given horizontal plane
@@ -1708,6 +898,18 @@ Computes the (3d to 2d) intersection of a shape and the given horizontal plane
 @inline slice(s...) = operator(Slice, (0,), s...)
 
 # TODO: slice at different z value
+
+
+# Half-space intersection ««1
+struct Halfspace <: AbstractTransform{3}
+	direction::SVector{3}
+	origin::SVector{3}
+	child::AbstractGeometry{3}
+end
+
+mesh(g::MeshOptions, s::Halfspace, (m,)) =
+	return VolumeMesh(TriangleMeshes.halfspace(
+	s.direction, s.origin, m.mesh,g.color))
 
 """
     halfspace(direction, origin, s...)
@@ -1726,7 +928,799 @@ TODO: more flexible syntax
 @inline front_half(s...) = halfspace(SA[0,-1,0],SA[0,0,0], s...)
 @inline back_half(s...) = halfspace(SA[0,1,0],SA[0,0,0], s...)
 
-# overloading Julia operators««1
+
+# Linear extrusion (and cylinder)««1
+struct LinearExtrude{T} <: AbstractTransform{3}
+	height::T
+	child::AbstractGeometry{2}
+end
+
+function mesh(g::MeshOptions, s::LinearExtrude, (m,))
+	@assert m isa ShapeMesh
+	pts2 = Shapes.vertices(m.poly)
+	tri = Shapes.triangulate(m.poly)
+	peri = Shapes.loops(m.poly)
+	# perimeters are oriented ↺, holes ↻
+
+	n = length(pts2)
+	pts3 = vcat([[SA[p..., z] for p in pts2] for z in [0, s.height]]...)
+	# for a perimeter p=p1, p2, p3... outward: ↺
+	# with top vertices q1, q2, q3...
+	# faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
+	#  - bottom: identical to tri
+	#  - top: reverse of tri + n
+	#  - sides:
+	faces = [ reverse.(tri); [ f .+ n for f in tri ];
+	  vcat([[(i,j,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
+	  vcat([[(j,j+n,i+n) for (i,j) in consecutives(p) ] for p in peri]...);
+	]
+	return VolumeMesh(g, pts3, faces)
+end
+
+"""
+    linear_extrude(h, s...)
+    linear_extrude(h) * s...
+
+Linear extrusion to height `h`.
+"""
+@inline linear_extrude(height, s...; center=false) =
+	operator(_linear_extrude, (height, center), s...)
+@inline function _linear_extrude(height, center, s)
+	m = LinearExtrude(height, s)
+	center ? translate([0,0,-one_half(height)], m) : m
+end
+
+#     cylinder(h, r1, r2 [, center=false])
+#     cylinder(h, (r1, r2) [, center=false])
+"""
+    cylinder(h, r [, center=false])
+
+A cylinder (or cone frustum)
+with basis centered at the origin, lower radius `r1`, upper radius `r2`,
+and height `h`.
+
+**Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
+not `(h,r,0)` as in OpenSCAD. For a cone, using `(cone(h,r))` instead is recommended.
+
+FIXME: currently only `cylinder(h,r)` works (the general case needs scaled extrusion).
+"""
+@inline cylinder(h::Real, r::Real;center::Bool=false) =
+	let c = linear_extrude(h)*circle(r)
+	center ? lower(one_half(h))*c : c
+	end
+
+# Cone ««1
+# Note: this is *not* a convex hull - a generic cone is not convex
+# (the base shape may be nonconvex, or even have holes).
+struct Cone{T} <: AbstractTransform{3}
+	apex::SVector{3,T}
+	child::AbstractGeometry{2}
+end
+
+function mesh(g::MeshOptions{T}, s::Cone, (m,)) where{T}
+	pts2 = Shapes.vertices(m.poly)
+	tri = Shapes.triangulate(m.poly)
+	peri = Shapes.loops(m.poly)
+	n = length(pts2)
+	pts3 = [SA[p[1],p[2], 0] for p in pts2]
+	push!(pts3, SVector{3,T}(s.apex))
+	faces = [ tri;
+		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
+	return VolumeMesh(g, pts3, faces)
+end
+
+"""
+    cone(h, shape)
+    cone(h)*shape
+    cone(apex, shape)
+    cone(apex)*shape
+
+Cone with arbitrary base.
+"""
+@inline cone(v::AbstractVector, s...) = operator(Cone, (v,), s...)
+@inline cone(h::Real, s...) = cone(SA[0,0,h], s...)
+
+"""
+    cone(h, r)
+
+Circular right cone with basis centered at the origin,
+radius `r`, and height `h`.
+
+    cone(apex, r)
+
+Circular, possibly oblique, cone with given apex point
+and radius `r` around the origin.
+"""
+@inline cone(v::AbstractVector, r::Real) = Cone(v, circle(r))
+@inline cone(h::Real, r::Real) = cone(SA[0,0,h], r)
+
+
+# Rotate extrusion««1
+struct RotateExtrude{T} <: AbstractTransform{3}
+	angle::T
+	child::AbstractGeometry{2}
+end
+
+function mesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
+	# right half of child:
+	m1 = intersect(Shapes.HalfPlane(SA[1,0],0), m.poly)
+	pts2 = Shapes.vertices(m1)
+	tri = Shapes.triangulate(m1)
+	peri = Shapes.loops(m1) # oriented ↺
+	n = length(pts2)
+	
+	pts3 = _rotate_extrude(g, pts2[1], s.angle)
+	firstindex = [1]
+	arclength = Int[length(pts3)]
+	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
+	for p in pts2[2:end]
+		push!(firstindex, length(pts3)+1)
+		newpoints = _rotate_extrude(g, p, s.angle)
+		@debug "newpoints[$p] = $(length(newpoints))"
+		push!(arclength, length(newpoints))
+		pts3 = vcat(pts3, newpoints)
+	end
+	@debug "pts3: $pts3"
+	@debug "firstindex: $firstindex"
+	@debug "arclength: $arclength"
+	# point i ∈ polygonxor: firstindex[i]:(firstindex[i]-1+arclength[i])
+	get3 = @closure (a,t) -> (a[t[1]], a[t[2]], a[t[3]])
+	triangles = vcat(
+		[ get3(firstindex,t) for t in tri ],
+		[ get3(firstindex,t) .+ get3(arclength,t) .- 1 for t in reverse.(tri) ]
+	)
+	@debug "triangles: $(Vector.(triangles))"
+	for l in peri
+		@debug "triangulating perimeter l=$l««"
+		for (i1, p1) in pairs(l)
+			i2 = mod1(i1+1, length(l)); p2 = l[i2]
+			# point p1: firstindex[p1] .. firstindex[p1]-1+arclength[p1]
+			# point p2: etc.
+			@debug "triangulating between points $p1 and $p2:"
+			@debug "   $(firstindex[p1])..$(firstindex[p1]-1+arclength[p1])"
+			@debug "   $(firstindex[p2])..$(firstindex[p2]-1+arclength[p2])"
+			nt = ladder_triangles(
+				arclength[p2], arclength[p1],
+				firstindex[p2], firstindex[p1],
+				)
+			push!(triangles, nt...)
+			@debug "new triangles: $(nt)"
+		end
+		@debug "(end perimeter)»»"
+	end
+	@debug "triangles = $triangles"
+	return VolumeMesh(g, pts3, triangles)
+end
+
+"""
+    rotate_extrude([angle = 360°], shape...)
+    rotate_extrude([angle = 360°]) * shape
+
+Similar to OpenSCAD's `rotate_extrude` primitive.
+"""
+@inline rotate_extrude(angle::Number, s...) =
+	operator(RotateExtrude, (angle,), s...)
+@inline rotate_extrude(s...) = rotate_extrude(360, s...)
+
+
+# Sweep (surface and volume)««1
+# SurfaceSweep ««2
+struct SurfaceSweep <: AbstractGeometry{3}
+	trajectory::AbstractGeometry{2}
+	profile::AbstractGeometry{2}
+# 	closed::Bool
+	join::Symbol
+	miter_limit::Float64
+	@inline SurfaceSweep(path, child; join=:round, miter_limit=2.0) =
+		new(path, child, join, miter_limit)
+end
+@inline children(s::SurfaceSweep) = (s.trajectory, s.profile,)
+
+function mesh(g::MeshOptions, s::SurfaceSweep, (mt,mp,))
+	tlist = paths(mt) # trajectory paths
+	plist = paths(mp) # profile paths
+	m = nothing
+	for t in tlist # each loop in the trajectory
+		rmax = sqrt(maximum(norm².(t)))
+		ε = max(get(g, :atol), get(g, :rtol)*rmax)
+		v = [ surface(Shapes.path_extrude(t, p;
+			closed=true, join=s.join, miter_limit=s.miter_limit, precision=ε)...)
+			for p in plist ]
+		r = reduce(symdiff, v)
+		m = (m == nothing) ? r : csgunion(m, r)
+	end
+	return m
+end
+
+# VolumeSweep ««2
+struct VolumeSweep <: AbstractTransform{3}
+	transform::Function
+	nsteps::Int
+	maxgrid::Int
+	isolevel::Float64
+	child::AbstractGeometry{3}
+end
+
+function mesh(g::MeshOptions, s::VolumeSweep, (m,))
+	return VolumeMesh(TriangleMeshes.swept_volume(m.mesh, s.transform,
+		min(ceil(Int,1/get(g,:rtol)),s.nsteps),
+		gridcells(g, vertices(m), s.maxgrid), s.isolevel))
+end
+# Interface ««2
+"""
+    sweep(path, shape...)
+
+Extrudes the given `shape` by
+1) rotating perpendicular to the path (rotating the unit *y*-vector
+to the direction *z*), and 
+2) sweeping it along the `path`, with the origin on the path.
+
+FIXME: open-path extrusion is broken because `ClipperLib` currently
+does not support the `etOpenSingle` offset style.
+"""
+@inline sweep(path, s...; kwargs...) =
+# @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
+	operator(_Sweep, (path,), s...; kwargs...)
+
+"""
+    sweep(transform, volume)
+
+Sweeps the given `volume` by applying the `transform`:
+
+  V' = ⋃ { f(t) ⋅ V | t ∈ [0,1] }
+
+`f` is a function mapping a real number in [0,1] to a pair (matrix, vector)
+defining an affine transform.
+
+ - nsteps:  upper bound on the number of steps for subdividing the [0,1] interval
+ - gridsize: subdivision for marching cubes
+ - isolevel: optional distance to add/subtract from swept volume
+"""
+function sweep end
+
+@inline _Sweep(path, s::AbstractGeometry{2}; kwargs...) =
+	SurfaceSweep(path, s)
+@inline _Sweep(transform, s::AbstractGeometry{3};
+	nsteps=32, maxgrid=32, isolevel=0) =
+	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
+
+
+
+# Offset««1
+
+struct Offset{D} <: AbstractTransform{D}
+	radius::Float64
+	# these values are used only for 2d children:
+	ends::Symbol
+	join::Symbol
+	miter_limit::Float64
+	# this value is used only for 3d children:
+	maxgrid::Int
+	# and the child:
+	child::AbstractGeometry{D}
+	@inline Offset(radius::Real, ends::Symbol, join::Symbol, miter_limit::Real,
+		maxgrid::Real, child::AbstractGeometry{D}) where{D} =
+		new{D}(radius, ends, join, miter_limit, maxgrid, child)
+end
+
+function mesh(g::MeshOptions, s::Offset{2}, (m,))
+	ε = max(get(g,:atol), get(g,:rtol) * s.radius)
+	return ShapeMesh(Shapes.offset(poly(m), s.radius;
+	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
+end
+
+mesh(g::MeshOptions, s::Offset{3}, (m,)) =
+	VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius,
+		gridcells(g, vertices(m), s.maxgrid)))
+
+# Front-end««2
+"""
+    offset(r, solid...; kwargs...)
+    offset(r; kwargs...) * solid
+
+Offsets by given radius.
+Positive radius is outside the shape, negative radius is inside.
+
+Parameters for 2d shapes:
+
+    ends=:round|:square|:butt|:loop
+    join=:round|:miter|:square
+    miter_limit=2.0
+
+Parameter for 3d solids:
+
+    maxgrid = 32 # upper bound on the number of cubes used in one direction
+
+!!! warning "Complexity"
+    Offset of a volume is a costly operation;
+    it is realized using a marching cubes algorithm on a grid defined
+    by `maxgrid`.
+		Thus, its complexity is **cubic** in the parameter `maxgrid`.
+"""
+@inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.,
+	maxgrid = 32) =
+	operator(Offset,(r,ends,join,miter_limit, maxgrid),s...)
+
+"""
+    opening(r, shape...; kwargs...)
+
+[Morphological opening](https://en.wikipedia.org/wiki/Opening_(morphology)):
+offset(-r) followed by offset(r).
+Removes small appendages and rounds convex corners.
+"""
+@inline opening(r::Real, s...;kwargs...) =
+	offset(r;kwargs...)*offset(-r, s...; kwargs...)
+"""
+    closing(r, shape...; kwargs...)
+
+[Morphological closing](https://en.wikipedia.org/wiki/Closing_(morphology)):
+offset(r) followed by offset(-r).
+Removes small holes and rounds concave corners.
+"""
+@inline closing(r::Real, s...; kwargs...) = opening(-r, s...; kwargs...)
+
+
+# Decimate/subdivide««1
+# decimate««2
+struct Decimate <: AbstractTransform{3}
+	max_faces::Int
+	child::AbstractGeometry{3}
+end
+
+@inline mesh(g::MeshOptions, s::Decimate, (m,)) =
+	VolumeMesh(TriangleMeshes.decimate(m.mesh, s.max_faces))
+"""
+    decimate(n, surface...)
+
+Decimates a 3d surface to at most `n` triangular faces.
+"""
+@inline decimate(n::Integer, s...) = operator(Decimate, (n,), s...)
+
+# subdivide««2
+struct LoopSubdivide <: AbstractTransform{3}
+	count::Int
+	child::AbstractGeometry{3}
+end
+
+@inline mesh(g::MeshOptions, s::LoopSubdivide, (m,)) =
+	VolumeMesh(TriangleMeshes.loop(m.mesh, s.count))
+"""
+    loop_subdivide(n, shape...)
+
+Applies `n` iterations of loop subdivision to the solid.
+This does not preserve shape;
+instead, it tends to “round out” the solid.
+"""
+@inline loop_subdivide(n::Integer, s...) = operator(LoopSubdivide, (n,), s...)
+
+# SetParameters etc.««1
+# SetParameters ««2
+struct SetParameters{D} <: AbstractTransform{D}
+	parameters
+	child::AbstractGeometry{D}
+	@inline SetParameters(parameters, child::AbstractGeometry{D}) where{D} =
+		new{D}(parameters, child)
+end
+
+# this object introduces a special case for recursive meshing:
+mesh(g::MeshOptions, s::SetParameters) =
+	mesh(MeshOptions(g, s.parameters), s.child)
+
+"""
+    set_parameters(;atol, rtol, symmetry) * solid...
+
+A transformation which passes down the specified parameter values to its
+child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
+"""
+@inline set_parameters(s...; parameters...) =
+	operator(SetParameters, (parameters.data,), s...)
+
+# Color ««2
+struct Color{D,C<:Colorant} <: AbstractTransform{D}
+	color::C
+	child::AbstractGeometry{D}
+end
+
+# FIXME: `color` is ignored for shapes
+@inline mesh(g::MeshOptions, c::Color{2}, (m,)) = m
+@inline mesh(g::MeshOptions, c::Color{3}, (m,)) =
+	VolumeMesh(TriangleMesh(vertices(m), faces(m), fill(c.color, size(faces(m)))))
+
+"""
+    color(c::Colorant, s...)
+    color(c::AbstractString, s...)
+    color(c::AbstractString, α::Real, s...)
+    color(c) * s...
+
+Colors objects `s...` in the given color.
+"""
+@inline color(c::Colors.RGBA, s...) = operator(Color, (c,), s...)
+@inline color(c::Colors.RGB, s...) = color(Colors.RGBA(c,1.), s...)
+@inline color(c::Union{Symbol,AbstractString}, s...) =
+	color(parse(MeshColor, c), s...)
+@inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
+	color(Colors.coloralpha(parse(Colorant, c), a), s...)
+
+# Highlight ««2
+struct Highlight{D,C<:Colorant} <: AbstractTransform{D}
+	color::C
+	child::AbstractGeometry{D}
+end
+
+@inline mesh(g::MeshOptions, c::Highlight, (m,)) = m
+@inline auxmeshes(g::MeshOptions, s::Highlight, m, l) =
+	[l...; s.color => raw(m) ]
+
+const _HIGHLIGHT_ALPHA=.15
+"""
+    highlight(c::Colorant, s)
+    highlight(c::AbstractString, s)
+    (c::Colorant) % s
+
+Marks an object as highlighted.
+This means that the base object will be displayed (in the specified color)
+at the same time as all results of operations built from this object.
+"""
+@inline highlight(c::Colors.RGBA, s...) = operator(Highlight, (c,), s...)
+@inline highlight(c::Union{Symbol,AbstractString}, s...) =
+	highlight(Colors.parse(Colorant, c), s...)
+@inline highlight(c::Colors.RGB, s...) =
+	highlight(Colors.RGBA(c, _HIGHLIGHT_ALPHA), s...)
+
+#————————————————————— CSG operations —————————————————————————————— ««1
+# https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf
+
+abstract type AbstractConstructed{S,D} <: AbstractGeometry{D} end
+
+# default interface:
+@inline children(s::AbstractConstructed) = s.children
+@inline scad_info(::AbstractConstructed{S}) where{S} = (S, ())
+@inline AbstractTrees.printnode(io::IO, ::AbstractConstructed{S}) where{S} =
+	print(io, S)
+
+"""
+		ConstructedSolid{S,V,D}
+
+A type representing CSG operations on solids. `D` is the dimension and
+`S` is a symbol representing the operation (union, intersection etc.)
+"""
+struct ConstructedSolid{S,V,D} <: AbstractConstructed{S,D}
+	children::V # Vector{<:AbstractGeometry}, or tuple etc.
+end
+
+constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
+	ConstructedSolid{S,T(AbstractGeometry{D}),D} where{D}
+
+# Generic code for associativity etc.««2
+# make operators associative; see definition of + in operators.jl
+for op in (:union, :intersect, :minkowski, :hull)
+	Q=QuoteNode(op)
+	# union, intersection, minkowski are trivial on single objects:
+	op != :hull &&  @eval ($op)(a::AbstractGeometry) = a
+	@eval begin
+	# all of these are associative:
+	# we leave out the binary case, which will be defined on a case-by-case
+	# basis depending on the operators (see below).
+	($op)(a::AbstractGeometry, b::AbstractGeometry, c::AbstractGeometry, x...) =
+		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
+	end
+end
+
+# Unrolling: prevent nesting of similar associative constructions
+"""
+		unroll(x::AbstractGeometry, Val(sym1), Val(sym2)...)
+
+Returns either `[x]` or, if `x` is a `ConstructedSolid` matching one of the
+symbols `sym1`, `sym2`..., `children(x)`.
+"""
+@inline unroll(s::AbstractGeometry, ::Val, tail...) = unroll(s, tail...)
+@inline unroll(s::AbstractGeometry) = s
+@inline unroll(s::ConstructedSolid{D, S}, ::Val{S}, tail...) where{D, S} =
+	children(s)
+@inline unroll2(s::AbstractGeometry, t::AbstractGeometry, tail...) =
+	[unroll(s, tail...); unroll(t, tail...)]
+
+# Booleans ««1
+@inline csgunion(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
+@inline csginter(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
+@inline csgdiff(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
+
+@inline csgunion(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:union, s1.poly, s2.poly), I)
+@inline csginter(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:intersection, s1.poly, s2.poly), I)
+@inline csgdiff(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:difference, s1.poly, s2.poly), I)
+
+# Complement««2
+# It would be possible in theory to represent complementation as a
+# reversed mesh. However, the only reasonable fill-rule in `Clipper.jl`
+# (`positive`) understands a clockwise loop as an empty polygon (because
+# all points have either 0 or -1 as a winding number). A way to solve
+# this (which Clipper does not implement) would be to affect winding
+# number +1 to the point at infinity.
+#
+# So we instead represent complementation symbolically,
+# using the Boolean rules:
+# ~(~A) = A
+# A ∩ (~B) = A ∖ B
+# (~A) ∩ (~B) = ~(A ∪ B)
+# A ∪ (~B) = ∼(B ∖ A)
+# (~A) ∪ (~B) = ~(A ∩ B)
+# (~A) ∪ (~B) = A ⊕ (~B) = A ⊕ B
+#
+# This means that ad-hoc rules are defined for complements (see below),
+# so we need CSGComplement to be defined before the other types.
+CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
+iscomplement(::CSGComplement) = true
+iscomplement(::AbstractGeometry) = false
+@inline mesh(g::MeshOptions, ::CSGComplement, (m,)) = m
+
+"""
+    complement(x::AbstractGeometry)
+    ~x
+
+Returns the complement of `x`, i.e. an object X such that y ∩ X = y ∖ x.
+
+!!! note "Warning: complement"
+
+    Complements are not supported for all operations.
+    They would typically not make sense for convex hulls,
+    and Minkowski differences are not implemented (yet).
+   For now they only work with Boolean operations: ∪, ∩, ∖.
+
+"""
+@inline complement(x::AbstractGeometry{D}) where{D} = CSGComplement{D}((x,))
+
+# Union««2
+CSGUnion = constructed_solid_type(:union)
+function mesh(g::MeshOptions,s::CSGUnion, mlist)#::MeshType(g,s)
+	isempty(mlist) && return empty(MeshType(g,s)) # FIXME
+	(m1, mt...) = mlist
+	(i1, ct...) = iscomplement.(children(s))
+	for (m2,i2) in zip(mt, ct)
+		if i1
+			# (~A) ∪ (~B) = ~(A ∩ B): i1 ← true, m1 ← m1 ∩ m2
+			# (~A) ∪ B = ~(A ∖ B): i1 ← true, m1 ← m1∖m2
+			m1 = i2 ? csginter(m1,m2) : csgdiff(m1,m2)
+		else
+			(m1,i1) = i2 ? (csgdiff(m2,m1), true) : (csgunion(m1,m2), false)
+		end
+	end
+	return m1
+end
+
+# FIXME: make self_union a mesh cleaning function?
+@inline self_union(m::ShapeMesh) = ShapeMesh(Shapes.simplify(poly(m)))
+@inline self_union(m::VolumeMesh) = csgunion(m, m)
+
+"""
+    union(a::AbstractGeometry...)
+
+Computes the union of several solids. The dimensions must match.
+"""
+@inline union(a::AbstractGeometry, b::AbstractGeometry) =
+	throw(DimensionMismatch("union of 2d and 3d objects not allowed"))
+@inline union(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	CSGUnion{D}(unroll2(a, b, Val(:union)))
+
+
+# Intersection««2
+CSGInter = constructed_solid_type(:intersection)
+function mesh(g::MeshOptions, s::CSGInter, mlist)#::MeshType(g,s)
+	isempty(mlist) && return empty(MeshType(g,s))
+	(m1, mt...) = mlist
+	(i1, ct...) = iscomplement.(children(s))
+	for (m2,i2) in zip(mt,ct)
+		if i1
+			# (~A) ∩ (~B) = ~(A ∪ B)
+			# (~A) ∩ B =  B∖A
+			(m1,i1) = i2 ? (csgunion(m1,m2), true) : (csgdiff(m2,m1), false)
+		else
+			# A ∩ (~B) = A∖B
+			m1 = i2 ? csgdiff(m1,m2) : csginter(m1,m2)
+		end
+	end
+	return m1
+end
+
+"""
+    intersect(a::AbstractGeometry...)
+
+Computes the intersection of several solids.
+Mismatched dimensions are allowed; 3d solids will be intersected
+with the horizontal plane (as if by the `slice()` operation)
+and a 2d intersection will be returned.
+"""
+@inline intersect(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	CSGInter{D}(unroll2(a, b, Val(:intersection)))
+@inline Base.intersect(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
+	intersect(slice(a), b)
+@inline Base.intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
+	intersect(a, slice(b))
+
+
+# Difference««2
+# this is a binary operator:
+CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
+function mesh(g::MeshOptions, s::CSGDiff, mlist)#::MeshType(g,s)
+	(i1,i2) = iscomplement.(children(s))
+	(m1,m2) = mlist
+	if i1
+		return i2 ? csgdiff(m2,m1) : csgunion(m1,m2)
+	else
+		return i2 ? csgunion(m1,m2) : csgdiff(m1,m2)
+	end
+end
+
+"""
+    setdiff(a::AbstractGeometry, b::AbstractGeometry)
+
+Computes the difference of two solids.
+The following dimensions are allowed: (2,2), (3,3), and (2,3).
+In the latter case, the 3d object will be intersected with the horizontal
+plane via the `slice()` operation.
+
+    setdiff([a...], [b...])
+
+Shorthand for `setdiff(union(a...), union(b...))`.
+"""
+@inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	CSGDiff{D}((a,b))
+@inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
+	setdiff(a, slice(b))
+@inline setdiff(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
+	throw(DimensionMismatch("difference (3d) - (2d) not allowed"))
+
+# added interface: setdiff([x...], [y...])
+@inline setdiff(x::AbstractVector{<:AbstractGeometry},
+                y::AbstractVector{<:AbstractGeometry}) =
+	setdiff(union(x...), union(y...))
+
+
+# Xor (used by extrusion) ««2
+@inline symdiff(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(3, s1.mesh, s2.mesh))
+# Empty unions and intersects««2
+# FIXME: this is not really used...
+"""
+    EmptyUnion
+
+A convenience type representing the union of nothing.
+This is removed whenever it is `union()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `union()` (which is generally undefined) to this.
+"""
+struct EmptyUnion end
+"""
+    EmptyIntersect
+
+A convenience type representing the intersection of nothing.
+This is removed whenever it is `intersect()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `intersect()` (which is generally undefined) to this.
+"""
+struct EmptyIntersect end
+
+union() = EmptyUnion()
+intersect() = EmptyIntersect()
+Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
+Base.show(io::IO, ::EmptyIntersect) = print(io, "intersect())")
+
+macro define_neutral(op, what, result)
+	quote
+	@inline $(esc(op))(neutral, absorb::$what) = $result
+	@inline $(esc(op))(absorb::$what, neutral) = $result
+	@inline $(esc(op))(x::$what, ::$what) = x
+	end
+end
+function minkowski end
+function hull end
+@define_neutral union EmptyUnion neutral
+@define_neutral union EmptyIntersect  absorb
+@define_neutral intersect EmptyUnion absorb
+@define_neutral intersect EmptyIntersect  neutral
+@define_neutral minkowski EmptyUnion absorb
+@define_neutral minkowski EmptyIntersect  absorb
+@define_neutral hull EmptyUnion neutral
+@define_neutral hull EmptyIntersect  absorb
+
+# Convex hull ««1
+struct CSGHull{D} <: AbstractConstructed{:hull,D}
+	children::Vector{<:AbstractGeometry}
+end
+
+@inline mesh(g::MeshOptions, ::CSGHull{2}, mlist) =
+	ShapeMesh(g, [convex_hull(reduce(vcat, vertices.(mlist)))])
+
+@inline vertices3(m::VolumeMesh) = vertices(m)
+@inline vertices3(s::ShapeMesh) = (position(s)([v;0]) for v in vertices(s))
+
+function mesh(g::MeshOptions{T}, ::CSGHull{3}, mlist) where{T}
+	v = SVector{3,T}[]
+	for m in mlist; push!(v, vertices3(m)...); end
+	(p, f) = convex_hull(v)
+	return VolumeMesh(g, p, f)
+end
+
+"""
+    hull(s::AbstractGeometry...)
+    hull(s::AbstractGeometry | StaticVector...)
+
+Represents the convex hull of given solids (and, possibly, individual
+points).
+Mixing dimensions (and points) is allowed.
+"""
+@inline hull(s::AbstractGeometry{2}...) =
+	CSGHull{2}([unroll(t, Val.((:hull, :union))...) for t in s])
+
+function hull(s::Union{AbstractGeometry{2},StaticVector{2,<:Real}}...)
+	l = AbstractGeometry{2}[unroll(t, Val.((:hull, :union))...)
+		for t in s if t isa AbstractGeometry]
+	v = filter(x->x isa AbstractVector, s)
+	push!(l, polygon([v...]))
+	return CSGHull{2}(l)
+end
+
+function hull(s::Union{AbstractGeometry,AbstractVector}...)
+	l = AbstractGeometry[]
+	T = Bool; v = SVector{3,T}[]
+	for x in s
+		if x isa AbstractVector
+			y = (length(x) == 3) ? SVector{3}(x) :
+			    (length(x) == 2) ? SVector{3}(x[1], x[2], 0) :
+					error("bad point dimension: $(length(x))")
+			T = promote_type(T, eltype(y))
+			v = push!(SVector{3,T}.(v), y)
+		else
+			push!(l, x)
+		end
+	end
+	!isempty(v) && push!(l, surface(v, [(i,i,i) for i in 1:length(v)]))
+	return CSGHull{3}(l)
+end
+
+# Minkowski sum ««1
+# Minkowski sum in unequal dimensions is allowed;
+# we place the higher-dimensional summand first,
+# and its dimension is equal to the dimension of the sum:
+struct MinkowskiSum{D,D2} <: AbstractGeometry{D}
+	first::AbstractGeometry{D}
+	second::AbstractGeometry{D2}
+end
+
+@inline children(m::MinkowskiSum) = (m.first, m.second,)
+
+@inline mesh(g::MeshOptions, ::MinkowskiSum{2,2}, (m1,m2)) =
+	ShapeMesh(Shapes.minkowski_sum(m1.poly, m2.poly))
+@inline mesh(g::MeshOptions, ::MinkowskiSum{3,3}, (m1,m2)) =
+	VolumeMesh(TriangleMeshes.minkowski_sum(m1.mesh, m2.mesh))
+function mesh(g::MeshOptions{T}, ::MinkowskiSum{3,2}, (m1,m2)) where{T}
+	tri = Shapes.triangulate(poly(m2))
+	v2 = collect(vertices3(m2))
+	return VolumeMesh(TriangleMeshes.minkowski_sum(m1.mesh,
+		TriangleMesh{T,MeshColor}(v2, tri,
+			fill(first(m1.mesh.attributes), size(tri)))))
+end
+
+"""
+    minkowski(s1::AbstractGeometry, s2::AbstractGeometry)
+
+Represents the Minkowski sum of given solids.
+Mixing dimensions is allowed (and returns a three-dimensional object).
+"""
+@inline minkowski(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
+	MinkowskiSum{D,D}(a, b)
+@inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
+	MinkowskiSum{3,2}(a,b)
+@inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{3})=minkowski(b,a)
+
+# Overloading Julia operators««1
 # backslash replaces U+2216 ∖ SET MINUS, which is not an allowed Julia operator
 @inline Base.:\(x::AbstractGeometry, y::AbstractGeometry) = setdiff(x, y)
 @inline Base.:~(x::AbstractGeometry) = complement(x)
@@ -1829,12 +1823,12 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 
 # STL ««1
 """
-    stl(file, object; options...)
+    stl(file, object; kwargs...)
 
 Outputs an STL description of `object` to the given `file` (string or IO).
-Optional `kwargs` are the same as for the `mesh` function
-or the `set_parameters` object.
+Optional `kwargs` are the same as for `set_parameters`.
 """
+@inline stl(io::IO, m::FullMesh) = stl(io, m.main)
 function stl(io::IO, m::VolumeMesh)
 	println(io, "solid Julia_ConstructiveGeometry_jl_model")
 	points = TriangleMeshes.vertices(m.mesh)
@@ -1855,10 +1849,17 @@ function stl(io::IO, m::VolumeMesh)
 	println(io, "endsolid")
 end
 @inline stl(io::IO, m::AbstractGeometry{3}; kwargs...) =
-	stl(io, compute_mainmesh(m; kwargs...))
+	stl(io, fullmesh(m; kwargs...))
 @inline stl(f::AbstractString, args...; kwargs...) =
 	open(f, "w") do io stl(io, args...; kwargs...) end
 # SVG ««1
+"""
+    svg(file, object; kwargs...)
+
+Outputs an SVG description of `object` to the given `file` (string or IO).
+Optional `kwargs` are the same as for `set_parameters`.
+"""
+@inline svg(io::IO, m::FullMesh) = svg(io, m.main)
 function svg(io::IO, m::ShapeMesh)
 	(x,y) = paths(m)[1][1]; rect = MVector(x, x, y, y)
 	for (x,y) in Shapes.vertices(m.poly)
@@ -1887,17 +1888,9 @@ function svg(io::IO, m::ShapeMesh)
 	println(io, """ " /> </svg>""")
 end
 @inline svg(io::IO, m::AbstractGeometry{2}; kwargs...) =
-	svg(io, compute_mainmesh(m; kwargs...))
-"""
-    svg(file, shape)
-
-Exports 2d `shape` as an SVG file.
-"""
+	svg(io, fullmesh(m; kwargs...))
 @inline svg(f::AbstractString, args...; kwargs...) =
 	open(f, "w") do io svg(io, args...; kwargs...) end
-#————————————————————— Extra tools —————————————————————————————— ««1
-
-#»»1
 # Viewing««1
 @inline Base.display(m::AbstractGeometry) = AbstractTrees.print_tree(m)
 
@@ -1906,7 +1899,7 @@ Exports 2d `shape` as an SVG file.
 	plot!(Makie.Scene(), g; kwargs...)
 
 @inline plot!(scene::SceneLike, s::AbstractGeometry; kwargs...)=
-	plot!(scene, compute_fullmesh(s); kwargs...)
+	plot!(scene, fullmesh(s); kwargs...)
 
 function plot!(scene::SceneLike, m::FullMesh; kwargs...)
 	rawmain = raw(m.main)
@@ -1991,8 +1984,8 @@ end
 
 @inline Base.map!(f, m::AnnotatedMesh) =
 	(map!(f, m.child); map!(f, m.points, m.points))
-@inline mainmesh(g::MeshOptions, a::Annotate) =
-	AnnotatedMesh(a.annotation, a.points, mainmesh(g, a.child))
+@inline mesh(g::MeshOptions, a::Annotate) =
+	AnnotatedMesh(a.annotation, a.points, mesh(g, a.child))
 
 function plot!(scene::SceneLike, m::AnnotatedMesh)
 	plot!(scene, m.child)
@@ -2350,38 +2343,6 @@ export mesh, stl, svg
 # don't export include, of course
 
 # »»1
-# function explain(s::AbstractSurface, io::IO = stdout; scale=1,
-# 		offset=[0.,0.,0.], name=:m )
-# 	println(io, """
-# module $name(pos=$offset, c="gray", s=$scale) {
-# translate($scale*pos) {
-# """)
-# 	for (i, p) in pairs(ConstructiveGeometry.vertices(s))
-# 		println(io, """
-# translate(s*$(Vector{Float64}(coordinates(p)))) {
-# 	color("red") sphere(1);
-# 	color("black", .8) linear_extrude(1) text("$i", size=5);
-# }
-# """)
-# 	end
-# 	println(io, "color(c, .7) polyhedron([")
-# 	b = false
-# 	for p in ConstructiveGeometry.vertices(s)
-# 		print(io, b ? "," : ""); b = true
-# 		print(io, " s*",Vector{Float64}(coordinates(p)))
-# 	end
-# 	println(io, "],[")
-# 	b = false
-# 	for f in ConstructiveGeometry.faces(s)
-# 		print(io, b ? "," : ""); b = true
-# 		println(io, " ", Vector{Int}(f) .- 1, " //", Vector{Int}(f))
-# 	end
-# 	println(io, "]); } }\n$name();")
-# end
-# @inline explain(s::AbstractSurface, f::AbstractString; kwargs...) = begin
-# 	println("writing a surface with $(nvertices(s)) points to $f")
-# 	open(f, "w") do io explain(s, io; kwargs...) end
-# end
 end #««1 module
 # »»1
 # vim: fdm=marker fmr=««,»» noet:

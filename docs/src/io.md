@@ -19,7 +19,16 @@ TODO.
 
 ## OpenSCAD output
 
-TODO.
+```@docs
+ConstructiveGeometry.scad
+```
+
+!!! warning "Deprecated"
+
+    Since the constructions from this package have started to diverge
+    from those of OpenSCAD, (and also since the possibilities for export
+    and visualization have improved), OpenSCAD output is being deprecated
+    and may be removed in a future version.
 
 ## OpenSCAD to Julia conversion.
 

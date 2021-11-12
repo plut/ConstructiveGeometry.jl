@@ -207,6 +207,12 @@ png("highlight", s); # hide
 ```
 ![example: intersection of a highlighted sphere and a highlighted cube](highlight.png)
 
+Highlighted parts of objects are shown only
+when the object is represented as an image via the `plot` method
+(either interactively with `GLMakie`,
+or as an image with `CairoMakie`).
+For SVG and STL output, all highlighted parts are ignored.
+
 ## Modifying meshing parameters
 ```@docs
 set_parameters

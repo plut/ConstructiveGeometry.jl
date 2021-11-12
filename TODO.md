@@ -1,4 +1,5 @@
 # Main points
+ - [x] simplify (again) full-meshing: aux meshes are not a problem
  - [ ] remove triangulation method from `ConvexHull.jl`
  - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] check if `coordtype` is ever used/remove it

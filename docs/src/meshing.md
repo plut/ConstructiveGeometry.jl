@@ -19,7 +19,20 @@ However, working with explicit meshes
 allows to e.g. perform arbitrary (non-linear)
 coordinate transformations on the objects.
 
-## Interface
+## Plotting
+
+This package defines methods for the `Makie.plot` function
+for all CSG objects.
+Volumes are represented as a triangulated mesh
+(with faces colored in the appropriate color);
+two-dimensional shapes are represented as filled polygons
+(colored in the default color).
+
+It is possible to display the objects either interactively with `GLMakie`,
+or as static images with `CairoMakie`;
+the latter is what is used to build the examples in this documentation.
+
+## Parameters
 
 The meshing of objects is governed by a few parameters:
  - `atol` and `rtol` determine the number of faces inserted in the mesh;
