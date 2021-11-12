@@ -1,4 +1,5 @@
 # Main points
+ - [ ] remove triangulation method from `ConvexHull.jl`
  - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] check if `coordtype` is ever used/remove it
  - [x] fix problem of triangulating tangent polygons: separately
@@ -221,7 +222,7 @@
 # Extras
  - [ ] deformation https://libigl.github.io/tutorial/#chapter-4-shape-deformation
  - [ ] https://student.cs.uwaterloo.ca/~cs779/Gallery/Winter2018/anietoro/doc/
- - [ ] add a display method that shows the tree
+ - [x] add a display method that shows the tree
  - [ ] icosphere (from Blender)
  - [ ] sphere made from extruding a half-circle
  - [ ] improve `unit_n_gon` to take advantage of symmetries

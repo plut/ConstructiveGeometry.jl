@@ -19,6 +19,8 @@ import Base: show, print
 import Base: union, intersect, setdiff, copy, isempty, merge
 import Base: *, +, -, ∈, inv, sign, iszero
 
+import AbstractTrees: AbstractTrees, children
+
 # sub-packages:
 include("ConvexHull.jl")
 using .ConvexHull
@@ -242,11 +244,16 @@ end
 A `D`-dimensional geometric object.
 Interface:
  - `children`
+ - `mainmesh`
+ - `auxmesh` (optional)
+ - `printnode`
 """
 
 abstract type AbstractGeometry{D} end
 @inline Base.ndims(::AbstractGeometry{D}) where{D} = D
 @inline children(::AbstractGeometry) = AbstractGeometry[]
+@inline AbstractTrees.printnode(io::IO, s::AbstractGeometry) =
+	print(io, typeof(s).name.name)
 
 """
     AbstractMesh{D,T}
@@ -452,6 +459,9 @@ end
 @inline position(s::ShapeMesh) = s.position
 @inline vertices(s::ShapeMesh) = Shapes.vertices(poly(s))
 
+@inline AbstractTrees.printnode(io::IO, s::ShapeMesh) =
+	print(io, "ShapeMesh # ", length(paths(s)), " polygon(s), ",
+		sum(length.(paths(s))), " vertices")
 @inline mainmesh(g::MeshOptions, m::ShapeMesh, _) = ShapeMesh(g, paths(m))
 
 @inline MeshType(::MeshOptions{false,T,C},::AbstractGeometry{2}) where{T,C} =
@@ -466,6 +476,9 @@ end
 struct Square{T} <: AbstractGeometry{2}
 	size::SVector{2,T}
 end
+# @inline AbstractTrees.printnode(io::IO, s::Square) =
+# 	print(io, "square(", s.size, ")")
+
 @inline scad_info(s::Square) = (:square, (size=s.size,))
 @inline square_vertices(u, v) = [ SA[0,0], SA[u,0], SA[u,v], SA[0,v]]
 
@@ -476,6 +489,8 @@ end
 struct Circle{T} <: AbstractGeometry{2}
 	radius::T
 end
+# @inline AbstractTrees.printnode(io::IO, s::Circle) =
+# 	print(io, "circle(", s.radius, ")")
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
 @inline mainmesh(g::MeshOptions{F,T}, s::Circle, _) where{F,T} =
 	ShapeMesh(g, [unit_n_gon(g, T(s.radius))])
@@ -490,6 +505,8 @@ struct Stroke{T} <: AbstractGeometry{2}
 end
 Stroke(points, width; ends=:round, join=:round, miter_limit=2.) =
 	Stroke{Float64}(points, width, ends, join, miter_limit)
+@inline AbstractTrees.printnode(io::IO, s::Stroke) =
+	print(io, "Stroke # ", length(s.points), " points")
 
 function mainmesh(g::MeshOptions{F,T}, s::Stroke, _) where{F,T}
 	r = one_half(T(s.width))
@@ -513,6 +530,9 @@ end
 @inline attributes(s::VolumeMesh) = TriangleMeshes.attributes(s.mesh)
 @inline empty(::Type{VolumeMesh{T,A}}) where{T,A} =
 	VolumeMesh(TriangleMesh{T,A}([],[],[]))
+@inline AbstractTrees.printnode(io::IO, s::VolumeMesh) =
+	print(io, "VolumeMesh # ", length(vertices(s)), " vertices, ",
+		length(faces(s)), " faces")
 
 function apply(f::AffineMap, m::TriangleMesh{T,A}, d=signdet(f.a, 3)) where{T,A}
 	iszero(d) && throw(SingularException(3))
@@ -593,6 +613,8 @@ struct ConstructedSolid{S,V,D} <: AbstractConstructed{S,D}
 	children::V # Vector{<:AbstractGeometry}, or tuple etc.
 end
 
+@inline AbstractTrees.printnode(io::IO, s::ConstructedSolid{S}) where{S} =
+	print(io, S)
 constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
 	ConstructedSolid{S,T(AbstractGeometry{D}),D} where{D}
 
@@ -806,7 +828,7 @@ function auxmeshes(g::MeshOptions, s::AffineTransform{3}, m, l)
 	return [ x => apply(s.f, y, d) for (x,y) in [l...;] ]
 end
 
-# Project and slice (TODO)««2
+# Project and slice««2
 struct Project <: AbstractTransform{2}
 	child::AbstractGeometry{3}
 end
@@ -1658,7 +1680,7 @@ be used.
 Rotation around the Z-axis (in trigonometric direction, i.e.
 counter-clockwise).
 """
-@inline rotate(θ::Real, s...; axis=nothing, kwargs...) =
+@inline rotate(θ::Number, s...; axis=nothing, kwargs...) =
 	mult_matrix(rotation(float(θ), axis), s...; kwargs...)
 """
     rotate((θ,φ,ψ), {center=center}, {solid...})
@@ -1666,7 +1688,7 @@ counter-clockwise).
 Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 """
 @inline rotate(angles, s...; kwargs...) =
-	mult_matrix(Rotations.RotZYX(radians.(angles)...), s...; kwargs...)
+	mult_matrix(Rotations.RotZYX(angles...), s...; kwargs...)
 
 # project and slice««2
 """
@@ -1877,7 +1899,7 @@ Exports 2d `shape` as an SVG file.
 
 #»»1
 # Viewing««1
-@inline Base.display(m::AbstractGeometry) = plot(m)
+@inline Base.display(m::AbstractGeometry) = AbstractTrees.print_tree(m)
 
 # TODO: figure out how to rewrite the following using native Makie recipes
 @inline plot(g::AbstractGeometry; kwargs...) =

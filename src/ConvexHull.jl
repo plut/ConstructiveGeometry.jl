@@ -77,26 +77,6 @@ end
 @inline Base.:(/)(h::Polyhedra.HyperPlane, α::Real) =
 	Polyhedra.HyperPlane(h.a / α, h.β / α)
 
-# converts path to matrix with points as rows:
-@inline poly_vrep(points::AbstractVector) = vcat(transpose.(Vector.(points))...)
-@inline poly_vrep(points::Matrix) = points
-@inline poly_eltype(points::AbstractVector) = eltype(eltype(points))
-@inline poly_eltype(points::Matrix) = eltype(points)
-"""
-    vpoly(points...)
-
-Returns a `Polyhedra.polyhedron` in vrep from a list of points.
-"""
-@inline function vpoly(points; lib=true)
-	PH = Polyhedra
-	if lib
-		return PH.polyhedron(PH.vrep(poly_vrep(points)),
-			polyhedra_lib(poly_eltype(points)))
-	else
-		return PH.polyhedron(PH.vrep(poly_vrep(points)))
-	end
-end
-
 # HRepElement is the supertype of HalfSpace and HyperPlane
 @inline direction(h::Polyhedra.HRepElement) = h.a
 @inline function normalize(h::Polyhedra.HRepElement)
