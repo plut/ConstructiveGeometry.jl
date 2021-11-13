@@ -1,4 +1,8 @@
+# Naming
+ - [ ] `linear_extrude` / `prism` ?
+ - [ ] `rotate_extrude` / `revolution` ?
 # Bug fixes
+ - [x] `linear_extrude(scale=0)` is a cone: merge points on top
  - [x] fix problem of triangulating tangent polygons: separately
    triangulate each connected component
  - [x] clarify priority: `linear_extrude(8)*(5*object)`

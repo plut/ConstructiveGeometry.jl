@@ -988,10 +988,25 @@ function mesh(g::MeshOptions, s::LinearExtrude, (m,))
 	dq = cis(s.twist/nslices)
 	dr = (s.scale .- 1)/nslices
 	z = 0; q = 1; r = SA[1.,1.]
-	for k in 1:nslices
-		z+= dz; q*= dq; r+= dr
-		push!(pts3, (SA[r[1]*(p[1]*real(q)-p[2]*imag(q)),
-			r[2]*(p[1]*imag(q)+p[2]*real(q)), z] for p in pts2)...)
+	if iszero(s.scale)
+		for k in 1:nslices-1
+			z+= dz; q*= dq; r+= dr
+			push!(pts3, (SA[r[1]*(p[1]*real(q)-p[2]*imag(q)),
+				r[2]*(p[1]*imag(q)+p[2]*real(q)), z] for p in pts2)...)
+		end
+		push!(pts3, [0,0,s.height])
+		p = n*(nslices-1);
+		faces = [ reverse.(tri);
+			tube_mesh(Shapes.loops(m.poly), nslices-1);
+			[(i+p,j+p,n+1+p) for l in peri for (i,j) in consecutives(l)]]
+	else
+		for k in 1:nslices
+			z+= dz; q*= dq; r+= dr
+			push!(pts3, (SA[r[1]*(p[1]*real(q)-p[2]*imag(q)),
+				r[2]*(p[1]*imag(q)+p[2]*real(q)), z] for p in pts2)...)
+		end
+		faces = [ reverse.(tri); [ f .+ n*nslices for f in tri ];
+			tube_mesh(Shapes.loops(m.poly), nslices) ]
 	end
 	# for a perimeter p=p1, p2, p3... outward: ↺
 	# with top vertices q1, q2, q3...
@@ -999,8 +1014,6 @@ function mesh(g::MeshOptions, s::LinearExtrude, (m,))
 	#  - bottom: identical to tri
 	#  - top: reverse of tri + n
 	#  - sides:
-	faces = [ reverse.(tri); [ f .+ n*nslices for f in tri ];
-		tube_mesh(Shapes.loops(m.poly), nslices) ]
 	return VolumeMesh(g, pts3, faces)
 end
 
@@ -1039,23 +1052,17 @@ FIXME: currently only `cylinder(h,r)` works (the general case needs scaled extru
 	end
 
 # Cone ««1
-# Note: this is *not* a convex hull - a generic cone is not convex
-# (the base shape may be nonconvex, or even have holes).
 struct Cone{T} <: AbstractTransform{3}
 	apex::SVector{3,T}
 	child::AbstractGeometry{2}
+	@inline Cone(a::AbstractVector{T}, c::AbstractGeometry{2}) where{T} =
+		new{T}(a,c)
 end
 
 function mesh(g::MeshOptions{T}, s::Cone, (m,)) where{T}
-	pts2 = Shapes.vertices(m.poly)
-	tri = Shapes.triangulate(m.poly)
-	peri = Shapes.loops(m.poly)
-	n = length(pts2)
-	pts3 = [SA[p[1],p[2], 0] for p in pts2]
-	push!(pts3, SVector{3,T}(s.apex))
-	faces = [ tri;
-		vcat([[(i,j,n+1) for (i,j) in consecutives(p)] for p in peri]...);]
-	return VolumeMesh(g, pts3, faces)
+	m1 = mesh(g, LinearExtrude(1, 0°, SA[0,0], s.child), (m,))
+	vertices(m1)[end] = s.apex
+	return m1
 end
 
 """
