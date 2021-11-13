@@ -44,8 +44,6 @@ Base.size(c::Consecutives) = size(c.parent)
 # round to a multiple of `m`:
 @inline round(m::Integer, x::Integer, ::typeof(RoundUp)) = x + m - mod1(x, m)
 
-#————————————————————— Geometry tools —————————————————————————————— ««1
-
 # Angle types««1
 # All angles are internally stored as degrees: the user might (often)
 # want exact degrees angles and probably never exact radians angles.
@@ -130,100 +128,6 @@ StaticArrays.similar_type(::Vector, T::Type) = Vector{T} # piracy!
 # we need two methods here for disambiguation:
 @inline Base.:*(r::Reflection, v::AbstractVector) = v - 2*r.axis*(r.proj*v)
 @inline Base.:*(r::Reflection, v::AbstractMatrix) = v - 2*r.axis*(r.proj*v)
-
-# Circles and spheres««1
-# Circles««2
-
-
-"""
-    unit_n_gon(T::Type, n::Int)
-		unit_n_gon(r, parameters::NamedTuple)
-
-Returns the vertices of a regular n-gon inscribed in the unit circle
-as points with coordinates of type `T`, while avoiding using too many
-trigonometric computations.
-"""
-function unit_n_gon(r::T, n::Int) where{T<:Real}
-	ω = cispi(2/n) # exp(2iπ/n)
-	z = Vector{Complex{T}}(undef, n)
-	z[1] = one(T)
-	# TODO: use 2-fold, 4-fold symmetry if present
-	# n=3: 2..2
-	# n=4: 2..2 (+ point 3 = -1)
-	# n=5: 2..3
-	# n=6: 2..3 (+ point 4 = -1)
-	# points with y>0:
-	for i in 2:(n+1)>>1
-		@inbounds z[i] = z[i-1]*ω; z[i] /= abs(z[i]) # for radius stability
-		# z[n] = conj(z[2]), etc.
-		@inbounds z[n+2-i] = conj(z[i])
-	end
-	if iseven(n)
-		@inbounds z[n>>1+1] = -1
-	end
-	reinterpret(SVector{2,T}, r*z)
-end
-@inline unit_n_gon(r::Rational{BigInt}, n::Int) =
-	SVector{2,Rational{BigInt}}.(unit_n_gon(Float32(r), n))
-
-# Spheres««1
-const golden_angle = 2π/MathConstants.φ
-"""
-    fibonacci_sphere_points(T::Type{<:Real}, n::Int)
-
-Returns a set of `n` well-spaced points, of type `SVector{3,T}`, on the unit
-sphere.
-
-TODO: use ideas from
-http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
-
-to optimize for volume of convex hull.
-"""
-function fibonacci_sphere_points(r::T, n::Int) where{T<:Real}
-	v = Vector{SVector{3,T}}(undef, n)
-	for i in eachindex(v)
-		θ = i*T(golden_angle)
-		z = (n+1-2i)/T(n)
-		ρ = T(√(1-z^2))
-		(s,c) = sincos(θ)
-		@inbounds v[i] = SVector{3,T}(r*c*ρ, r*s*ρ, r*z)
-	end
-	return v
-end
-@inline fibonacci_sphere_points(r::Rational{BigInt}, n::Int) =
-	SVector{3,Rational{BigInt}}.(fibonacci_sphere_points(Float32(r), n))
-# ladder triangles ««2
-"""
-    ladder_triangles(n1, n2, start1, start2)
-
-Given two integers m, n, triangulate as a ladder between these integers;
-example: ladder(5, 4, a, b)
-
-    a──a+1──a+2──a+3──a+4
-    │ ╱ ╲  ╱   ╲ ╱  ╲  │
-    b────b+1────b+2───b+3
-
-Returns the m+n-2 triangles (a,b,a+1), (b,b+1,a+1), (a+1,b+1,a+2)…
-"""
-function ladder_triangles(n1, n2, start1, start2)
-	p1 = p2 = 1
-	triangles = NTuple{3,Int}[]
-	while true
-		(p1 == n1) && (p2 == n2) && break
-		# put up to scale (n1-1)*(n2-1):
-		# front = (i,j) corresponds to ((n2-1)*i, (n1-1)*j)
-		c1 = (p1)*(n2-1)
-		c2 = (p2)*(n1-1)
-		if c1 < c2 || ((c1 == c2) && (n1 <= n2))
-			push!(triangles, (p1+start1-1, p2+start2-1, p1+start1))
-			p1+= 1
-		else
-			push!(triangles, (p1+start1-1, p2+start2-1, p2+start2))
-			p2+= 1
-		end
-	end
-	return triangles
-end
 
 #————————————————————— Basic structure —————————————————————————————— ««1
 
@@ -345,66 +249,6 @@ end
 # special cases below: highlight
 
 
-# number of sides of a circle ««2
-
-"""
-    circle_nvertices(g::MeshOptions, radius)
-
-Returns the number of sides used to draw a circle (arc) of given angle.
-The base value `n` is given by the minimum of:
- - atol: each sagitta (s= r(1-cos 2π/n)) must not be smaller
- than `atol`, or n = π √(r/2 atol);
- - rtol: s/r = 1-cos(2π/n)  not smaller than rtol,
- or n = π /√(2*rtol).
-"""
-function circle_nvertices(g::MeshOptions, r)
-	ε = max(get(g,:rtol), get(g,:atol)/r)
-	base = ceil(Int, π/√(2ε))
-	# a circle always has at least 4 sides
-	return round(get(g,:symmetry), max(4, base), RoundUp)
-end
-@inline unit_n_gon(g::MeshOptions, r)= unit_n_gon(r,circle_nvertices(g, r))
-
-# number of vertices of a sphere ««2
-"""
-    sphere_nvertices(g::MeshOptions, r::Real)
-
-Returns the number `n` of points on a sphere according to these
-parameters.
-
-"""
-function sphere_nvertices(g::MeshOptions, r)
-	ε = max(get(g,:rtol), get(g,:atol)/r)
-	base = 2 + ceil(Int, (π/√3)/ε)
-	# a sphere always has at least 6 vertices
-	return max(6, base)
-end
-@inline fibonacci_sphere_points(g::MeshOptions, r) =
-	fibonacci_sphere_points(r, sphere_nvertices(g, r))
-
-# tools for rotate extrusion««2
-"""
-    _rotate_extrude(point, data, parameters)
-
-Extrudes a single point, returning a vector of 3d points
-(x,y) ↦ (x cosθ, x sinθ, y).
-"""
-function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle) where{T}
-	@assert p[1] ≥ 0
-	# special case: point is on the y-axis; returns a single point:
-	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
-	n = Int(cld(circle_nvertices(g, p[1])*angle, 360°))
-
-	ω = Complex{T}(cosd(angle/n), sind(angle/n))
-	z = Vector{Complex{T}}(undef, n+1)
-	z[1] = one(T)
-	for i in 2:n
-		@inbounds z[i] = z[i-1]*ω; z[i]/= abs(z[i])
-	end
-	# close the loop:
-	z[n+1] = Complex{T}(cosd(angle), sind(angle))
-	return [SA[p[1]*real(u), p[1]*imag(u), p[2]] for u in z]
-end
 # gridcells ««2
 """
     gridcells(g::MeshOptions, vertices, maxgrid)
@@ -497,18 +341,79 @@ An axis-parallel square or rectangle  with given `size`
 # Circle««1
 struct Circle{T} <: AbstractGeometry{2}
 	radius::T
+	circumscribed::Bool
 end
 
 @inline scad_info(s::Circle) = (:circle, (r=s.radius,))
-@inline mesh(g::MeshOptions{T}, s::Circle, _) where{T} =
-	ShapeMesh(g, [unit_n_gon(g, T(s.radius))])
+
+# Regular polygon««2
+"""
+    unit_n_gon(T::Type, n::Int)
+		unit_n_gon(r, parameters::NamedTuple)
+
+Returns the vertices of a regular n-gon inscribed in the unit circle
+as points with coordinates of type `T`, while avoiding using too many
+trigonometric computations.
+"""
+function unit_n_gon(r::T, n::Int) where{T<:Real}
+	ω = cispi(2/n) # exp(2iπ/n)
+	z = Vector{Complex{T}}(undef, n)
+	z[1] = one(T)
+	# TODO: use 2-fold, 4-fold symmetry if present
+	# n=3: 2..2
+	# n=4: 2..2 (+ point 3 = -1)
+	# n=5: 2..3
+	# n=6: 2..3 (+ point 4 = -1)
+	# points with y>0:
+	for i in 2:(n+1)>>1
+		@inbounds z[i] = z[i-1]*ω; z[i] /= abs(z[i]) # for radius stability
+		# z[n] = conj(z[2]), etc.
+		@inbounds z[n+2-i] = conj(z[i])
+	end
+	if iseven(n)
+		@inbounds z[n>>1+1] = -1
+	end
+	reinterpret(SVector{2,T}, r*z)
+end
+@inline unit_n_gon(r::Rational{BigInt}, n::Int) =
+	SVector{2,Rational{BigInt}}.(unit_n_gon(Float32(r), n))
+
+# number of sides of a circle ««2
 
 """
-    circle(r::Real)
+    circle_nvertices(g::MeshOptions, radius)
+
+Returns the number of sides used to draw a circle (arc) of given angle.
+The base value `n` is given by the minimum of:
+ - atol: each sagitta (s= r(1-cos 2π/n)) must not be smaller
+ than `atol`, or n = π √(r/2 atol);
+ - rtol: s/r = 1-cos(2π/n)  not smaller than rtol,
+ or n = π /√(2*rtol).
+"""
+function circle_nvertices(g::MeshOptions, r)
+	ε = max(get(g,:rtol), get(g,:atol)/r)
+	base = ceil(Int, π/√(2ε))
+	# a circle always has at least 4 sides
+	return round(get(g,:symmetry), max(4, base), RoundUp)
+end
+
+function mesh(g::MeshOptions{T}, s::Circle, _) where{T}
+	n = circle_nvertices(g, s.radius)
+	r = T(s.circumscribed ? s.radius/cospi(1/n) : s.radius)
+	return ShapeMesh(g, [unit_n_gon(r, n)])
+end
+
+# Interface««2
+"""
+    circle(r::Real, [circumscribed = false])
 
 A circle with diameter `r`, centered at the origin.
+
+The corresponding mesh is a regular polygon,
+which is circumscribed to the ideal circle if `circumscribed == true`
+and inscribed otherwise.
 """
-@inline circle(a::Real) = Circle(a)
+@inline circle(a::Real; circumscribed=false) = Circle(a, circumscribed)
 
 # Stroke ««1
 struct Stroke{T} <: AbstractGeometry{2}
@@ -667,11 +572,55 @@ struct Sphere{T} <: AbstractGeometry{3}
 end
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
 
+# Fibonacci sphere««2
+const golden_angle = 2π/MathConstants.φ
+"""
+    fibonacci_sphere_points(T::Type{<:Real}, n::Int)
+
+Returns a set of `n` well-spaced points, of type `SVector{3,T}`, on the unit
+sphere.
+
+TODO: use ideas from
+http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/
+
+to optimize for volume of convex hull.
+"""
+function fibonacci_sphere_points(r::T, n::Int) where{T<:Real}
+	v = Vector{SVector{3,T}}(undef, n)
+	for i in eachindex(v)
+		θ = i*T(golden_angle)
+		z = (n+1-2i)/T(n)
+		ρ = T(√(1-z^2))
+		(s,c) = sincos(θ)
+		@inbounds v[i] = SVector{3,T}(r*c*ρ, r*s*ρ, r*z)
+	end
+	return v
+end
+@inline fibonacci_sphere_points(r::Rational{BigInt}, n::Int) =
+	SVector{3,Rational{BigInt}}.(fibonacci_sphere_points(Float32(r), n))
+# number of vertices of a sphere ««2
+"""
+    sphere_nvertices(g::MeshOptions, r::Real)
+
+Returns the number `n` of points on a sphere according to these
+parameters.
+
+"""
+function sphere_nvertices(g::MeshOptions, r)
+	ε = max(get(g,:rtol), get(g,:atol)/r)
+	base = 2 + ceil(Int, (π/√3)/ε)
+	# a sphere always has at least 6 vertices
+	return max(6, base)
+end
+@inline fibonacci_sphere_points(g::MeshOptions, r) =
+	fibonacci_sphere_points(r, sphere_nvertices(g, r))
+
 function mesh(g::MeshOptions{T}, s::Sphere, _) where{T}
 	plist = fibonacci_sphere_points(g, T(s.radius))
 	(pts, faces) = convex_hull(plist)
 	return VolumeMesh(g, pts, faces)
 end
+
 
 """
     sphere(r::Real)
@@ -712,10 +661,11 @@ end
 # Multiplicative notation:
 @inline Base.:*(u::Transform, s) = u.f(s)
 @inline (u::Transform)(s) = u*s
-@inline Base.:*(u::Transform, v::Transform, s...)= _comp(Val(assoc(u,v)),u,v,s...)
-@inline _comp(::Val{:left}, u, v, s...) = *(compose(u,v), s...)
-@inline _comp(::Val{:right}, u, v, s...) = *(u, *(v, s...))
-@inline assoc(::Transform, ::Transform) = :right
+# Associativity code — useless since we now use affine_transform (TODO)
+# @inline Base.:*(u::Transform, v::Transform, s...)= _comp(Val(assoc(u,v)),u,v,s...)
+# @inline _comp(::Val{:left}, u, v, s...) = *(compose(u,v), s...)
+# @inline _comp(::Val{:right}, u, v, s...) = *(u, *(v, s...))
+# @inline assoc(::Transform, ::Transform) = :right
 @inline Base.:*(u::Transform, v::Transform) = compose(u, v)
 @inline compose(u::Transform, v::Transform) = Transform{typeof(∘)}(u.f∘v.f)
 
@@ -745,6 +695,13 @@ function auxmeshes(g::MeshOptions, s::AffineTransform{3}, m, l)
 	return [ x => apply(s.f, y, d) for (x,y) in [l...;] ]
 end
 
+# affine_transform««2
+affine_transform(f, s::AbstractGeometry) = AffineTransform(f, s)
+# This composes matrices before applying them to the objects,
+# thus saving time (and hierarchy complexity).
+affine_transform(f, s::AffineTransform) =
+	AffineTransform(compose(f, s.f), s.child)
+
 # mult_matrix««2
 """
     mult_matrix(a, [center=c], solid...)
@@ -772,9 +729,7 @@ Represents the affine operation `x -> a*x + b`.
     (3 × 3) multiplications, followed by a single (3 × n).
 """
 @inline mult_matrix(a, s...; center=ZeroVector()) =
-begin
-	operator(AffineTransform, (AffineMap(a, a*center-center),), s...)
-end
+	operator(affine_transform, (AffineMap(a, a*center-center),), s...)
 # translate ««2
 """
     translate(v, s...)
@@ -783,7 +738,7 @@ end
 
 Translates solids `s...` by vector `v`.
 """
-@inline translate(v,s...)= operator(AffineTransform,(AffineMap(I,v),), s...)
+@inline translate(v,s...)= operator(affine_transform,(AffineMap(I,v),), s...)
 """
     raise(z, s...)
 
@@ -825,11 +780,9 @@ be used.
 @inline reflect(v::AbstractVector, s...; kwargs...) =
 	mult_matrix(Reflection(v), s...; kwargs...)
 # rotate««2
-# @inline rotation(θ::Number, ::Nothing) = Rotations.Angle2d(θ)
-# @inline rotation(θ::Number, axis) = Rotations.AngleAxis(θ, axis)
 """
-    rotate(θ, {center=center}, {solid...})
-    rotate(θ, axis=axis, {center=center}, {solid...})
+    rotate(θ, [center=center], [solid...])
+    rotate(θ, axis=axis, [center=center], [solid...])
 
 Rotation around the Z-axis (in trigonometric direction, i.e.
 counter-clockwise).
@@ -844,7 +797,7 @@ counter-clockwise).
 @inline _rotate1(θ, ::Nothing, s::AbstractGeometry{3}; kwargs...) =
 	mult_matrix(Rotations.RotZ(float(θ)), s; kwargs...)
 """
-    rotate((θ,φ,ψ), {center=center}, {solid...})
+    rotate((θ,φ,ψ), [center=center], [solid...])
 
 Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 """
@@ -947,17 +900,9 @@ with given `direction` and `origin`.
 @inline half(dir, s...; origin=ZeroVector()) =
 	operator(Half, (dir, origin,), s...)
 
-# Linear extrusion (and cylinder)««1
-struct LinearExtrude{T} <: AbstractTransform{3}
-	height::T
-	twist::Angle
-	scale::SVector{2,T}
-	child::AbstractGeometry{2}
-	@inline LinearExtrude(height::T, twist, scale::AbstractVector{S}, child) where{T,S} =
-		new{promote_type(T,S)}(height, todegrees(twist), scale, child)
-end
-
-function tube_mesh(loops, slices)
+# Prisms and cones ««1
+# Prism meshes ««2
+function tube_mesh(loops, slices)#««
 	# this computes the combinatorial mesh of an open tube,
 	# given the loops of the base and the number of slices (≥ 1)
 	layer = sum(length.(loops)) # total number of points in a layer
@@ -971,9 +916,8 @@ function tube_mesh(loops, slices)
 		p = q
 	end
 	return faces
-end
-
-function mesh(g::MeshOptions, s::LinearExtrude, (m,))
+end#»»
+function prism_mesh(g::MeshOptions, h0, h1, twist, scale, m)#««
 	@assert m isa ShapeMesh
 	pts2 = Shapes.vertices(m.poly)
 	tri = Shapes.triangulate(m.poly)
@@ -982,40 +926,43 @@ function mesh(g::MeshOptions, s::LinearExtrude, (m,))
 	n = length(pts2)
 
 	rmax = sqrt(maximum(norm².(pts2)))
-	nslices = max(Int(cld(circle_nvertices(g, rmax)*s.twist, 360°)), 1)
+	nslices = max(Int(cld(circle_nvertices(g, rmax)*twist, 360°)), 1)
 	pts3 = sizehint!([SA[p..., 0] for p in pts2], nslices*n)
-	dz = s.height / nslices
-	dq = cis(s.twist/nslices)
-	dr = (s.scale .- 1)/nslices
-	z = 0; q = 1; r = SA[1.,1.]
-	if iszero(s.scale)
-		for k in 1:nslices-1
-			z+= dz; q*= dq; r+= dr
-			push!(pts3, (SA[r[1]*(p[1]*real(q)-p[2]*imag(q)),
-				r[2]*(p[1]*imag(q)+p[2]*real(q)), z] for p in pts2)...)
-		end
-		push!(pts3, [0,0,s.height])
-		p = n*(nslices-1);
-		faces = [ reverse.(tri);
-			tube_mesh(Shapes.loops(m.poly), nslices-1);
+	dz = (h1-h0) / nslices
+	dq = cis(twist/nslices)
+	dr = (scale .- 1)/nslices
+	z = h0; q = 1; r = SA[1.,1.]
+	N = nslices - iszero(scale)
+	for _ in 1:N
+		z+= dz; q*= dq; r+= dr
+		push!(pts3, (SA[r[1]*(p[1]*real(q)-p[2]*imag(q)),
+			r[2]*(p[1]*imag(q)+p[2]*real(q)), z] for p in pts2)...)
+	end
+	faces = [reverse.(tri); tube_mesh(peri, N); ]
+	if iszero(scale)
+		# end by a cone
+		push!(pts3, [0,0,h1])
+		p = n*N
+		faces = [faces;
 			[(i+p,j+p,n+1+p) for l in peri for (i,j) in consecutives(l)]]
 	else
-		for k in 1:nslices
-			z+= dz; q*= dq; r+= dr
-			push!(pts3, (SA[r[1]*(p[1]*real(q)-p[2]*imag(q)),
-				r[2]*(p[1]*imag(q)+p[2]*real(q)), z] for p in pts2)...)
-		end
-		faces = [ reverse.(tri); [ f .+ n*nslices for f in tri ];
-			tube_mesh(Shapes.loops(m.poly), nslices) ]
+		# close top face
+		faces = [faces; [f .+ n*N for f in tri ]; ]
 	end
-	# for a perimeter p=p1, p2, p3... outward: ↺
-	# with top vertices q1, q2, q3...
-	# faces = [p1,p2,q1], [p2,q2,q1], [p2,p3,q2],  [p2,q3,q2]...
-	#  - bottom: identical to tri
-	#  - top: reverse of tri + n
-	#  - sides:
 	return VolumeMesh(g, pts3, faces)
+end#»»
+# LinearExtrude ««2
+struct LinearExtrude{T} <: AbstractTransform{3}
+	height::T
+	twist::Angle
+	scale::SVector{2,T}
+	child::AbstractGeometry{2}
+	@inline LinearExtrude(height::T, twist, scale::AbstractVector{S}, child) where{T,S} =
+		new{promote_type(T,S)}(height, todegrees(twist), scale, child)
 end
+
+@inline mesh(g::MeshOptions, s::LinearExtrude, (m,)) =
+	prism_mesh(g, 0, s.height, s.twist, s.scale, m)
 
 """
     linear_extrude(h, s...; twist, scale)
@@ -1032,10 +979,11 @@ Linear extrusion to height `h`.
 	center ? translate([0,0,-one_half(height)], m) : m
 end
 
-#     cylinder(h, r1, r2 [, center=false])
+# Cylinder ««2
 #     cylinder(h, (r1, r2) [, center=false])
 """
-    cylinder(h, r [, center=false])
+    cylinder(h, r , [center=false], [circumscribed=false])
+    cylinder(h, r1, r2 , [center=false], [circumscribed=false])
 
 A cylinder (or cone frustum)
 with basis centered at the origin, lower radius `r1`, upper radius `r2`,
@@ -1044,14 +992,23 @@ and height `h`.
 **Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
 not `(h,r,0)` as in OpenSCAD. For a cone, using `(cone(h,r))` instead is recommended.
 
-FIXME: currently only `cylinder(h,r)` works (the general case needs scaled extrusion).
+The mesh is a regular prism,
+circumscribed to the cylinder if `circumscribed == true`
+and inscribed otherwise.
 """
-@inline cylinder(h::Real, r::Real;center::Bool=false) =
-	let c = linear_extrude(h)*circle(r)
+@inline cylinder(h::Real, r::Real;center::Bool=false, circumscribed=false) =
+	let c = linear_extrude(h)*circle(r;circumscribed)
 	center ? lower(one_half(h))*c : c
 	end
 
-# Cone ««1
+function cylinder(h::Real, r1::Real, r2::Real; center::Bool = false, circumscribed=false)
+	a1, a2 = minmax(r1, r2)
+	m = linear_extrude(h, scale=a1/a2)*circle(a2;circumscribed)
+	b = 2(r1<r2)
+	return SA[0,0,one_half(h)*(b-center)] + SA[1 0 0;0 1 0;0 0 1-b]*m
+end
+
+# Cone ««2
 struct Cone{T} <: AbstractTransform{3}
 	apex::SVector{3,T}
 	child::AbstractGeometry{2}
@@ -1060,7 +1017,7 @@ struct Cone{T} <: AbstractTransform{3}
 end
 
 function mesh(g::MeshOptions{T}, s::Cone, (m,)) where{T}
-	m1 = mesh(g, LinearExtrude(1, 0°, SA[0,0], s.child), (m,))
+	m1 = prism_mesh(g, 0, 1, 0°, SA[0,0], m)
 	vertices(m1)[end] = s.apex
 	return m1
 end
@@ -1077,19 +1034,20 @@ Cone with arbitrary base.
 @inline cone(h::Real, s...) = cone(SA[0,0,h], s...)
 
 """
-    cone(h, r)
+    cone(h, r; circumscribed=false)
 
 Circular right cone with basis centered at the origin,
-radius `r`, and height `h`.
+radius `r`, and height `h`. Equivalent to `cone([0,0,h])*circle(r)`.
 
-    cone(apex, r)
+    cone(apex, r; circumscribed=false)
 
 Circular, possibly oblique, cone with given apex point
 and radius `r` around the origin.
 """
-@inline cone(v::AbstractVector, r::Real) = Cone(v, circle(r))
-@inline cone(h::Real, r::Real) = cone(SA[0,0,h], r)
-
+@inline cone(v::AbstractVector, r::Real; circumscribed=false) =
+	Cone(v, circle(r; circumscribed))
+@inline cone(h::Real, r::Real; circumscribed=false) =
+	cone(SA[0,0,h], r; circumscribed)
 
 # Rotate extrusion««1
 struct RotateExtrude{T} <: AbstractTransform{3}
@@ -1097,6 +1055,64 @@ struct RotateExtrude{T} <: AbstractTransform{3}
 	child::AbstractGeometry{2}
 end
 
+# ladder triangles ««2
+"""
+    ladder_triangles(n1, n2, start1, start2)
+
+Given two integers m, n, triangulate as a ladder between these integers;
+example: ladder(5, 4, a, b)
+
+    a──a+1──a+2──a+3──a+4
+    │ ╱ ╲  ╱   ╲ ╱  ╲  │
+    b────b+1────b+2───b+3
+
+Returns the m+n-2 triangles (a,b,a+1), (b,b+1,a+1), (a+1,b+1,a+2)…
+"""
+function ladder_triangles(n1, n2, start1, start2)
+	p1 = p2 = 1
+	triangles = NTuple{3,Int}[]
+	while true
+		(p1 == n1) && (p2 == n2) && break
+		# put up to scale (n1-1)*(n2-1):
+		# front = (i,j) corresponds to ((n2-1)*i, (n1-1)*j)
+		c1 = (p1)*(n2-1)
+		c2 = (p2)*(n1-1)
+		if c1 < c2 || ((c1 == c2) && (n1 <= n2))
+			push!(triangles, (p1+start1-1, p2+start2-1, p1+start1))
+			p1+= 1
+		else
+			push!(triangles, (p1+start1-1, p2+start2-1, p2+start2))
+			p2+= 1
+		end
+	end
+	return triangles
+end
+
+# _rotate_extrude««2
+"""
+    _rotate_extrude(point, data, parameters)
+
+Extrudes a single point, returning a vector of 3d points
+(x,y) ↦ (x cosθ, x sinθ, y).
+"""
+function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle) where{T}
+	@assert p[1] ≥ 0
+	# special case: point is on the y-axis; returns a single point:
+	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
+	n = Int(cld(circle_nvertices(g, p[1])*angle, 360°))
+
+	ω = Complex{T}(cosd(angle/n), sind(angle/n))
+	z = Vector{Complex{T}}(undef, n+1)
+	z[1] = one(T)
+	for i in 2:n
+		@inbounds z[i] = z[i-1]*ω; z[i]/= abs(z[i])
+	end
+	# close the loop:
+	z[n+1] = Complex{T}(cosd(angle), sind(angle))
+	return [SA[p[1]*real(u), p[1]*imag(u), p[2]] for u in z]
+end
+
+# Meshing ««2
 function mesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
 	# right half of child:
 	m1 = intersect(Shapes.HalfPlane(SA[1,0],0), m.poly)
@@ -2358,7 +2374,7 @@ end
 # 
 # # attach ««2
 # """
-# 		attach(parent, {:label => child}...)
+# 		attach(parent, [:label => child]...)
 # 
 # Moves (by rotations) all children so that their anchor matches the
 # anchors of `parent` defined by the given labels.

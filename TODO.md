@@ -1,6 +1,3 @@
-# Naming
- - [ ] `linear_extrude` / `prism` ?
- - [ ] `rotate_extrude` / `revolution` ?
 # Bug fixes
  - [x] `linear_extrude(scale=0)` is a cone: merge points on top
  - [x] fix problem of triangulating tangent polygons: separately
@@ -27,11 +24,15 @@
   - [ ] allow `NamedTuple` for this
   - [ ] possible via `move(origin, s...; direction, spin)`
 # Code cleaning
+ - [ ] split `Offset` in two structures `OffsetShape` and `OffsetVolume`
  - [x] make transformations even lazier, so that they are evaluated only once
    their subjects (and more importantly, their dimension) are known
- - [ ] overload extrude() (for paths, angles, numbers)
+ - [ ] check if operator associativity is still needed
+ - [ ] overload `extrude()` (for paths, angles, numbers)
  - [ ] move doc examples to `WGLMakie`
  - [ ] remove triangulation method from `ConvexHull.jl`
+ - [ ] `linear_extrude` / `prism` ?
+ - [ ] `rotate_extrude` / `revolution` ?
  - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] make meshing type-stable
  - [x] update `iglwrap` and use latest version
@@ -44,9 +45,10 @@
    - [x] `offset_surface`
    - [x] `intersect_with_half_space`
  - [x] `cylinder(..., center)`
- - [ ] `cylinder(h, r1, r2)`
- - [ ] add a parameter to circles, spheres and cylinders to mesh them as
+ - [x] `cylinder(h, r1, r2)`
+ - [x] add a parameter to circles, spheres and cylinders to mesh them as
    circumscribed
+    - [ ] (spheres still TODO)
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
