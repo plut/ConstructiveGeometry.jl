@@ -1,4 +1,5 @@
 # Bug fixes
+ - [ ] `minkowski(volume, polygon)` seems broken
  - [x] `rotate_extrude()` with slide and polygon touching y-axis
  - [x] `linear_extrude(scale=0)` is a cone: merge points on top
  - [x] fix problem of triangulating tangent polygons: separately
@@ -8,8 +9,7 @@
    fix by something better (but this is likely Clipper's fault)
  - [ ] simple syntax for making conditionals (⇒ use those empty objects)
    - [ ] or also allow `Nothing` in vectors of objects
-   - [ ] even better, `EmptyUnion`
-   - [ ] or ad-hoc `EmptyShape` / `EmptyVolume`
+   - [x] even better, `EmptyUnion`
 # Simple fixes
  - [x] `atol`/`rtol` ?
  - [x] auto-compute `offset` npoints from meshing options
@@ -26,10 +26,11 @@
   - [ ] allow `NamedTuple` for this
   - [ ] possible via `move(origin, s...; direction, spin)`
 # Code cleaning
- - [ ] split `Offset` in two structures `OffsetShape` and `OffsetVolume`
+ - [ ] https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf : simplify even further the CSG tree
+ - [x] split `Offset` in two structures `OffsetShape` and `OffsetVolume`
  - [x] make transformations even lazier, so that they are evaluated only once
    their subjects (and more importantly, their dimension) are known
- - [ ] check if operator associativity is still needed
+ - [x] check if operator associativity is still needed
  - [ ] overload `extrude()` (for paths, angles, numbers)
  - [ ] move doc examples to `WGLMakie`
  - [ ] remove triangulation method from `ConvexHull.jl`
@@ -54,6 +55,7 @@
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] `import`: stl, amf, ply
  - [x] equivalent of OpenSCAD's for loop?!
  - [x] `linear_extrude` with twist and scale
  - [x] `rotate_extrude` with slide (per-turn) along the axis
@@ -121,7 +123,6 @@
     Annotation("blah",(1.5,.5,.5), mesh(sphere(3)))
 ```
  - [ ] hook them in existing highlight procedure
- - [ ] import `.stl`, `.amf` and `.ply`
  - [ ] add a LineNode reference to constructors
    (i.e. first thing in call stack outside module).
  - [ ] `color`: add more properties (e.g. shininess) to be able to show

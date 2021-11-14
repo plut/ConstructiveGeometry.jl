@@ -1287,28 +1287,33 @@ defining an affine transform.
 
 # Offset««1
 
-struct Offset{D} <: AbstractTransform{D}
+struct SurfaceOffset <: AbstractTransform{2}
 	radius::Float64
-	# these values are used only for 2d children:
 	ends::Symbol
 	join::Symbol
 	miter_limit::Float64
-	# this value is used only for 3d children:
-	maxgrid::Int
-	# and the child:
-	child::AbstractGeometry{D}
-	@inline Offset(radius::Real, ends::Symbol, join::Symbol, miter_limit::Real,
-		maxgrid::Real, child::AbstractGeometry{D}) where{D} =
-		new{D}(radius, ends, join, miter_limit, maxgrid, child)
+	child::AbstractGeometry{2}
+	@inline SurfaceOffset(radius::Real, ends::Symbol, join::Symbol,
+		miter_limit::Real, child::AbstractGeometry{2}) =
+		new(radius, ends, join, miter_limit, child)
 end
 
-function mesh(g::MeshOptions, s::Offset{2}, (m,))
+function mesh(g::MeshOptions, s::SurfaceOffset, (m,))
 	ε = max(get(g,:atol), get(g,:rtol) * s.radius)
 	return ShapeMesh(Shapes.offset(poly(m), s.radius;
 	join = s.join, ends = s.ends, miter_limit = s.miter_limit, precision = ε))
 end
 
-mesh(g::MeshOptions, s::Offset{3}, (m,)) =
+struct VolumeOffset <: AbstractTransform{3}
+	radius::Float64
+	maxgrid::Int
+	child::AbstractGeometry{3}
+	@inline VolumeOffset(radius::Real, maxgrid::Real, s::AbstractGeometry{3}) =
+		new(radius, maxgrid, s)
+end
+
+
+mesh(g::MeshOptions, s::VolumeOffset, (m,)) =
 	VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius,
 		gridcells(g, vertices(m), s.maxgrid)))
 
@@ -1336,9 +1341,12 @@ Parameter for 3d solids:
     by `maxgrid`.
 		Thus, its complexity is **cubic** in the parameter `maxgrid`.
 """
-@inline offset(r::Real, s...; ends=:fill, join=:round, miter_limit=2.,
-	maxgrid = 32) =
-	operator(Offset,(r,ends,join,miter_limit, maxgrid),s...)
+@inline offset(r::Real, s...; kw...) = operator(_offset,(r,), s...; kw...)
+@inline _offset(r, s::AbstractGeometry{2};
+	ends=:fill, join=:round, miter_limit=2.) =
+	SurfaceOffset(r, ends, join, miter_limit, s)
+@inline _offset(r, s::AbstractGeometry{3}; maxgrid=32) =
+	VolumeOffset(r, maxgrid, s)
 
 """
     opening(r, shape...; kwargs...)
