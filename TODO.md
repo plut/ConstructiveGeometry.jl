@@ -26,7 +26,7 @@
   - [ ] allow `NamedTuple` for this
   - [ ] possible via `move(origin, s...; direction, spin)`
 # Code cleaning
- - [ ] https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf : simplify even further the CSG tree
+ - [x] https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf : CSG tree normalization (only useful when using `convexity` rendering...)
  - [x] split `Offset` in two structures `OffsetShape` and `OffsetVolume`
  - [x] make transformations even lazier, so that they are evaluated only once
    their subjects (and more importantly, their dimension) are known
@@ -55,6 +55,7 @@
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] propagate `atol` and `rtol` through transformation matrices (use largest eigenvalue)
  - [ ] `import`: stl, amf, ply
  - [x] equivalent of OpenSCAD's for loop?!
  - [x] `linear_extrude` with twist and scale

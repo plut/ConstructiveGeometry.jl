@@ -678,7 +678,7 @@ end
 @inline operator(f, x, s::AbstractGeometry; kw...) = f(x..., s; kw...)
 
 # other cases reducing to this one:
-@inline operator(f, x, s::AbstractGeometry...;kw...) =
+@inline operator(f, x, s::Union{<:AbstractGeometry,EmptyUnion}...;kw...) =
 	operator(f, x, union(s...);kw...)
 @inline operator(f, x, s::AbstractVector; kw...) = operator(f, x, s...; kw...)
 @inline operator(f, x; kw...) =
@@ -745,8 +745,8 @@ Represents the affine operation `x -> a*x + b`.
 
 !!! note "Matrix multiplication"
 
-    Chained `mult_matrix` operations will be combined into a single
-    operation when possible. This saves time: multiple
+    Chained affine transformations are composed before applying
+    to the objects. This saves time: multiple
     (3 × n) matrix multiplications are replaced by
     (3 × 3) multiplications, followed by a single (3 × n).
 """
@@ -898,7 +898,7 @@ symbolic_dir = ( (), # 1 is ignored
 @inline Half(dir::AbstractVector{T}, origin::AbstractVector, s) where{T} =
 	Half(dir, dot(dir, origin), s)
 
-origin_vec(dir, off) = dir*(off / norm²(dir))
+@inline origin_vec(dir, off) = dir*(off / norm²(dir))
 
 mesh(g::MeshOptions, s::Half{3}, (m,)) =
 	VolumeMesh(TriangleMeshes.halfspace(
@@ -911,13 +911,13 @@ mesh(g::MeshOptions, s::Half{2}, (m,)) =
     half(direction, s...; origin = 0)
     half(direction; origin = 0) * s
 
-Keeps only the part of 3d objects `s` lying in the halfspace/halfplane
+Keeps only the part of objects `s` lying in the halfspace/halfplane
 with given `direction` and `origin`.
 
 `direction` may be either a vector, or one of the six symbols  `:top`, `:bottom`, `:left`, `:right`, `:front`, `:back`.
 
-`origin` may be either a point (i.e. one point of the hyperplane) or a scalar
-(b in the equation a*x=b of the hyperplane).
+`origin` may be either a point (i.e. one point on the hyperplane)
+or a scalar (b in the equation a*x=b of the hyperplane).
 """
 @inline half(dir, s...; origin=ZeroVector()) =
 	operator(Half, (dir, origin,), s...)
@@ -973,17 +973,17 @@ function prism_mesh(g::MeshOptions, h0, h1, twist, scale, m)#««
 	end
 	return VolumeMesh(g, pts3, faces)
 end#»»
-# LinearExtrude ««2
-struct LinearExtrude{T} <: AbstractTransform{3}
+# Prism ««2
+struct Prism{T} <: AbstractTransform{3}
 	height::T
 	twist::Angle
 	scale::SVector{2,T}
 	child::AbstractGeometry{2}
-	@inline LinearExtrude(height::T, twist, scale::AbstractVector{S}, child) where{T,S} =
+	@inline Prism(height::T, twist, scale::AbstractVector{S}, child) where{T,S} =
 		new{promote_type(T,S)}(height, todegrees(twist), scale, child)
 end
 
-@inline mesh(g::MeshOptions, s::LinearExtrude, (m,)) =
+@inline mesh(g::MeshOptions, s::Prism, (m,)) =
 	prism_mesh(g, 0, s.height, s.twist, s.scale, m)
 
 """
@@ -997,7 +997,7 @@ Linear extrusion to height `h`.
 @inline _linear_extrude(h,c,t,s::Real,x) = _linear_extrude(h,c,t,SA[s,s],x)
 @inline function _linear_extrude(height, center, twist, scale::AbstractVector,
 		s::AbstractGeometry{2})
-	m = LinearExtrude(height, twist, scale, s)
+	m = Prism(height, twist, scale, s)
 	center ? translate([0,0,-one_half(height)], m) : m
 end
 
@@ -1274,7 +1274,6 @@ defining an affine transform.
  - isolevel: optional distance to add/subtract from swept volume
 """
 @inline sweep(path, s...; kwargs...) =
-# @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
 	operator(_sweep, (path,), s...; kwargs...)
 
 @inline _sweep(path, s::AbstractGeometry{2}; kwargs...) =
@@ -1282,8 +1281,6 @@ defining an affine transform.
 @inline _sweep(transform, s::AbstractGeometry{3};
 	nsteps=32, maxgrid=32, isolevel=0) =
 	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
-
-
 
 # Offset««1
 
@@ -1311,7 +1308,6 @@ struct VolumeOffset <: AbstractTransform{3}
 	@inline VolumeOffset(radius::Real, maxgrid::Real, s::AbstractGeometry{3}) =
 		new(radius, maxgrid, s)
 end
-
 
 mesh(g::MeshOptions, s::VolumeOffset, (m,)) =
 	VolumeMesh(TriangleMeshes.offset(m.mesh, s.radius,

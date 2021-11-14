@@ -35,8 +35,8 @@ png("mult_matrix1", s); # hide
 ![a skewed cube](mult_matrix1.png)
 
 Only invertible affine transformations are supported.
-Transformations with a negative determinant will reverse the object
-(reverse the polygons, or reverse the faces of meshes)
+Transformations with a negative determinant reverse the object
+(either reverse the polygon loops, or reverse the triangular faces of meshes)
 to preserve orientation.
 
 For non-invertible transformations, see [`project`](@ref).
@@ -63,6 +63,11 @@ translate
 ```@docs
 scale
 ```
+```@repl 0
+s = [1,1.5,2]*sphere(50);
+png("scaled_sphere", s); # hide
+```
+![a diagonally scaled sphere produces an ellipsoid](scaled_sphere.png)
 ```@docs
 rotate
 ```
@@ -147,11 +152,22 @@ rotate_extrude
 ```@repl 0
 s1 = rotate_extrude(245)*[square(10,5), square(5,15)];
 png("rotate_extrude", s1); # hide
-s2 = rotate_extrude(720, 30)*translate([10,0])*square(5);
+s2 = rotate_extrude(720, slide=30)*translate([10,0])*square(5);
 png("slide", s2); # hide
 ```
 ![example: rotation extrusion of a L-shape](rotate_extrude.png)
 ![example: rotational extrusion with slide](slide.png)
+
+The `cone` function may also be used as an operator
+to build a cone out of an arbitrary shape:
+```@repl 0
+s = cone([1,2,3])*square(5);
+png("cone_pyramid", s); # hide
+```
+![example: using cone to build a pyramid](cone_pyramid.png)
+
+
+### Surface sweep
 ```@docs
 sweep
 ```

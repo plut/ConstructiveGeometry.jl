@@ -8,6 +8,9 @@ using Makie
 using CairoMakie
 png(name, s) = save(name*".png", Makie.plot(s));
 ```
+In the text terminal, objects are displayed as a CSG tree.
+To view them graphically, load a `Makie` back-end (e.g. `use GLMakie`)
+and call the `Makie.plot` command.
 
 Objects are converted to explicit meshes
 for display or export as STL or SVG files.
@@ -36,7 +39,8 @@ the latter is what is used to build the examples in this documentation.
 
 The meshing of objects is governed by a few parameters:
  - `atol` and `rtol` determine the number of faces inserted in the mesh;
- - `symmetry` allows to impose a given rotational symmetry to circles;
+ - `symmetry` allows to impose a given rotational symmetry to circles and
+   cylinders.
 
 To set values other than the defaults for an object,
 apply the `set_parameters` transform to that object:
@@ -114,13 +118,24 @@ with the default values ``\texttt{\textdollar fa}=12``
 and ``\texttt{\textdollar fs=2}``, this gives
 ``n ≈ \min(π r, 30)``.
 
+By default, circles are meshed as regular polygons
+*inscribed* in the circle.
+They can also be meshed as regular polygons *circumscribed* to that
+circle, by passing the `circumscribed=true` parameter:
+```@repl 0
+s = circle(1,circumscribed=true)\circle(1);
+png("circumscribed",s); # hide
+```
+![difference of circumscribed and inscribed circles](circumscribed.png)
+The same parameter is also available for cylinders.
+
+
 ### Spheres
 
 Spheres are rendered as [Fibonacci
 spheres](http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/).
 This produces a more regular mesh than latitude-longitude grids
 (in particular, the grid does not have singularities at the poles).
-
 
 A sphere is approximated by an inscribed polyhedron with ``n`` vertices.
 Such a polyhedron has ``2n-4`` triangular faces;
