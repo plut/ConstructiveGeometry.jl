@@ -170,6 +170,34 @@ FIXME: this type is currently unused, should it be removed?
 """
 abstract type AbstractMesh{D,T} <: AbstractGeometry{D} end
 @inline Base.map!(f, m::AbstractMesh) = vertices(m) .= f.(vertices(m))
+# Empty unions and intersects««2
+"""
+    EmptyUnion
+
+A convenience type representing the union of nothing.
+This is removed whenever it is `union()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `union()` (which is generally undefined) to this.
+"""
+struct EmptyUnion end
+union() = EmptyUnion()
+Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
+const Unionable = Union{AbstractGeometry,EmptyUnion}
+const UnionableList = Union{<:Unionable}
+
+"""
+    EmptyIntersect
+
+A convenience type representing the intersection of nothing.
+This is removed whenever it is `intersect()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `intersect()` (which is generally undefined) to this.
+"""
+struct EmptyIntersect end
+intersect() = EmptyIntersect()
+Base.show(io::IO, ::EmptyIntersect) = print(io, "intersect()")
 
 # Meshing««1
 # MeshOptions type««2
@@ -662,11 +690,7 @@ end
 # Multiplicative notation:
 @inline Base.:*(u::Transform, s) = u.f(s)
 @inline (u::Transform)(s) = u*s
-# Associativity code — useless since we now use affine_transform (TODO)
-# @inline Base.:*(u::Transform, v::Transform, s...)= _comp(Val(assoc(u,v)),u,v,s...)
-# @inline _comp(::Val{:left}, u, v, s...) = *(compose(u,v), s...)
-# @inline _comp(::Val{:right}, u, v, s...) = *(u, *(v, s...))
-# @inline assoc(::Transform, ::Transform) = :right
+@inline (::Transform)(s::Union{EmptyUnion,EmptyIntersect}) = s
 @inline Base.:*(u::Transform, v::Transform) = compose(u, v)
 @inline compose(u::Transform, v::Transform) = Transform{typeof(∘)}(u.f∘v.f)
 
@@ -1498,35 +1522,6 @@ symbols `sym1`, `sym2`..., `children(x)`.
 	[unroll(s, tail...); unroll(t, tail...)]
 
 # Booleans ««1
-# Empty unions and intersects««2
-"""
-    EmptyUnion
-
-A convenience type representing the union of nothing.
-This is removed whenever it is `union()`-ed with anything else.
-
-This is *not* a subtype of AbtractGeometry or anything,
-since we overload `union()` (which is generally undefined) to this.
-"""
-struct EmptyUnion end
-union() = EmptyUnion()
-Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
-const Unionable = Union{AbstractGeometry,EmptyUnion}
-const UnionableList = Union{<:Unionable}
-
-"""
-    EmptyIntersect
-
-A convenience type representing the intersection of nothing.
-This is removed whenever it is `intersect()`-ed with anything else.
-
-This is *not* a subtype of AbtractGeometry or anything,
-since we overload `intersect()` (which is generally undefined) to this.
-"""
-struct EmptyIntersect end
-intersect() = EmptyIntersect()
-Base.show(io::IO, ::EmptyIntersect) = print(io, "intersect())")
-
 # Complement««2
 CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
 # This is symbolic and replaced at CSG time...
@@ -1541,13 +1536,14 @@ Returns the complement of `x`, i.e. an object X such that y ∩ X = y ∖ x.
 
 !!! note "Warning: complement"
 
-    Complements are not supported for all operations.
-    They would typically not make sense for convex hulls,
-    and Minkowski differences are not implemented (yet).
-    For now they only work with Boolean operations: ∪, ∩, ∖.
+    Complements are symbolic and only supported as shortcuts
+    for some Boolean operations: ∪, ∩, ∖.
+    (They would not make any sense in most other constructions anyway).
 
 """
 @inline complement(x::AbstractGeometry{D}) where{D} = CSGComplement{D}((x,))
+@inline complement(::EmptyUnion) = EmptyIntersect()
+@inline complement(::EmptyIntersect) = EmptyUnion()
 
 # Union««2
 CSGUnion = constructed_solid_type(:union)
