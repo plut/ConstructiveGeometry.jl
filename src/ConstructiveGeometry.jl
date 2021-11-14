@@ -183,9 +183,6 @@ since we overload `union()` (which is generally undefined) to this.
 struct EmptyUnion end
 union() = EmptyUnion()
 Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
-const Unionable = Union{AbstractGeometry,EmptyUnion}
-const UnionableList = Union{<:Unionable}
-
 """
     EmptyIntersect
 
