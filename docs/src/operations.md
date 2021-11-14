@@ -10,6 +10,8 @@ png(name, s) = save(name*".png", Makie.plot(s));
 ```
 
 ## Boolean operations
+
+### Basic operations
 ```@docs
 union(::AbstractGeometry,::AbstractGeometry)
 ```
@@ -47,6 +49,27 @@ complement
 Complements are provided as a shortcut to simplify “subtractive”
 operations, *i.e.* chains of intersections and differences.
 See [Three-dimensional embeddings of two-dimensional objects](@ref embed).
+
+### Rewriting rules
+
+The CSG tree as constructed by the user is subjected to immediate
+rewriting (this is performed by the `union`, `intersect` etc. functions),
+before any meshing function is called.
+
+The following rewriting rules are used:
+ - associative operations (`union`, `intersect`, `hull`, `minkowski`)
+   are regrouped:
+```@repl 0
+display(union(union(square(1), circle(1)), polygon([])))
+```
+ - single-operand unions and intersects are removed:
+```@repl 0
+display(union(square(1)))
+```
+ - symbolic complements are replaced by the appropriate values:
+```@repl 0
+display(intersect(square(1), ~circle(1), polygon([])))
+```
 
 ## Convex hull
 ```@docs

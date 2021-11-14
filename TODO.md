@@ -1,5 +1,5 @@
 # Bug fixes
- - [ ] `rotate_extrude()` with slide and polygon touching y-axis
+ - [x] `rotate_extrude()` with slide and polygon touching y-axis
  - [x] `linear_extrude(scale=0)` is a cone: merge points on top
  - [x] fix problem of triangulating tangent polygons: separately
    triangulate each connected component

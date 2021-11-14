@@ -1100,7 +1100,7 @@ Extrudes a single point, returning a vector of 3d points
 function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle, slide) where{T}
 	@assert p[1] ≥ 0
 	# special case: point is on the y-axis; returns a single point:
-	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
+	iszero(p[1]) && iszero(slide) && return [SA[p[1], p[1], p[2]]]
 	n = Int(cld(circle_nvertices(g, p[1])*angle, 360°))
 
 	ω = Complex{T}(cosd(angle/n), sind(angle/n))
@@ -1178,7 +1178,7 @@ The `slide` parameter is a displacement along the `z` direction.
 """
 @inline rotate_extrude(angle::Number, s...; slide=0) =
 	operator(RotateExtrude, (todegrees(angle), slide,), s...)
-@inline rotate_extrude(s...; slide=0) = rotate_extrude(360°, s...; slide)
+@inline rotate_extrude(s...; kwargs...) = rotate_extrude(360°, s...; kwargs...)
 
 
 # Sweep (surface and volume)««1
@@ -1252,8 +1252,6 @@ defining an affine transform.
  - gridsize: subdivision for marching cubes
  - isolevel: optional distance to add/subtract from swept volume
 """
-function sweep end
-
 @inline sweep(path, s...; kwargs...) =
 # @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
 	operator(_sweep, (path,), s...; kwargs...)
@@ -1472,19 +1470,18 @@ constructed_solid_type(S::Symbol, T=@closure A->Vector{A}) =
 	ConstructedSolid{S,T(AbstractGeometry{D}),D} where{D}
 
 # Generic code for associativity etc.««2
+# Macros for defining neutral element etc.
+macro mkneutral(op, what, result); quote
+	@inline $(esc(op))(neutral, absorb::$what) = $result
+	@inline $(esc(op))(absorb::$what, neutral) = $result
+	@inline $(esc(op))(x::$what, ::$what) = x
+end end
+macro mkunit(op,T=AbstractGeometry); quote $(esc(op))(a::$(esc(T))) = a end end
 # make operators associative; see definition of + in operators.jl
-for op in (:union, :intersect, :minkowski, :hull)
-	Q=QuoteNode(op)
-	# union, intersection, minkowski are trivial on single objects:
-	op != :hull &&  @eval ($op)(a::AbstractGeometry) = a
-	@eval begin
-	# all of these are associative:
-	# we leave out the binary case, which will be defined on a case-by-case
-	# basis depending on the operators (see below).
-	($op)(a::AbstractGeometry, b::AbstractGeometry, c::AbstractGeometry, x...) =
-		Base.afoldl($op, ($op)(($op)(a,b),c), x...)
-	end
-end
+macro mkassoc(op,T=AbstractGeometry)
+	op=esc(op); T=esc(T); quote
+	($op)(a::$T, b::$T, c::$T, x...) = Base.afoldl($op, ($op)(($op)(a,b),c),x...)
+end end
 
 # Unrolling: prevent nesting of similar associative constructions
 """
@@ -1501,43 +1498,40 @@ symbols `sym1`, `sym2`..., `children(x)`.
 	[unroll(s, tail...); unroll(t, tail...)]
 
 # Booleans ««1
-@inline csgunion(s1::S, s2::S) where {S<:VolumeMesh} =
-	VolumeMesh(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
-@inline csginter(s1::S, s2::S) where {S<:VolumeMesh} =
-	VolumeMesh(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
-@inline csgdiff(s1::S, s2::S) where {S<:VolumeMesh} =
-	VolumeMesh(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
+# Empty unions and intersects««2
+"""
+    EmptyUnion
 
-@inline csgunion(s1::ShapeMesh, s2::ShapeMesh) =
-	ShapeMesh(Shapes.clip(:union, s1.poly, s2.poly), I)
-@inline csginter(s1::ShapeMesh, s2::ShapeMesh) =
-	ShapeMesh(Shapes.clip(:intersection, s1.poly, s2.poly), I)
-@inline csgdiff(s1::ShapeMesh, s2::ShapeMesh) =
-	ShapeMesh(Shapes.clip(:difference, s1.poly, s2.poly), I)
+A convenience type representing the union of nothing.
+This is removed whenever it is `union()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `union()` (which is generally undefined) to this.
+"""
+struct EmptyUnion end
+union() = EmptyUnion()
+Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
+const Unionable = Union{AbstractGeometry,EmptyUnion}
+const UnionableList = Union{<:Unionable}
+
+"""
+    EmptyIntersect
+
+A convenience type representing the intersection of nothing.
+This is removed whenever it is `intersect()`-ed with anything else.
+
+This is *not* a subtype of AbtractGeometry or anything,
+since we overload `intersect()` (which is generally undefined) to this.
+"""
+struct EmptyIntersect end
+intersect() = EmptyIntersect()
+Base.show(io::IO, ::EmptyIntersect) = print(io, "intersect())")
 
 # Complement««2
-# It would be possible in theory to represent complementation as a
-# reversed mesh. However, the only reasonable fill-rule in `Clipper.jl`
-# (`positive`) understands a clockwise loop as an empty polygon (because
-# all points have either 0 or -1 as a winding number). A way to solve
-# this (which Clipper does not implement) would be to affect winding
-# number +1 to the point at infinity.
-#
-# So we instead represent complementation symbolically,
-# using the Boolean rules:
-# ~(~A) = A
-# A ∩ (~B) = A ∖ B
-# (~A) ∩ (~B) = ~(A ∪ B)
-# A ∪ (~B) = ∼(B ∖ A)
-# (~A) ∪ (~B) = ~(A ∩ B)
-# (~A) ∪ (~B) = A ⊕ (~B) = A ⊕ B
-#
-# This means that ad-hoc rules are defined for complements (see below),
-# so we need CSGComplement to be defined before the other types.
 CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
-iscomplement(::CSGComplement) = true
-iscomplement(::AbstractGeometry) = false
-@inline mesh(g::MeshOptions, ::CSGComplement, (m,)) = m
+# This is symbolic and replaced at CSG time...
+@inline mesh(g::MeshOptions, ::CSGComplement, (m,)) =
+	error("Complements are not supposed to be meshed...")
 
 """
     complement(x::AbstractGeometry)
@@ -1550,32 +1544,19 @@ Returns the complement of `x`, i.e. an object X such that y ∩ X = y ∖ x.
     Complements are not supported for all operations.
     They would typically not make sense for convex hulls,
     and Minkowski differences are not implemented (yet).
-   For now they only work with Boolean operations: ∪, ∩, ∖.
+    For now they only work with Boolean operations: ∪, ∩, ∖.
 
 """
 @inline complement(x::AbstractGeometry{D}) where{D} = CSGComplement{D}((x,))
 
 # Union««2
 CSGUnion = constructed_solid_type(:union)
-function mesh(g::MeshOptions,s::CSGUnion, mlist)#::MeshType(g,s)
-	isempty(mlist) && return empty(MeshType(g,s)) # FIXME
-	(m1, mt...) = mlist
-	(i1, ct...) = iscomplement.(children(s))
-	for (m2,i2) in zip(mt, ct)
-		if i1
-			# (~A) ∪ (~B) = ~(A ∩ B): i1 ← true, m1 ← m1 ∩ m2
-			# (~A) ∪ B = ~(A ∖ B): i1 ← true, m1 ← m1∖m2
-			m1 = i2 ? csginter(m1,m2) : csgdiff(m1,m2)
-		else
-			(m1,i1) = i2 ? (csgdiff(m2,m1), true) : (csgunion(m1,m2), false)
-		end
-	end
-	return m1
-end
 
-# FIXME: make self_union a mesh cleaning function?
-@inline self_union(m::ShapeMesh) = ShapeMesh(Shapes.simplify(poly(m)))
-@inline self_union(m::VolumeMesh) = csgunion(m, m)
+@inline mesh(g::MeshOptions, s::CSGUnion, mlist) = reduce(csgunion, mlist)
+@inline csgunion(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(0, s1.mesh, s2.mesh))
+@inline csgunion(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:union, s1.poly, s2.poly), I)
 
 """
     union(a::AbstractGeometry...)
@@ -1584,28 +1565,31 @@ Computes the union of several solids. The dimensions must match.
 """
 @inline union(a::AbstractGeometry, b::AbstractGeometry) =
 	throw(DimensionMismatch("union of 2d and 3d objects not allowed"))
+@inline union(a::AbstractGeometry, b::CSGComplement) =
+	complement(setdiff(b.children[1],a))
+@inline union(a::CSGComplement, b::AbstractGeometry) = union(b,a)
+@inline union(a::CSGComplement, b::CSGComplement) =
+	complement(intersect(a.children[1], b.children[1]))
 @inline union(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGUnion{D}(unroll2(a, b, Val(:union)))
 
+# TODO: make self_union a mesh cleaning function?
+@inline self_union(m::ShapeMesh) = ShapeMesh(Shapes.simplify(poly(m)))
+@inline self_union(m::VolumeMesh) = csgunion(m, m)
+
+@mkunit union Union{AbstractGeometry,EmptyUnion}
+@mkassoc union Union{AbstractGeometry,EmptyUnion}
+@mkneutral union EmptyUnion neutral
+@mkneutral union EmptyIntersect  absorb
 
 # Intersection««2
 CSGInter = constructed_solid_type(:intersection)
-function mesh(g::MeshOptions, s::CSGInter, mlist)#::MeshType(g,s)
-	isempty(mlist) && return empty(MeshType(g,s))
-	(m1, mt...) = mlist
-	(i1, ct...) = iscomplement.(children(s))
-	for (m2,i2) in zip(mt,ct)
-		if i1
-			# (~A) ∩ (~B) = ~(A ∪ B)
-			# (~A) ∩ B =  B∖A
-			(m1,i1) = i2 ? (csgunion(m1,m2), true) : (csgdiff(m2,m1), false)
-		else
-			# A ∩ (~B) = A∖B
-			m1 = i2 ? csgdiff(m1,m2) : csginter(m1,m2)
-		end
-	end
-	return m1
-end
+
+@inline mesh(g::MeshOptions, s::CSGInter, mlist) = reduce(csginter, mlist)
+@inline csginter(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(1, s1.mesh, s2.mesh))
+@inline csginter(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:intersection, s1.poly, s2.poly), I)
 
 """
     intersect(a::AbstractGeometry...)
@@ -1617,24 +1601,29 @@ and a 2d intersection will be returned.
 """
 @inline intersect(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGInter{D}(unroll2(a, b, Val(:intersection)))
-@inline Base.intersect(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
+@inline intersect(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
 	intersect(slice(a), b)
-@inline Base.intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
+@inline intersect(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
 	intersect(a, slice(b))
+@inline intersect(a::AbstractGeometry, b::CSGComplement) = setdiff(a, b.children[1])
+@inline intersect(a::CSGComplement, b::AbstractGeometry) = intersect(b,a)
+@inline intersect(a::CSGComplement, b::CSGComplement) =
+	complement(union(a.children[1], b.children[1]))
 
+@mkunit intersect Union{AbstractGeometry,EmptyIntersect}
+@mkassoc intersect Union{AbstractGeometry,EmptyIntersect}
+@mkneutral intersect EmptyUnion absorb
+@mkneutral intersect EmptyIntersect  neutral
 
 # Difference««2
 # this is a binary operator:
 CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
-function mesh(g::MeshOptions, s::CSGDiff, mlist)#::MeshType(g,s)
-	(i1,i2) = iscomplement.(children(s))
-	(m1,m2) = mlist
-	if i1
-		return i2 ? csgdiff(m2,m1) : csgunion(m1,m2)
-	else
-		return i2 ? csgunion(m1,m2) : csgdiff(m1,m2)
-	end
-end
+
+@inline mesh(g::MeshOptions, s::CSGDiff, (m1,m2,)) = csgdiff(m1, m2)
+@inline csgdiff(s1::S, s2::S) where {S<:VolumeMesh} =
+	VolumeMesh(TriangleMeshes.boolean(2, s1.mesh, s2.mesh))
+@inline csgdiff(s1::ShapeMesh, s2::ShapeMesh) =
+	ShapeMesh(Shapes.clip(:difference, s1.poly, s2.poly), I)
 
 """
     setdiff(a::AbstractGeometry, b::AbstractGeometry)
@@ -1643,10 +1632,6 @@ Computes the difference of two solids.
 The following dimensions are allowed: (2,2), (3,3), and (2,3).
 In the latter case, the 3d object will be intersected with the horizontal
 plane via the `slice()` operation.
-
-    setdiff([a...], [b...])
-
-Shorthand for `setdiff(union(a...), union(b...))`.
 """
 @inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGDiff{D}((a,b))
@@ -1654,62 +1639,24 @@ Shorthand for `setdiff(union(a...), union(b...))`.
 	setdiff(a, slice(b))
 @inline setdiff(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
 	throw(DimensionMismatch("difference (3d) - (2d) not allowed"))
+@inline setdiff(a::AbstractGeometry, b::CSGComplement) =
+	intersect(a, b.children[1])
+@inline setdiff(a::CSGComplement, b::AbstractGeometry) = setdiff(b,a)
+@inline setdiff(a::CSGComplement, b::CSGComplement) =
+	complement(setdiff(b.children[1], a.children[1]))
 
-# added interface: setdiff([x...], [y...])
-@inline setdiff(x::AbstractVector{<:AbstractGeometry},
-                y::AbstractVector{<:AbstractGeometry}) =
+"""
+    setdiff([a...], [b...])
+
+Shorthand for `setdiff(union(a...), union(b...))`.
+"""
+@inline setdiff(x::AbstractVector{<:Union{AbstractGeometry,EmptyUnion}},
+                y::AbstractVector{<:Union{AbstractGeometry,EmptyUnion}}) =
 	setdiff(union(x...), union(y...))
-
 
 # Xor (used by extrusion) ««2
 @inline symdiff(s1::S, s2::S) where {S<:VolumeMesh} =
 	VolumeMesh(TriangleMeshes.boolean(3, s1.mesh, s2.mesh))
-# Empty unions and intersects««2
-# FIXME: this is not really used...
-"""
-    EmptyUnion
-
-A convenience type representing the union of nothing.
-This is removed whenever it is `union()`-ed with anything else.
-
-This is *not* a subtype of AbtractGeometry or anything,
-since we overload `union()` (which is generally undefined) to this.
-"""
-struct EmptyUnion end
-"""
-    EmptyIntersect
-
-A convenience type representing the intersection of nothing.
-This is removed whenever it is `intersect()`-ed with anything else.
-
-This is *not* a subtype of AbtractGeometry or anything,
-since we overload `intersect()` (which is generally undefined) to this.
-"""
-struct EmptyIntersect end
-
-union() = EmptyUnion()
-intersect() = EmptyIntersect()
-Base.show(io::IO, ::EmptyUnion) = print(io, "union()")
-Base.show(io::IO, ::EmptyIntersect) = print(io, "intersect())")
-
-macro define_neutral(op, what, result)
-	quote
-	@inline $(esc(op))(neutral, absorb::$what) = $result
-	@inline $(esc(op))(absorb::$what, neutral) = $result
-	@inline $(esc(op))(x::$what, ::$what) = x
-	end
-end
-function minkowski end
-function hull end
-@define_neutral union EmptyUnion neutral
-@define_neutral union EmptyIntersect  absorb
-@define_neutral intersect EmptyUnion absorb
-@define_neutral intersect EmptyIntersect  neutral
-@define_neutral minkowski EmptyUnion absorb
-@define_neutral minkowski EmptyIntersect  absorb
-@define_neutral hull EmptyUnion neutral
-@define_neutral hull EmptyIntersect  absorb
-
 # Convex hull ««1
 struct CSGHull{D} <: AbstractConstructed{:hull,D}
 	children::Vector{<:AbstractGeometry}
@@ -1765,6 +1712,11 @@ function hull(s::Union{AbstractGeometry,AbstractVector}...)
 	return CSGHull{3}(l)
 end
 
+# no @mkunit here!
+@mkassoc hull Union{AbstractGeometry,EmptyUnion}
+@mkneutral hull EmptyUnion neutral
+@mkneutral hull EmptyIntersect  absorb
+
 # Minkowski sum ««1
 # Minkowski sum in unequal dimensions is allowed;
 # we place the higher-dimensional summand first,
@@ -1799,6 +1751,11 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
 	MinkowskiSum{3,2}(a,b)
 @inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{3})=minkowski(b,a)
+
+@mkunit minkowski
+@mkassoc minkowski Union{AbstractGeometry,EmptyUnion}
+@mkneutral minkowski EmptyUnion absorb
+@mkneutral minkowski EmptyIntersect  absorb
 
 # Overloading Julia operators««1
 # backslash replaces U+2216 ∖ SET MINUS, which is not an allowed Julia operator
