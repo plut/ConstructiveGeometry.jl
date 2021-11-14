@@ -1,4 +1,5 @@
 # Bug fixes
+ - [ ] `rotate_extrude()` with slide and polygon touching y-axis
  - [x] `linear_extrude(scale=0)` is a cone: merge points on top
  - [x] fix problem of triangulating tangent polygons: separately
    triangulate each connected component
@@ -8,6 +9,7 @@
  - [ ] simple syntax for making conditionals (⇒ use those empty objects)
    - [ ] or also allow `Nothing` in vectors of objects
    - [ ] even better, `EmptyUnion`
+   - [ ] or ad-hoc `EmptyShape` / `EmptyVolume`
 # Simple fixes
  - [x] `atol`/`rtol` ?
  - [x] auto-compute `offset` npoints from meshing options
@@ -54,7 +56,7 @@
 ## Geometry
  - [x] equivalent of OpenSCAD's for loop?!
  - [x] `linear_extrude` with twist and scale
- - [ ] `rotate_extrude` with slide (per-turn) along the axis
+ - [x] `rotate_extrude` with slide (per-turn) along the axis
  - [ ] compute center of gravity (and use it for scaling etc.)
  - [ ] add a 1d type (points, segments; paths) for minkowski (/ extrusions)?
    - [ ] this makes sense; `Clipper.jl` seems happy to do Minkowski with a path

@@ -134,18 +134,24 @@ png("closing", s); # hide
 linear_extrude
 ```
 ```@repl 0
-s = linear_extrude(10)*[square(10,5), square(5,15)];
-png("linear_extrude", s); # hide
+s1 = linear_extrude(10)*[square(10,5), square(5,15)];
+png("linear_extrude", s1); # hide
+s2 = linear_extrude(20, twist=45, scale=.8)*[square(10,5), square(5,15)];
+png("linear_extrude_twist", s2); # hide
 ```
 ![example: linear extrusion of a L-shape](linear_extrude.png)
+![example: linear extrusion with twist](linear_extrude_twist.png)
 ```@docs
 rotate_extrude
 ```
 ```@repl 0
-s = rotate_extrude(245)*[square(10,5), square(5,15)];
-png("rotate_extrude", s); # hide
+s1 = rotate_extrude(245)*[square(10,5), square(5,15)];
+png("rotate_extrude", s1); # hide
+s2 = rotate_extrude(720, 30)*translate([10,0])*square(5);
+png("slide", s2); # hide
 ```
 ![example: rotation extrusion of a L-shape](rotate_extrude.png)
+![example: rotational extrusion with slide](slide.png)
 ```@docs
 sweep
 ```

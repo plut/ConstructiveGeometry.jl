@@ -653,7 +653,8 @@ end
 @inline operator(f, x, s::AbstractGeometry; kw...) = f(x..., s; kw...)
 
 # other cases reducing to this one:
-@inline operator(f, x, s...;kw...) = operator(f, x, union(s...);kw...)
+@inline operator(f, x, s::AbstractGeometry...;kw...) =
+	operator(f, x, union(s...);kw...)
 @inline operator(f, x, s::AbstractVector; kw...) = operator(f, x, s...; kw...)
 @inline operator(f, x; kw...) =
 	Transform{f}(@closure s -> operator(f, x, s; kw...))
@@ -1050,8 +1051,9 @@ and radius `r` around the origin.
 	cone(SA[0,0,h], r; circumscribed)
 
 # Rotate extrusion««1
-struct RotateExtrude{T} <: AbstractTransform{3}
+struct RotateExtrude{T,X} <: AbstractTransform{3}
 	angle::Angle{_UNIT_DEGREE,T}
+	slide::X
 	child::AbstractGeometry{2}
 end
 
@@ -1095,7 +1097,7 @@ end
 Extrudes a single point, returning a vector of 3d points
 (x,y) ↦ (x cosθ, x sinθ, y).
 """
-function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle) where{T}
+function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle, slide) where{T}
 	@assert p[1] ≥ 0
 	# special case: point is on the y-axis; returns a single point:
 	iszero(p[1]) && return [SA[p[1], p[1], p[2]]]
@@ -1109,7 +1111,8 @@ function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle) where{T}
 	end
 	# close the loop:
 	z[n+1] = Complex{T}(cosd(angle), sind(angle))
-	return [SA[p[1]*real(u), p[1]*imag(u), p[2]] for u in z]
+	s = slide / n
+	return [SA[p[1]*real(u), p[1]*imag(u), p[2]+(i-1)*s] for (i, u) in pairs(z)]
 end
 
 # Meshing ««2
@@ -1121,13 +1124,13 @@ function mesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
 	peri = Shapes.loops(m1) # oriented ↺
 	n = length(pts2)
 	
-	pts3 = _rotate_extrude(g, pts2[1], s.angle)
+	pts3 = _rotate_extrude(g, pts2[1], s.angle, s.slide)
 	firstindex = [1]
 	arclength = Int[length(pts3)]
 	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
 	for p in pts2[2:end]
 		push!(firstindex, length(pts3)+1)
-		newpoints = _rotate_extrude(g, p, s.angle)
+		newpoints = _rotate_extrude(g, p, s.angle, s.slide)
 		@debug "newpoints[$p] = $(length(newpoints))"
 		push!(arclength, length(newpoints))
 		pts3 = vcat(pts3, newpoints)
@@ -1164,15 +1167,18 @@ function mesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
 	return VolumeMesh(g, pts3, triangles)
 end
 
+# Interface ««2
 """
-    rotate_extrude([angle = 360°], shape...)
-    rotate_extrude([angle = 360°]) * shape
+    rotate_extrude([angle = 360°], shape...; slide=0)
+    rotate_extrude([angle = 360°]; [slide=0]) * shape
 
 Similar to OpenSCAD's `rotate_extrude` primitive.
+
+The `slide` parameter is a displacement along the `z` direction.
 """
-@inline rotate_extrude(angle::Number, s...) =
-	operator(RotateExtrude, (todegrees(angle),), s...)
-@inline rotate_extrude(s...) = rotate_extrude(360°, s...)
+@inline rotate_extrude(angle::Number, s...; slide=0) =
+	operator(RotateExtrude, (todegrees(angle), slide,), s...)
+@inline rotate_extrude(s...; slide=0) = rotate_extrude(360°, s...; slide)
 
 
 # Sweep (surface and volume)««1
@@ -1230,9 +1236,7 @@ to the direction *z*), and
 FIXME: open-path extrusion is broken because `ClipperLib` currently
 does not support the `etOpenSingle` offset style.
 """
-@inline sweep(path, s...; kwargs...) =
-# @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
-	operator(_sweep, (path,), s...; kwargs...)
+function sweep end
 
 """
     sweep(transform, volume)
@@ -1249,6 +1253,10 @@ defining an affine transform.
  - isolevel: optional distance to add/subtract from swept volume
 """
 function sweep end
+
+@inline sweep(path, s...; kwargs...) =
+# @inline sweep(path::AbstractGeometry{2}, s...; kwargs...) =
+	operator(_sweep, (path,), s...; kwargs...)
 
 @inline _sweep(path, s::AbstractGeometry{2}; kwargs...) =
 	SurfaceSweep(path, s)
