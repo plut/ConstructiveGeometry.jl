@@ -211,25 +211,23 @@ instead as data.
 
 NOTE: for now, only `Float64` is possible.
 """
-struct MeshOptions{T<:Real,C}
+struct MeshOptions{T<:Real,C,P<:NamedTuple}
 	# at least `atol`, `rtol` and `symmetry`, but user data is allowed here:
-	parameters::NamedTuple
+	parameters::P
 	color::C
-	@inline MeshOptions{T,C}(p, c) where{T,C} = new{T,C}(p, c)
-	@inline MeshOptions{T,C}(p) where{T,C} = new{T,C}(p, p.color)
-	@inline MeshOptions{T}(p) where{T} = MeshOptions{T,typeof(p.color)}(p)
+	@inline MeshOptions{T}(p::P,c::C) where{T,C,P} = new{T,C,P}(p,c)
 	@inline MeshOptions{T}(;kwargs...) where{T} =
-		MeshOptions{T}(merge(_DEFAULT_PARAMETERS, kwargs.data))
+		MeshOptions{T}(merge(_DEFAULT_PARAMETERS, kwargs.data), _DEFAULT_COLOR)
 end
 
 const MeshColor = Colors.RGBA{N0f8}
+const _DEFAULT_COLOR = MeshColor(.3,.4,.5) # bluish gray
 const _DEFAULT_PARAMETERS = (
-	color = MeshColor(.3,.4,.5), # bluish gray
 	atol = 0.1, rtol = .005, symmetry = 1,
 )
 
-@inline MeshOptions(g::M, p::NamedTuple) where{M<:MeshOptions} =
-	M(merge(g.parameters, p), g.color)
+@inline MeshOptions(g::MeshOptions{T}, p::NamedTuple) where{T} =
+	MeshOptions{T}(merge(g.parameters, p), g.color)
 @inline Base.get(g::MeshOptions, name) =
 	get(g.parameters, name, _DEFAULT_PARAMETERS[name])
 
@@ -500,7 +498,11 @@ end
 
 @inline TriangleMesh(g::MeshOptions{T}, points, faces,
 	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{F,T,A} =
+begin
+	println("TriangleMesh(g=$g)")
+	println("    attrs=$attrs")
 	TriangleMesh{T,A}(SVector{3,T}.(points), faces, attrs)
+end
 @inline VolumeMesh(g::MeshOptions{T,C}, points, faces) where{T,C} =
 	VolumeMesh(TriangleMesh{T,C}(SVector{3,T}.(points), faces,
 		fill(g.color, size(faces))))
@@ -594,6 +596,7 @@ If `center` is `true` then the cube is centered.
 # Sphere««1
 struct Sphere{T} <: AbstractGeometry{3}
 	radius::T
+	circumscribed::Bool
 end
 @inline scad_info(s::Sphere) = (:sphere, (r=s.radius,))
 
@@ -637,22 +640,22 @@ function sphere_nvertices(g::MeshOptions, r)
 	# a sphere always has at least 6 vertices
 	return max(6, base)
 end
-@inline fibonacci_sphere_points(g::MeshOptions, r) =
-	fibonacci_sphere_points(r, sphere_nvertices(g, r))
 
 function mesh(g::MeshOptions{T}, s::Sphere, _) where{T}
-	plist = fibonacci_sphere_points(g, T(s.radius))
+	n = sphere_nvertices(g, s.radius)
+	r = s.circumscribed ? s.radius/sqrt(1-8π/√3/(n-2)) : s.radius
+	plist = fibonacci_sphere_points(T(r), n)
 	(pts, faces) = convex_hull(plist)
 	return VolumeMesh(g, pts, faces)
 end
 
-
+# Interface ««2
 """
-    sphere(r::Real)
+    sphere(r::Real, [circumscribed=false])
 
 A sphere with diameter `r`, centered at the origin.
 """
-@inline sphere(a::Real) = Sphere(a)
+@inline sphere(a::Real; circumscribed=false) = Sphere(a, circumscribed)
 #————————————————————— Transformations —————————————————————————————— ««1
 
 # `AbstractTransform`:

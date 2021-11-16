@@ -127,7 +127,9 @@ s = circle(1,circumscribed=true)\circle(1);
 png("circumscribed",s); # hide
 ```
 ![difference of circumscribed and inscribed circles](circumscribed.png)
-The same parameter is also available for cylinders.
+The same parameter is also available for cylinders and spheres.
+The result is only approximated in the case of spheres,
+with the approximation being worse for small-radius spheres.
 
 
 ### Spheres

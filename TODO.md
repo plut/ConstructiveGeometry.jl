@@ -55,7 +55,7 @@
 # New features
 ## Geometry
  - [ ] propagate `atol` and `rtol` through transformation matrices (use largest eigenvalue)
- - [ ] `import`: stl, amf, ply
+ - [ ] `import`: stl, amf, ply, dxf
  - [x] equivalent of OpenSCAD's for loop?!
  - [x] `linear_extrude` with twist and scale
  - [x] `rotate_extrude` with slide (per-turn) along the axis
