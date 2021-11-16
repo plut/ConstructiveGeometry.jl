@@ -7,9 +7,7 @@
  - [x] clarify priority: `linear_extrude(8)*(5*object)`
  - [x] projection of hollow sphere does not work: replace the temporary
    fix by something better (but this is likely Clipper's fault)
- - [ ] simple syntax for making conditionals (⇒ use those empty objects)
-   - [ ] or also allow `Nothing` in vectors of objects
-   - [x] even better, `EmptyUnion`
+ - [x] simple syntax for making conditionals (⇒ use those empty objects)
 # Simple fixes
  - [x] `atol`/`rtol` ?
  - [x] auto-compute `offset` npoints from meshing options
@@ -26,6 +24,7 @@
   - [ ] allow `NamedTuple` for this
   - [ ] possible via `move(origin, s...; direction, spin)`
 # Code cleaning
+ - [ ] replace `include` by something using `FileIO` e.g. `.cg.jl`?
  - [x] https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf : CSG tree normalization (only useful when using `convexity` rendering...)
  - [x] split `Offset` in two structures `OffsetShape` and `OffsetVolume`
  - [x] make transformations even lazier, so that they are evaluated only once

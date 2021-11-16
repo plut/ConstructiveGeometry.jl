@@ -70,6 +70,10 @@ display(union(square(1)))
 ```@repl 0
 display(intersect(square(1), ~circle(1), polygon([])))
 ```
+ - empty unions and intersections are removed:
+```@repl 0
+display(union(square(1),union(),circle(1)))
+```
 
 ## Convex hull
 ```@docs
