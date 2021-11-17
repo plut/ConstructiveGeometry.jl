@@ -1528,7 +1528,7 @@ symbols `sym1`, `sym2`..., `children(x)`.
 # Booleans ««1
 # Complement««2
 CSGComplement{D} = ConstructedSolid{:complement,Tuple{<:AbstractGeometry{D}},D}
-# This is symbolic and replaced at CSG time...
+# This is symbolic and replaced at construction time
 @inline mesh(g::MeshOptions, ::CSGComplement, (m,)) =
 	error("Complements are not supposed to be meshed...")
 
