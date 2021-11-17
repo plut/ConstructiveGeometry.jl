@@ -32,7 +32,8 @@ Computes the position of the point at parameter `t` on the curve `b`.
 # recursive definition for de Casteljau's algorithm:
 @inline _interpolate(p::SVector{1}, _) = p[1]
 @inline _interpolate(p::SVector{N,P}, t) where{N,P} =
-	_interpolate(SVector{N-1,P}(t*p[i+1]+(1-t)*p[i] for i in 1:N-1), t)
+	_interpolate(SVector{N-1,Base.return_types(*,(P,typeof(t)))[1]}(
+		t*p[i+1]+(1-t)*p[i] for i in 1:N-1), t)
 
 """
     interpolate(b::BezierCurve, v::AbstractVector{<:Real})

@@ -28,6 +28,8 @@ include("Shapes.jl")
 using .Shapes
 include("TriangleMeshes.jl")
 using .TriangleMeshes
+include("Bezier.jl")
+using .Bezier
 
 # General tools««1
 struct Consecutives{T,V} <: AbstractVector{T}
@@ -331,6 +333,14 @@ Filled polygon delimitated by the given vertices.
 TODO: allow several paths and simplify crossing paths.
 """
 @inline polygon(path) = ShapeMesh(Shapes.PolygonXor([path]))
+"""
+    bezier(p0,p1,p2,p3,n)
+
+Interpolates `n` points of the Bézier curve parametrized by points
+`p0`..`p3`. The points are (parameter-wise) regularly spaced.
+"""
+@inline bezier(p0,p1,p2,p3,n::Integer) =
+	Bezier.interpolate(Bezier.BezierCurve(p0,p1,p2,p3),n) # [points..., bezier()...]
 
 # Square««1
 struct Square{T} <: AbstractGeometry{2}
@@ -546,7 +556,7 @@ function surface(vertices, faces)
 		push!(triangles, tri...)
 	end
 	return VolumeMesh(TriangleMesh{Float64,MeshColor}(vertices, triangles,
-		fill(_DEFAULT_PARAMETERS.color, size(triangles))))
+		fill(_DEFAULT_COLOR, size(triangles))))
 end
 
 
@@ -2012,7 +2022,7 @@ end
 # end
 # Makie.plottype(::Shapes.PolygonXor) = Makie.Mesh
 function plot!(scene::SceneLike, p::Shapes.PolygonXor;
-		color=_DEFAULT_PARAMETERS.color, kwargs...)
+		color=_DEFAULT_COLOR, kwargs...)
 	isempty(p.paths) && return scene
 	v = Shapes.vertices(p)
 	tri = Shapes.triangulate(p)
