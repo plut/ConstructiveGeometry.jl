@@ -9,7 +9,9 @@ import LinearAlgebra: det
 using StaticArrays
 using FixedPointNumbers
 using FastClosures
-using Unitful: Unitful, °
+import Unitful: Unitful, °
+import FileIO: FileIO, @format_str
+# import MeshIO
 
 import Rotations
 import Colors: Colors, Colorant
@@ -508,11 +510,7 @@ end
 
 @inline TriangleMesh(g::MeshOptions{T}, points, faces,
 	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{F,T,A} =
-begin
-	println("TriangleMesh(g=$g)")
-	println("    attrs=$attrs")
 	TriangleMesh{T,A}(SVector{3,T}.(points), faces, attrs)
-end
 @inline VolumeMesh(g::MeshOptions{T,C}, points, faces) where{T,C} =
 	VolumeMesh(TriangleMesh{T,C}(SVector{3,T}.(points), faces,
 		fill(g.color, size(faces))))
@@ -1822,13 +1820,60 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline Base.:%(c::Colorant, x::AbstractGeometry) = highlight(c, x)
 
 #————————————————————— I/O —————————————————————————————— ««1
+function __init__loadsave()
+	# FileIO has a central registry: this is bad!
+	# The PLY, STL etc. slots are already taken by MeshIO: this is worse!
+	# We don't use MeshIO since it needs its own data type (bad!)
+	# instead of an interface, and is badly documented.
+	# All those bad APIs force us to play dirty:
+	for s in (:STL_ASCII, :STL_BINARY, :PLY_ASCII, :PLY_BINARY)
+		FileIO.sym2loader[s] = [ConstructiveGeometry]
+		FileIO.sym2saver[s] = [ConstructiveGeometry]
+	end
+end
 
-# File inclusion««1
+"""
+    load(file)
+
+Reads an object in a data file. Currently supported formats are:
+ - `.stl` (ascii and binary)
+ - `.ply` (ascii and binary)
+"""
+@inline load(f::FileIO.File{F}; kw...) where{F<:FileIO.DataFormat} =
+	# also, open(::FileIO.File) somehow does not return an IO!? sad!
+	open(f) do x; load(F(), x.io; kw...); end
+
+"""
+    FileIO.save(file, object; kw...)
+
+Saves `set_parameters(kw...)*object` in the given file.
+Currently supported file formats are:
+ - `.stl` (ascii)
+ - `.ply` (ascii)
+ - `.svg` for shapes.
+
+Other image formats (e.g. `.png`) are supported through
+the Makie `plot` function.
+"""
+function FileIO.save(f::AbstractString, m::AbstractGeometry; kw...)
+	# this is a method of `FileIO.save` since we know the type of `m`
+	endswith(f, r".stl"i) && return open(f, "w") do io
+		save(format"STL_ASCII"(), io, m; kw...) end
+	endswith(f, r".ply"i) && return open(f, "w") do io
+		save(format"PLY_ASCII"(), io, m; kw...) end
+	endswith(f, r".svg"i) && return open(f, "w") do io
+		save(format"SVG"(), io, m; kw...) end
+	return Makie.save(f.filename, plot(m; kw...)) # using CairoMakie
+end
+@inline save(f::FileIO.DataFormat, io::IO, m::AbstractGeometry; kwargs...) =
+	save(f, io, fullmesh(m; kwargs...).main)
+
+# .jl file reading (experimental)««1
 
 # FIXME: replace Main by caller module?
 # FIXME: add some blob to represent function arguments
 """
-		ConstructiveGeometry.include(file::AbstractString, f::Function)
+		ConstructiveGeometry.load_jl(file::AbstractString, f::Function)
 
 Reads given `file` and returns the union of all top-level `Geometry`
 objects (except the results of assignments) found in the file.
@@ -1840,7 +1885,7 @@ S=ConstructiveGeometry.square(1)
 ConstructiveGeometry.circle(3)
 S
 
-julia> ConstructiveGeometry.include("example.jl")
+julia> ConstructiveGeometry.load_jl("example.jl")
 union() {
  circle(radius=3.0);
  square(size=[1.0, 1.0], center=false);
@@ -1848,7 +1893,7 @@ union() {
 ```
 
 """
-function include(file::AbstractString)
+function load_jl(file::AbstractString)
 	global toplevel_objs = AbstractGeometry[]
 	Base.include(x->expr_filter(obj_filter, x), Main, file)
 	return union(toplevel_objs...)
@@ -1890,45 +1935,113 @@ expr_filter(f::Function, ::Val{:toplevel}, x::Expr) =
 	Expr(:toplevel, expr_filter.(f, x.args)...)
 
 # STL ««1
-"""
-    stl(file, object; kwargs...)
-
-Outputs an STL description of `object` to the given `file` (string or IO).
-Optional `kwargs` are the same as for `set_parameters`.
-"""
-@inline stl(io::IO, m::FullMesh) = stl(io, m.main)
-function stl(io::IO, m::VolumeMesh)
-	println(io, "solid Julia_ConstructiveGeometry_jl_model")
+function save(::format"STL_ASCII", io::IO, m::VolumeMesh)#««
+	print(io, "solid Julia_ConstructiveGeometry_jl_model\n")
 	points = TriangleMeshes.vertices(m.mesh)
 	faces = TriangleMeshes.faces(m.mesh)
 	for f in faces
 		tri = (points[f[1]], points[f[2]], points[f[3]])
 		n = cross(tri[2]-tri[1], tri[3]-tri[1])
-		println(io, """
-  facet normal $(n[1]) $(n[2]) $(n[3])
-	outer loop""")
+		print(io, "facet normal ", n[1], " ", n[2], " ", n[3], "\nouter loop\n")
 	  for p in tri
-			println(io, "    vertex $(p[1]) $(p[2]) $(p[3])")
+			print(io, "    vertex ", p[1], " ", p[2], " ", p[3], "\n")
 		end
-		println(io, """
-   endloop
-	 endfacet""")
+		print(io, "\nendloop\nendfacet\n")
 	end
-	println(io, "endsolid")
-end
-@inline stl(io::IO, m::AbstractGeometry{3}; kwargs...) =
-	stl(io, fullmesh(m; kwargs...))
-@inline stl(f::AbstractString, args...; kwargs...) =
-	open(f, "w") do io stl(io, args...; kwargs...) end
-# SVG ««1
-"""
-    svg(file, object; kwargs...)
+	print(io, "endsolid\n")
+end#»»
+function load(::format"STL_BINARY", io) #««
+	skip(io, 80) # header
+	n = read(io, UInt32)
+	f = sizehint!(NTuple{3,Int}[], n)
+	v = sizehint!(SVector{3,Float64}[], 3n)
 
-Outputs an SVG description of `object` to the given `file` (string or IO).
-Optional `kwargs` are the same as for `set_parameters`.
-"""
-@inline svg(io::IO, m::FullMesh) = svg(io, m.main)
-function svg(io::IO, m::ShapeMesh)
+	i = 0
+	while !eof(io)
+		push!(io, (3i+1, 3i+2, 3i+3))
+		skip(io, 12) # normal
+		for _ in 1:3
+			push!(v, Float64.(read(io, NTuple{3,Float32})))
+		end
+		skip(io, 2)
+	end
+	return surface(v, f)
+end#»»
+function load(::format"STL_ASCII", io) #««
+	n = 0
+	f = NTuple{3,Int}[]
+	v = SVector{3,Float64}[]
+	while !eof(io)
+		l = split(lowercase(readline(io)))
+		if !isempty(l) && first(l) == "facet"
+			readline(io) # outer loop
+			push!(f, length(v) .+ (1,2,3))
+			for _ in 1:3
+				push!(v, parse.(Float64, split(lowercase(readline(io)))[2:4]))
+			end
+			readline(io); readline(io) # end loop, end facet
+		end
+	end
+	return surface(v, f)
+end#»»
+# PLY ««1
+function load(::Union{format"PLY_ASCII",format"PLY_BINARY"}, io)#««
+	nv = nf = 0
+	readline(io) # "ply"
+	format = 0
+	while !eof(io)
+		l = split(lowercase(readline(io)))
+		if l[1] == "format"
+			if l[2] == "ascii"
+				format = 1
+			elseif l[2] == "binary_little_endian"
+				format = 2
+			elseif l[2] == "binary_big_endian"
+				format = 3
+			else
+				error("bad format: $l[2]")
+			end
+		elseif l[1] == "element"
+			if l[2] == "vertex"
+				nv = parse(Int, l[3])
+			elseif l[2] == "face"
+				nf = parse(Int, l[3])
+			end
+		elseif l[1] == "end_header"
+			break
+		end
+	end
+	if format == 1
+		v = [ SVector{3}(parse.(Float64, split(lowercase(readline(io)))))
+			for _ in 1:nv ]
+		f = [ 1 .+ parse.(Int, split(lowercase(readline(io)))[2:end]) for _ in 1:nf]
+	elseif format == 2 # little-endian
+		v = [ bswap.(ntoh.(read(io, SVector{3,Float32}))) for _ in 1:nv ]
+		f = [ 1 .+ Int64.(bswap.(ntoh.(read(io, NTuple{3,Int32})))) for _ in 1:nf ]
+	else # format = 3: big-endian
+		v = [ ntoh.(read(io, SVector{3,Float32})) for _ in 1:nv ]
+		f = [ 1 .+ Int64.(ntoh.(read(io, NTuple{3,Int32}))) for _ in 1:nf ]
+	end
+	return surface(v,f)
+end#»»
+function save(::format"PLY_ASCII", io::IO, m::TriangleMeshes.TriangleMesh)#««
+	v,f = TriangleMeshes.vertices(m), TriangleMeshes.faces(m)
+	println(typeof.((v,f)))
+	print(io, "ply\nformat ascii 1.0\nelement vertex ",
+		length(v),
+	"\nproperty float32 x\nproperty float32 y\nproperty float32 z\nelement face ",
+		length(f),
+		"\nproperty list uint8 int32 vertex_indices\nend_header\n"
+	)
+	for x in v
+		print(io, x[1], " ", x[2], " ", x[3], "\n")
+	end
+	for x in f 
+		print(io, "3 ", x[1]-1, " ", x[2]-1, " ", x[3]-1, "\n")
+	end
+end#»»
+# SVG ««1
+function save(::format"SVG", io::IO, m::ShapeMesh)
 	(x,y) = paths(m)[1][1]; rect = MVector(x, x, y, y)
 	for (x,y) in Shapes.vertices(m.poly)
 		x < rect[1] && (rect[1] = x)
@@ -1940,25 +2053,22 @@ function svg(io::IO, m::ShapeMesh)
 	dx = rect[2]-rect[1]; dy = rect[4]-rect[3]
 	λ = .05
 	viewbox = (rect[1]-λ*dx, -(rect[4]+λ*dy), (1+2λ)*dx, (1+2λ)*dy)
-	println(io, """
+	print(io, """
 <svg xmlns="http://www.w3.org/2000/svg"
   viewBox="$(viewbox[1]) $(viewbox[2]) $(viewbox[3]) $(viewbox[4])">
 <!-- A shape with $(length(paths(m))) paths and $(length.(paths(m))) vertices -->
 <path fill-rule="evenodd" fill="#999" stroke-width="0"
-  d=" """)
+  d="\n""")
 	for p in paths(m)
 		print(io, "M ", p[1][1], ",", -p[1][2], " ")
 		for q in p[2:end]
 			print(io, "L ", q[1], ",", -q[2], " ")
 		end
-		println(io, "Z")
+		print(io, "Z\n")
 	end
-	println(io, """ " /> </svg>""")
+	print(io, """ " /> </svg>\n""")
 end
-@inline svg(io::IO, m::AbstractGeometry{2}; kwargs...) =
-	svg(io, fullmesh(m; kwargs...))
-@inline svg(f::AbstractString, args...; kwargs...) =
-	open(f, "w") do io svg(io, args...; kwargs...) end
+Base.show(io::IO, ::MIME"image/svg+xml", s::AbstractGeometry{2})= save_svg(io,s)
 # Viewing««1
 @inline Base.display(m::AbstractGeometry) = AbstractTrees.print_tree(m)
 
@@ -2247,9 +2357,9 @@ end
 # 	NamedAnchors{D,T}(x, Dict(k => AnchorData{D,T}(v) for (k,v) in a))
 # 
 # function scad(io::IO, x::NamedAnchors, spaces::AbstractString = "")
-# 	println(io, spaces, "// Object with named anchors:")
+# 	print(io, spaces, "// Object with named anchors:\n")
 # 	for (label, anchor) in x.anchors
-# 		println(io, spaces, "// $label: $(text(anchor))")
+# 		print(io, spaces, "// $label: $(text(anchor))\n")
 # 	end
 # 	scad(io, x.child, spaces)
 # end
@@ -2409,9 +2519,12 @@ export linear_extrude, rotate_extrude, sweep
 export color, set_parameters
 export mesh, stl, svg
 export ×
-# don't export include, of course
+export save,load
 
 # »»1
+function __init__()
+	__init__loadsave()
+end
 end #««1 module
 # »»1
 # vim: fdm=marker fmr=««,»» noet:

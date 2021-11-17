@@ -1,22 +1,12 @@
 # [Mesh I/O](@id io)
 
-## STL output
-
 ```@docs
-ConstructiveGeometry.stl
+save
 ```
 
-TODO: other file formats (`.ply`) ?
-
-## SVG output
 ```@docs
-ConstructiveGeometry.svg
+load
 ```
-
-## STL input
-
-TODO.
-
 ## OpenSCAD output
 
 ```@docs

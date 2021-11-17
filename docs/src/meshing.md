@@ -51,6 +51,7 @@ circle(2)
 ```
 
 ```@repl 0
+pwd()
 s = union(set_parameters(atol=1,symmetry=1)*circle(1),
 [2,0]+set_parameters(atol=1,symmetry=8)*circle(1),
 [4,0]+set_parameters(atol=1e-3)*circle(1));

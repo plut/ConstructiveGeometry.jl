@@ -24,7 +24,15 @@
   - [ ] allow `NamedTuple` for this
   - [ ] possible via `move(origin, s...; direction, spin)`
 # Code cleaning
- - [ ] replace `include` by something using `FileIO` e.g. `.cg.jl`?
+ - [x] remove `DataStructures` dependency
+ - [x] `import`: stl, amf, ply, dxf (-> **load**)
+   - [ ] stl and ply would follow from integrating `Meshes.jl`
+For MeshIO: stl needs
+    decompose(Point3f0, mesh)
+    decompose(GLTriangleFace, mesh)
+    decompose_normals(mesh)
+   - [ ] this still needs to somehow merge points in stl (e.g. self-union) ?
+ - [x] replace `include` by something using `FileIO` e.g. `.cg.jl`?
  - [x] https://www.usenix.org/legacy/event/usenix05/tech/freenix/full_papers/kirsch/kirsch.pdf : CSG tree normalization (only useful when using `convexity` rendering...)
  - [x] split `Offset` in two structures `OffsetShape` and `OffsetVolume`
  - [x] make transformations even lazier, so that they are evaluated only once
@@ -54,8 +62,8 @@
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] **rotation with axis**
  - [ ] propagate `atol` and `rtol` through transformation matrices (use largest eigenvalue)
- - [ ] `import`: stl, amf, ply, dxf
  - [x] equivalent of OpenSCAD's for loop?!
  - [x] `linear_extrude` with twist and scale
  - [x] `rotate_extrude` with slide (per-turn) along the axis

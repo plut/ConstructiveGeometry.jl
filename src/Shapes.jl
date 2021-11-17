@@ -14,7 +14,6 @@ using StaticArrays
 using FixedPointNumbers
 using FastClosures
 using Triangle
-using DataStructures
 import Clipper
 
 
