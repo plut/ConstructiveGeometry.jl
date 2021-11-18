@@ -825,8 +825,8 @@ counter-clockwise).
 # we dispatch on the dimension of `s` to make (Angle2d) act on z-axis:
 @inline _rotate1(θ, ::Nothing, s::AbstractGeometry{2}; kwargs...) =
 	mult_matrix(Rotations.Angle2d(float(θ)), s; kwargs...)
-@inline _rotate1(θ, axis, s::AbstractGeometry{3}; kwargs...) =
-	mult_matrix(Rotations.AngleAxis(θ, axis), s; kwargs...)
+@inline _rotate1(θ, axis::AbstractVector, s::AbstractGeometry{3}; kwargs...) =
+	mult_matrix(Rotations.AngleAxis(θ, axis...), s; kwargs...)
 @inline _rotate1(θ, ::Nothing, s::AbstractGeometry{3}; kwargs...) =
 	mult_matrix(Rotations.RotZ(float(θ)), s; kwargs...)
 """
@@ -1625,7 +1625,7 @@ and a 2d intersection will be returned.
 
 # Difference««2
 # this is a binary operator:
-CSGDiff = constructed_solid_type(:difference, A->Tuple{<:A,<:A})
+CSGDiff = constructed_solid_type(:difference, A->SVector{2,<:A})
 
 @inline mesh(g::MeshOptions, s::CSGDiff, (m1,m2,)) = csgdiff(m1, m2)
 @inline csgdiff(s1::S, s2::S) where {S<:VolumeMesh} =
@@ -1642,7 +1642,7 @@ In the latter case, the 3d object will be intersected with the horizontal
 plane via the `slice()` operation.
 """
 @inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
-	CSGDiff{D}((a,b))
+	CSGDiff{D}(SA[a,b])
 @inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
 	setdiff(a, slice(b))
 @inline setdiff(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
@@ -2026,7 +2026,6 @@ function load(::Union{format"PLY_ASCII",format"PLY_BINARY"}, io)#««
 end#»»
 function save(::format"PLY_ASCII", io::IO, m::TriangleMeshes.TriangleMesh)#««
 	v,f = TriangleMeshes.vertices(m), TriangleMeshes.faces(m)
-	println(typeof.((v,f)))
 	print(io, "ply\nformat ascii 1.0\nelement vertex ",
 		length(v),
 	"\nproperty float32 x\nproperty float32 y\nproperty float32 z\nelement face ",

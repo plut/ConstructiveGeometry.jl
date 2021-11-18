@@ -1,4 +1,4 @@
-# `ConstructiveGeometry.jl` Documentation
+# [`ConstructiveGeometry.jl`](https://github.com/plut/ConstructiveGeometry.jl) Documentation
 
 This package provides tools for describing 3d objects in Julia.
 For example, this is the Julia code used to draw the logo of this

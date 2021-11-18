@@ -27,7 +27,7 @@ The following features should be mostly working now:
  - Minkowski sum (2d and 3d);
  - offset (2d and 3d);
  - surface decimation and Loop subdivision;
- - export to SVG (for shapes) and STL (for volumes).
+ - import from STL and PLY, and export to STL, PLY and SVG.
 
 ## Global philosophy
 
@@ -66,7 +66,7 @@ however, the second, third plots etc. are much faster.
 
 Reaching feature-parity (at least for static designs)
 is one of the first goals of this package.
-The main missing parts for this are the primitives `import` and `text`.
+The main missing parts for this is the primitive `text`.
 On the other hand, this package already provides a few constructions
 absent from (base) OpenSCAD, such as 3d offsetting or surface sweep.
 
