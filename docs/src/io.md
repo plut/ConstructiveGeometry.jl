@@ -1,12 +1,36 @@
 # [Mesh I/O](@id io)
 
-```@docs
-save
+Loading and saving of files can be done through the `FileIO` functions
+`load` and `save`.
+
+## File loading
+
+Files can be loaded in this way:
+```julia
+using FileIO
+bust = load("beethoven.ply")
 ```
 
-```@docs
-load
+The following formats should be supported: `.stl` (ASCII and binary)
+`.ply` (ASCII and little-endian/big-endian binary).
+
+TODO: `.dxf`
+
+## File saving
+
+Files can be saved in this way:
+```julia
+using FileIO
+save("foo.stl", object)
 ```
+
+The following formats are supported: `.stl` (ASCII)
+and `.ply` (ASCII) for volumes;
+`.svg` for shapes.
+
+Image file formats are also supported through `CairoMakie`'s `plot`
+functions.
+
 ## OpenSCAD output
 
 ```@docs

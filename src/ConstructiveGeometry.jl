@@ -1843,6 +1843,16 @@ Reads an object in a data file. Currently supported formats are:
 	# also, open(::FileIO.File) somehow does not return an IO!? sad!
 	open(f) do x; load(F(), x.io; kw...); end
 
+function FileIO.save(f::AbstractString, m::AbstractGeometry; kw...)
+	# this is a method of `FileIO.save` since we know the type of `m`
+	endswith(f, r".stl"i) && return open(f, "w") do io
+		save(format"STL_ASCII"(), io, m; kw...) end
+	endswith(f, r".ply"i) && return open(f, "w") do io
+		save(format"PLY_ASCII"(), io, m; kw...) end
+	endswith(f, r".svg"i) && return open(f, "w") do io
+		save(format"SVG"(), io, m; kw...) end
+	return Makie.save(f, plot(m; kw...)) # using CairoMakie
+end
 """
     FileIO.save(file, object; kw...)
 
@@ -1855,16 +1865,6 @@ Currently supported file formats are:
 Other image formats (e.g. `.png`) are supported through
 the Makie `plot` function.
 """
-function FileIO.save(f::AbstractString, m::AbstractGeometry; kw...)
-	# this is a method of `FileIO.save` since we know the type of `m`
-	endswith(f, r".stl"i) && return open(f, "w") do io
-		save(format"STL_ASCII"(), io, m; kw...) end
-	endswith(f, r".ply"i) && return open(f, "w") do io
-		save(format"PLY_ASCII"(), io, m; kw...) end
-	endswith(f, r".svg"i) && return open(f, "w") do io
-		save(format"SVG"(), io, m; kw...) end
-	return Makie.save(f.filename, plot(m; kw...)) # using CairoMakie
-end
 @inline save(f::FileIO.DataFormat, io::IO, m::AbstractGeometry; kwargs...) =
 	save(f, io, fullmesh(m; kwargs...).main)
 
@@ -2519,7 +2519,6 @@ export linear_extrude, rotate_extrude, sweep
 export color, set_parameters
 export mesh, stl, svg
 export ×
-export save,load
 
 # »»1
 function __init__()

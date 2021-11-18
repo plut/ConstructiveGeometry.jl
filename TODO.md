@@ -1,4 +1,5 @@
 # Bug fixes
+ - [ ] highlighed sphere difference
  - [ ] `minkowski(volume, polygon)` seems broken
  - [x] `rotate_extrude()` with slide and polygon touching y-axis
  - [x] `linear_extrude(scale=0)` is a cone: merge points on top
@@ -58,7 +59,6 @@ For MeshIO: stl needs
  - [x] `cylinder(h, r1, r2)`
  - [x] add a parameter to circles, spheres and cylinders to mesh them as
    circumscribed
-    - [ ] (spheres still TODO)
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
@@ -99,7 +99,7 @@ For MeshIO: stl needs
  - [ ] `text`
    - [ ] use `Pango` for text and `FreeType` for fonts
  - [ ] wrapped volumes
- - [ ] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
+ - [x] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
  - [ ] `symmetrize(m, s...) = union(s..., mirror(m, s...))`
    find some easy syntax allowing also `symmetrize(m)*s`
  - [ ] 2d Minkowski difference
