@@ -103,6 +103,8 @@ For MeshIO: stl needs
  - [ ] `symmetrize(m, s...) = union(s..., mirror(m, s...))`
    find some easy syntax allowing also `symmetrize(m)*s`
  - [ ] 2d Minkowski difference
+## Misc.
+ - [ ] `plot(...; zoom=...)`
 ## Attachments
  - [ ] anchor/attachment system
     attach(square(1),

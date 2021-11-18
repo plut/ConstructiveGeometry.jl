@@ -62,8 +62,7 @@ png("circles", s); # hide
 ### Auxiliary meshes
 
 These are the meshes of any `highlight`()ed parts of the objects.
-Auxiliary meshes are only used for displaying
-(whether interactively with GLMakie, or as an image with CairoMakie);
+Auxiliary meshes are only used for displaying;
 they are ignored when exporting the object to STL or SVG format.
 
 ## [Precision: `atol` and `rtol`](@id atol_rtol)
