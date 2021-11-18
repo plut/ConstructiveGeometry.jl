@@ -133,7 +133,7 @@ end
 		_CLIPPER_ENUM.join[join], _CLIPPER_ENUM.ends[ends])
 	return [ fromc(Clipper.execute(c, ρ*_CLIPPER_ONE)) for ρ in r]
 end
-@inline simplify_paths(p::AbstractVector{<:Path{2}}; fill=:nonzero) =
+@inline simplify(p::AbstractVector{<:Path{2}}; fill=:nonzero) =
 	fromc(Clipper.simplify_polygons(toc(p), _CLIPPER_ENUM.fill[fill]))
 """
     orientation(p::Path{2})
@@ -268,7 +268,8 @@ end
 @inline coordtype(s::PolygonXor) = coordtype(typeof(s))
 @inline paths(p::PolygonXor) = p.paths
 @inline vertices(p::PolygonXor) = reduce(vcat, paths(p))
-@inline simplify(p::P) where{P<:PolygonXor} = P(simplify_paths(paths(p)))
+@inline simplify(p::P; fill=:nonzero) where{P<:PolygonXor} =
+	P(simplify(paths(p); fill))
 
 """
     loops(::PolygonXor)
@@ -410,7 +411,7 @@ function minkowski_sum(m1::PolygonXor, m2::PolygonXor)#««
 	for p1 in m1c, p2 in m2c
 		# vector of paths
 		s = fromc(Clipper.minkowski_sum(toc(p1), toc(p2)))
-		s = PolygonXor(simplify_paths(s; fill=:nonzero))
+		s = PolygonXor(simplify(s; fill=:nonzero))
 		result = (result == nothing) ? s : clip(:union, result, s);
 
 		# fill holes:

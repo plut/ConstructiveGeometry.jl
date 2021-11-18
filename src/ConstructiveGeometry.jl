@@ -328,13 +328,19 @@ end
 	ShapeMesh{T}(Shapes.PolygonXor{T}([]))
 
 """
-    polygon(path)
+    polygon(paths...; fill=:nonzero)
 
 Filled polygon delimitated by the given vertices.
 
-TODO: allow several paths and simplify crossing paths.
+Crossing paths and reversed polygon are allowed; they will be simplified
+upon polygon creation, using the fill method given as `fill`.
+Possible methods are: `:nonzero`, `:evenodd`, `:positive`.
 """
-@inline polygon(path) = ShapeMesh(Shapes.PolygonXor([path]))
+function polygon(paths::AbstractVector...; fill=:nonzero)
+	# we need a floating-point type here to be able to simplify crossings:
+	T = float(promote_type((promote_type(eltype.(p)...) for p in paths)...))
+	ShapeMesh(Shapes.simplify(Shapes.PolygonXor{T}([paths...]); fill))
+end
 """
     bezier(p0,p1,p2,p3,n)
 

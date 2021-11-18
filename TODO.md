@@ -1,4 +1,6 @@
 # Bug fixes
+ - [x] `polygon([[0,0], bezier(...)...])`: element type
+ - [x] simplify crossing polygon
  - [x] rotation with axis
  - [x] highlighed sphere difference
  - [ ] `minkowski(volume, polygon)` seems broken
