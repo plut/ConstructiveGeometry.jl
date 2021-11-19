@@ -1228,19 +1228,19 @@ The `slide` parameter is a displacement along the `z` direction.
 
 
 # Sweep (surface and volume)««1
-# SurfaceSweep ««2
-struct SurfaceSweep <: AbstractGeometry{3}
+# ShapeSweep ««2
+struct ShapeSweep <: AbstractGeometry{3}
 	trajectory::AbstractGeometry{2}
 	profile::AbstractGeometry{2}
 # 	closed::Bool
 	join::Symbol
 	miter_limit::Float64
-	@inline SurfaceSweep(path, child; join=:round, miter_limit=2.0) =
+	@inline ShapeSweep(path, child; join=:round, miter_limit=2.0) =
 		new(path, child, join, miter_limit)
 end
-@inline children(s::SurfaceSweep) = (s.trajectory, s.profile,)
+@inline children(s::ShapeSweep) = (s.trajectory, s.profile,)
 
-function mesh(g::MeshOptions, s::SurfaceSweep, (mt,mp,))
+function mesh(g::MeshOptions, s::ShapeSweep, (mt,mp,))
 	tlist = paths(mt) # trajectory paths
 	plist = paths(mp) # profile paths
 	m = nothing
@@ -1280,6 +1280,10 @@ Extrudes the given `shape` by
 
 FIXME: open-path extrusion is broken because `ClipperLib` currently
 does not support the `etOpenSingle` offset style.
+
+FIXME: this function will only work if each vertex of the profile
+describes a full trajectory (i.e. no loops in the trajectory
+are closed by the extrusion process).
 """
 function sweep end
 
@@ -1301,7 +1305,7 @@ defining an affine transform.
 	operator(_sweep, (path,), s...; kwargs...)
 
 @inline _sweep(path, s::AbstractGeometry{2}; kwargs...) =
-	SurfaceSweep(path, s)
+	ShapeSweep(path, s)
 @inline _sweep(transform, s::AbstractGeometry{3};
 	nsteps=32, maxgrid=32, isolevel=0) =
 	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)

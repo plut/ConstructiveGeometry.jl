@@ -67,6 +67,8 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] path sweep: use straight skeleton for disappearing vertices
+  - [ ] compute straight skeleton
  - [ ] volume \ surface := volume \ extrude(surface)
  - [ ] propagate `atol` and `rtol` through transformation matrices (use largest eigenvalue)
  - [x] equivalent of OpenSCAD's for loop?!

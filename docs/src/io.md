@@ -28,8 +28,8 @@ The following formats are supported: `.stl` (ASCII)
 and `.ply` (ASCII) for volumes;
 `.svg` for shapes.
 
-Image file formats are also supported through `CairoMakie`'s `plot`
-functions.
+Image file formats (`.png`, `.pdf`) are also supported;
+they are delegated to `Makie`'s `plot` function.
 
 ## OpenSCAD output
 

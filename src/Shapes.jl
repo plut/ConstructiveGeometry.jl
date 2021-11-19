@@ -659,10 +659,10 @@ Extrudes the given polygon (a path of points forming a simple loop)
 along the given path. Both arguments are provided as a
 `Vector{SVector{2}}`.
 
-Returns a `Surface` (defined by points and a triangulation).
+Returns a (points, triangulation) pair.
 """
 function path_extrude(path::Path{2}, poly::Path{2};
-		join=:round, closed=false, miter_limit=2.0, precision=0.2)
+		join=:round, closed=true, miter_limit=2.0, precision=0.2)
 	# in kwargs: ends = closed ? :fill : :butt
 	N = length(poly)
 	# offset_path is a vector of vector of paths
