@@ -1,5 +1,5 @@
 # Bug fixes
- - [ ] linear extrude of repositioned 2d mesh: use normal (this would
+ - [x] linear extrude of repositioned 2d mesh: use normal (this would
    also fix Minkowski)
  - [x] `polygon([[0,0], bezier(...)...])`: element type
  - [x] simplify crossing polygon
@@ -46,7 +46,7 @@ For MeshIO: stl needs
  - [x] check if operator associativity is still needed
  - [ ] overload `extrude()` (for paths, angles, numbers)
  - [ ] move doc examples to `WGLMakie`
- - [ ] remove triangulation method from `ConvexHull.jl`
+ - [ ] remove `ConvexHull.jl` dependency (use method from `igl` instead?)
  - [ ] `linear_extrude` / `prism` ?
  - [ ] `rotate_extrude` / `revolution` ?
  - [ ] replace ad-hoc `plot` methods by correct `Makie` interface

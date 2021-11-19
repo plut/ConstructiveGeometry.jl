@@ -344,7 +344,7 @@ Possible methods are: `:nonzero`, `:evenodd`, `:positive`.
 """
 function polygon(paths::AbstractVector...; fill=:nonzero)
 	# we need a floating-point type here to be able to simplify crossings:
-	T = float(promote_type((promote_type(eltype.(p)...) for p in paths)...))
+	T = float(promote_type((promote_type(Int,eltype.(p)...) for p in paths)...))
 	ShapeMesh(Shapes.simplify(Shapes.PolygonXor{T}([paths...]); fill))
 end
 """
@@ -1275,8 +1275,7 @@ end
     sweep(path, shape...)
 
 Extrudes the given `shape` by
-1) rotating perpendicular to the path (rotating the unit *y*-vector
-to the direction *z*), and 
+1) rotating perpendicular to the path (rotating the unit *y*-vector to the direction *z*), and 
 2) sweeping it along the `path`, with the origin on the path.
 
 FIXME: open-path extrusion is broken because `ClipperLib` currently
