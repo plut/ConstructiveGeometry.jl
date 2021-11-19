@@ -43,10 +43,16 @@ Base.getindex(c::Consecutives, i::Integer) =
 	(c.parent[i], c.parent[mod1(i+1, length(c.parent))])
 Base.size(c::Consecutives) = size(c.parent)
 
+# Geometry ««2
 @inline one_half(x::Real) = x/2
 @inline norm²(p) = sum(p .* p)
 # round to a multiple of `m`:
 @inline round(m::Integer, x::Integer, ::typeof(RoundUp)) = x + m - mod1(x, m)
+
+@inline function unitnormal(a::StaticVector{3}, b::StaticVector{3})
+	v = cross(a,b)
+	return v/norm(v)
+end
 
 # Angle types««1
 # All angles are internally stored as degrees: the user might (often)
@@ -563,7 +569,6 @@ function surface(vertices, faces)
 		fill(_DEFAULT_COLOR, size(triangles))))
 end
 
-
 # Cube««1
 struct Cube{T} <: AbstractGeometry{3}
 	size::SVector{3,T}
@@ -956,8 +961,7 @@ function tube_mesh(loops, slices)#««
 	end
 	return faces
 end#»»
-function prism_mesh(g::MeshOptions, h0, h1, twist, scale, m)#««
-	@assert m isa ShapeMesh
+function prism_mesh(g::MeshOptions, h0, h1, twist, scale, m::ShapeMesh)#««
 	pts2 = Shapes.vertices(m.poly)
 	tri = Shapes.triangulate(m.poly)
 	peri = Shapes.loops(m.poly)
@@ -988,7 +992,11 @@ function prism_mesh(g::MeshOptions, h0, h1, twist, scale, m)#««
 		# close top face
 		faces = [faces; [f .+ n*N for f in tri ]; ]
 	end
-	return VolumeMesh(g, pts3, faces)
+	# reposition according to 3d position of child mesh
+	a = let a=m.position.a, n=unitnormal(a[:,1], a[:,2])
+		SA[a[1,1] a[1,2] n[1]; a[2,1] a[2,2] n[2]; a[3,1] a[3,2] n[3]]
+	end
+	return apply(AffineMap(a, m.position.b), VolumeMesh(g, pts3, faces))
 end#»»
 # Prism ««2
 struct Prism{T} <: AbstractTransform{3}
@@ -1763,7 +1771,8 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline minkowski(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	MinkowskiSum{D,D}(a, b)
 @inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
-	MinkowskiSum{3,2}(a,b)
+	minkowski(a,linear_extrude(0)*b)
+# 	MinkowskiSum{3,2}(a,b)
 @inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{3})=minkowski(b,a)
 
 @mkunit minkowski

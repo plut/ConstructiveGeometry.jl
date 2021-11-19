@@ -1,9 +1,11 @@
 # Bug fixes
+ - [ ] linear extrude of repositioned 2d mesh: use normal (this would
+   also fix Minkowski)
  - [x] `polygon([[0,0], bezier(...)...])`: element type
  - [x] simplify crossing polygon
  - [x] rotation with axis
  - [x] highlighed sphere difference
- - [ ] `minkowski(volume, polygon)` seems broken
+ - [x] `minkowski(volume, polygon)` seems broken
  - [x] `rotate_extrude()` with slide and polygon touching y-axis
  - [x] `linear_extrude(scale=0)` is a cone: merge points on top
  - [x] fix problem of triangulating tangent polygons: separately
@@ -65,6 +67,7 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] volume \ surface := volume \ extrude(surface)
  - [ ] propagate `atol` and `rtol` through transformation matrices (use largest eigenvalue)
  - [x] equivalent of OpenSCAD's for loop?!
  - [x] `linear_extrude` with twist and scale
