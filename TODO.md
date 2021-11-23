@@ -67,7 +67,10 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
- - [ ] path sweep: use straight skeleton for disappearing vertices
+ - [ ] test if point is in shape and random sample of shapes
+ - [ ] add some relational definitions
+ - [ ] path sweep: use straight skeleton/medial axis for disappearing vertices
+  - [ ] compute medial axis
   - [ ] compute straight skeleton
  - [ ] volume \ surface := volume \ extrude(surface)
  - [ ] propagate `atol` and `rtol` through transformation matrices (use largest eigenvalue)
@@ -82,7 +85,7 @@ For MeshIO: stl needs
  - [ ] `TriangleMeshes`: have a way to detect non-pwm meshes *and explain
    why*
    - [ ] fix meshes on stl import: *a bit harder, IGL does not have a function for this*
- - [ ] also in 2d, regularize polygons (e.g. one backwards loop)
+ - [x] also in 2d, regularize polygons (e.g. one backwards loop)
  - [x] triangulate faces of `Surface`
  - [x] allow self-union (for fixing meshes)
  - [x] Minkowski sum in mixed dimensions
@@ -103,9 +106,10 @@ For MeshIO: stl needs
  - [x] plane intersection: `slice`
  - [x] projection
  - [ ] path wrapping
- - [ ] `text`
-   - [ ] use `Pango` for text and `FreeType` for fonts
  - [ ] wrapped volumes
+ - [ ] `text`
+   - OpenSCAD: `src/FreetypeRenderer.cc`, `::render` function
+   - [ ] use `Pango` for text and `FreeType` for fonts
  - [x] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
  - [ ] `symmetrize(m, s...) = union(s..., mirror(m, s...))`
    find some easy syntax allowing also `symmetrize(m)*s`
