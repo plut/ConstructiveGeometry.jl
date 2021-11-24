@@ -11,6 +11,8 @@ import Base: Int
 # Tools ««1
 # Geometry ««2
 
+@inline norm²(v) = v[1]^2+v[2]^2
+@inline distance²(a,b) = norm²(a-b)
 """
     iscloser(a,b,c)
 
@@ -31,7 +33,7 @@ Returns true iff c is to the left of ab.
 @inline isincircle(a,b,c,x) = isincircle(a-x, b-x, c-x)
 function isincircle(a,b,c) # is point zero in this circle (assumed oriented)
 	@assert !isleft(a,c,b) "incircle: triangle ($a,$b,$c) has wrong orientation"
-	m = SA[a[1] a[2] a[1]^2+a[2]^2; b[1] b[2] b[1]^2+b[2]^2; c[1] c[2] c[1]^2+c[2]^2]
+	m = SA[a[1] a[2] norm²(a); b[1] b[2] norm²(b); c[1] c[2] norm²(c)]
 	return det(m) > 0
 end
 
@@ -274,7 +276,7 @@ end
 # Site location functions ««2
 
 """
-    locate(cornertable, points, point)
+    locate_site(cornertable, points, point)
 
 In a Voronoi diagram,
 finds the index of the site closest to the given point.
@@ -360,6 +362,13 @@ function triangulate(points)
 	resize!(points, N)
 	# »»
 	return t
+end
+
+function seednode(t::CornerTable, points, point)
+	s0 = locate_site(t, points, point)
+	s1 = argmax(distance²(points[s0],points[s])-distance²(point,points[s])
+		for s in neighbours(t, s0))
+	return s1
 end
 
 function flip_rec(t::CornerTable, points, c::Corner)
