@@ -594,7 +594,7 @@ function triangulate(points; trim=true)#««
 	push!(points, [0,-3m], [3m,2m], [-3m,2m])
   #»»
 	# incrementally add all points ««
-	for i in Random.randperm(npoints)
+	for i in 1:npoints # Random.randperm(npoints)
 		tree = badnodes(t, points, i)
 		star!(t, Cell(i), tree)
 	end
@@ -636,6 +636,10 @@ end
 @inline VoronoiDiagram(t::CornerTable{J}, p::AbstractVector{P},
 	s::AbstractVector, pos::AbstractVector, r::AbstractVector{T}) where{J,P,T} =
 	VoronoiDiagram{J,P,T}(t, p, NTuple{2,J}.(s), P.(pos), r)
+@inline VoronoiDiagram(t::CornerTable{J}, p::AbstractVector{P},
+	s::AbstractVector) where{J,P} =
+	VoronoiDiagram{J,P,eltype(P)}(t, p, NTuple{2,J}.(s),
+	Vector{P}(undef, nnodes(t)), Vector{eltype(P)}(undef, nnodes(t)))
 @inline triangulation(v::VoronoiDiagram) = v.triangulation
 @inline apex(v::VoronoiDiagram, e::Corner) = apex(triangulation(v), e)
 @inline opposite(v::VoronoiDiagram, e::Corner) = opposite(triangulation(v), e)
@@ -755,72 +759,116 @@ function equidistant_pxs(v::VoronoiDiagram, i1, j1, i2, j2, ε)
 end
 
 # Cell location functions ««2
-function findnode(v::VoronoiDiagram, a, b)
+function findrootnode(v::VoronoiDiagram, i,j)
 	# here the table is assumed built (for points)
 	# so we can search in the nodes around the cell for point a
 	# which one is closest to segment ab
 	t = triangulation(v)
-	pa, pb = point(v,a), point(v,b)
-	e = argmin(segdistance²(pa, pb, geometricnode(v, node(e)))
-		for e in star(t, a))
-	return node(e)
+	a, b = point(v,i), point(v,j)
+	emin, dmin = nothing, nothing
+	for e in star(t,i)
+		influences(v,i,j,node(e)) || continue
+		d = segdistance²(a,b,geometricnode(v, node(e)))
+		println("  influenced node $e->$(node(e)): geometricnode $(geometricnode(v,node(e))) d=$d  [$emin / $dmin]")
+		(emin == nothing || d < dmin) && println("  changing emin,dmin to $e,$d")
+		(emin == nothing || d < dmin) && ((emin, dmin) = (e, d))
+		println("  now emin,dmin = $emin,$dmin")
+	end
+	@assert emin ≠ nothing
+	println("returning $(node(emin))")
+	return node(emin)
+# # 	println("star($i) = $(collect(star(v,i)))")
+# 	elist = [e for e in star(t,i) if influences(v,i,j,node(e))]
+# 	println("  influenced = $elist")
+# 	e = argmin(segdistance²(a,b, geometricnode(v, node(e))) for e in elist)
+# # 
+# # 	for e in star(t,i)
+# # 		q = node(e)
+# # 		g = geometricnode(v, q)
+# # 		println("  $e ($q): g=$g, infl=$(influences(v,i,j,q)), segdistance²($a,$b,$g) = $(segdistance²(a,b,g))")
+# # 	end
+# # 	e = argmin(segdistance²(a, b, geometricnode(v, node(e)))
+# # 		for e in star(t, i) if influences(v,i,j,node(e)))
+# 	println("keeping $e ($(node(e)))")
+# 	return node(e)
 end
 
 function meetscircle(v::VoronoiDiagram, q, i, j)
 	g, r = geometricnode(v, q), noderadius(v, q)
-	a, b = point(v, Cell(i)), point(v, Cell(j))
+	a, b = point(v, i), point(v, j)
 	ab2 = norm²(b-a)
 	d = dot(g-a,b-a)
 	return segdistance²(a, b, g) < r
 end
+function influences(v::VoronoiDiagram, i, j, q)
+	a,b,g = point(v, i), point(v,j), geometricnode(v,q)
+	ab, ag = b-a, g-a
+	println("  influence($i,$j,$q): a=$a, b=$b, g=$g; ab,ag = $ab, $ag; dot=$(dot(ab,ag))")
+	return 0 < dot(ab,ag) < dot(ab,ab)
+end
 
 # Computing Voronoi diagram ««1
 # Tree traversal ««2
+"""
+    badnodes(v,i,j)
+
+Returns a list of those nodes which are closer to segment (i,j)
+than to their defining sites.
+
+TODO: return a closed loop of edges which are fully closer to (i,j)
+than to their defining sites, i.e. the boundary of the new cell for (i,j).
+"""
 function badnodes(v::VoronoiDiagram{J}, i, j) where{J} # segment case
 	t = triangulation(v)
-	stack = [findnode(v, Cell(i),Cell(j))]
-	tree = empty(stack)
+	rootnode = findrootnode(v,i,j)
+	println("\e[31m computing badnodes($i, $j)\e[m: rootnode=$rootnode")
+	stack = [(e, Cell{J}(0)) for e in corners(rootnode)]
+	tree = [rootnode]
 	loops = Cell{J}[]
+	n = 0
 	while !isempty(stack)
-		q = pop!(stack)
+		n+=1
+		@assert n ≤ 50
+		(e, s) = pop!(stack)
+		o = opposite(v, e)
+		q = node(o)
+		println("\e[1m$e = ($(node(e))->$q) around $s\e[m\n   (stack $stack, tree $tree)")
 		isone(Int(q)) && continue # this is the reversed triangle
-		@assert q ∉ tree # loops should have already been prevented
-		meetscircle(v, q, i, j) || continue
+		if q ∈ tree # one loop
+			println("\e[31;1m at node $q: loop found around $s\e[m")
+			Int(s) ≠ 0 && push!(loops, s)
+			continue
+		end
+		println("   node($q): infl=$(influences(v,i,j,q)), meetscircle=$(meetscircle(v,q,i,j))")
+		(influences(v,i,j,q) && meetscircle(v, q, i, j)) || continue
 		push!(tree, q)
-		# continue walking the tree, avoiding loops««
-		a = adjnodes(t,q)
-# 		println("    this segments crosses the node circle, continuing... (adj=$a)")
-		if a[1] in tree
-			if a[2] in tree
-				@assert a[3] ∉ tree
-				push!(stack, a[1]); push!(loops, cell(t, q, 1))
-			else
-				if a[3] in tree push!(stack, a[2]); push!(loops, cell(t, q, 2))
-				else push!(stack, a[2], a[3])
+		push!(stack, (next(o), right(t, e)))
+		push!(stack, (prev(o), left(t,e)))
+	end
+	# break loops in tree by identifying double edges
+# 	@assert isempty(loops)
+	doubleedges = Corner{J}[]
+	for s in loops
+		if s ∈ (i,j) # is this one of the ends of the segment we are inserting?
+			u = point(v,j) - point(v,i); (s == j) && (u = -u)
+			p = point(v,s)
+			elist = collect(star(t,q))
+			qlist = [ right(t, e) for e in elist ]
+			k = det2(u, geometricnode(v, last(qlist))-p)
+			for (e, q) in zip(elist, qlist)
+				# q == right(e)
+				k1 = k
+				k = det2(u, geometricnode(v, q))
+				if (k1 > 0) && (k < 0)
+					push!(doubleedges, prev(e))
+					break
 				end
 			end
 		else
-			if a[2] in tree
-				if a[3] in tree push!(stack, a[1]); push!(loops, cell(t, q, 1))
-				else push!(stack, a[3], a[1])
-				end
-			else
-				if a[3] in tree push!(stack, a[1], a[2])
-				else push!(stack, a[1], a[2], a[3])
-				end
-			end
-		end#»»
-	end
-	# break loops in tree by identifying double edges
-	@assert isempty(loops)
-	for q in loops
-		# find an edge in which we are sure that *some point* is closer to
-		# its defining sites (i.e. left(e), right(e)) than to the site we are
-		# inserting
-		for e in star(t, q)
+			error("not implemented")
 		end
 	end
-	return tree # the tree is usually small, no need to sort it
+	return (tree, doubleedges) # the tree is usually small, no need to sort it
 end
 # end#»»
 function star!(v::VoronoiDiagram, s, tree)#««
@@ -838,26 +886,24 @@ function voronoi(points, segments = [])#««
 	npoints = length(points)
 	nsegments = length(segments)
 	ntotal = npoints + nsegments
+	points = 1. *points
 	t = triangulate(points; trim=false)
 	ncells!(t, ncells(t) + nsegments)
-	println(collect(alltriangles(t)))
-	# compute all circumcenters ««
-	# (not doing this during pointwise triangulation saves a bit of time)
-	geomnodes = [ circumcenter(points[Int(cell(t,q,1))],
-		points[Int(cell(t,q,2))], points[Int(cell(t,q,3))]) for q in allnodes(t) ]
-	noderadius = [ distance²(g, points[Int(apex(t, Corner(3i)))])
-		for (i,g) in pairs(geomnodes) ]
-	v = VoronoiDiagram(t, points, segments, geomnodes, noderadius)
-	#»»
+	println("\e[32;1mtriangulation is ", collect(alltriangles(t)), "\e[m")
+	v = VoronoiDiagram(t, points, segments)
+	for q in allnodes(t); geometricnode!(v, q); end
+
 	# incrementally add all segments ««
 	nsegments = length(segments)
-	for i in Random.randperm(nsegments)
-		(a,b) = segments[i]
-		tree = badnodes(v, a, b)
+	for i in 1:nsegments # Random.randperm(nsegments)
+		print("\e[33m"); display(collect(pairs(collect(allnodes(v))))); println("\e[m")
+		s = Cell(npoints+3+i); (a,b) = cellsegment(v, s)
+		tree, doubleedges = badnodes(v, a, b)
 		println("  tree for cell $i = ($a,$b) is $tree")
-		star!(v, Cell(npoints+3+i), tree)
+		star!(v, s, tree)
 	end
 	#»»
+	#
 	# remove all superfluous nodes & cells ««
 	# the nodes are sorted this way:
 	# - inner nodes
@@ -900,5 +946,5 @@ end
 using StaticArrays
 V = Voronoi
 # t=V.triangulate([[-10,0],[10,0],[0,10.]])
-# v=V.voronoi([[-10,0],[10,0],[0,10.]],[(1,3),(3,2),(2,1)])
+v=V.voronoi([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(3,4),(5,6)])
 # collect(V.allnodes(v))

@@ -69,6 +69,7 @@ struct AffineMap{A,B}
 end
 
 struct ZeroVector end # additive pendant of UniformScaling
++(a::ZeroVector, ::ZeroVector) = a
 +(a, ::ZeroVector) = a
 +(::ZeroVector, a) = a
 -(z::ZeroVector) = z
@@ -115,16 +116,11 @@ struct Reflection{T,V<:AbstractVector} <: AbstractMatrix{T}
 	axis::V # v
 	proj::Transpose{T,V} # v/‖v‖²
 end
-StaticArrays.similar_type(::Vector, T::Type) = Vector{T} # piracy!
+# StaticArrays.similar_type(::Vector, T::Type) = Vector{T} # piracy!
 @inline Reflection(v::AbstractVector) =
 	Reflection{typeof(v[1]/1)}(v)
 @inline Reflection{T}(v::AbstractVector) where{T} =
-	Reflection{T, similar_type(v, T)}(v, transpose(v*inv(dot(v,v))))
-# normed case:
-@inline Reflection(k::Val{:normed}, v::AbstractVector) =
-	Reflection{eltype(v)}(k, v)
-@inline Reflection{T}(::Val{:normed}, v::AbstractVector) where{T} =
-	Reflection{T, typeof(v)}(v, transpose(v))
+	Reflection{T, SVector{length(v),T}}(v, transpose(v*inv(dot(v,v))))
 
 # allow this to behave as a StaticMatrix when needed:
 @inline Size(::Type{Reflection{T,V}}) where{T,V} = (Size(V,1), Size(V,1))
@@ -773,7 +769,7 @@ Represents the affine operation `x -> a*x + b`.
     (3 × 3) multiplications, followed by a single (3 × n).
 """
 @inline mult_matrix(a, s...; center=ZeroVector()) =
-	operator(affine_transform, (AffineMap(a, a*center-center),), s...)
+	operator(affine_transform, (AffineMap(a, center-a*center),), s...)
 # translate ««2
 """
     translate(v, s...)
