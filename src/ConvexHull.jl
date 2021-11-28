@@ -159,8 +159,10 @@ end
 Returns the convex hull (as a vector of 2d points, ordered in direct
 order).
 """
-@inline convex_hull(points::AbstractVector{<:StaticVector{2}}) =
-	points[convex_hull_list(points)]
+function convex_hull(points::AbstractVector{<:StaticVector{2}})
+	upoints = unique(sort(points))
+	return upoints[convex_hull_list(upoints)]
+end
 
 # """
 #     convex_hull(x::Geometry{3}...)

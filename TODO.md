@@ -68,6 +68,7 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] ellipse
  - [ ] test if point is in shape and random sample of shapes
  - [ ] add some relational definitions
  - [ ] path sweep: use straight skeleton/medial axis for disappearing vertices
