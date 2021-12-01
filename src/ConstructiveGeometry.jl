@@ -776,19 +776,23 @@ Represents the affine operation `x -> a*x + b`.
     translate(v) * s
     v + s
 
-Translates solids `s...` by vector `v`.
+Translates object(s) `s...` by vector `v`.
 """
 @inline translate(v,s...)= operator(affine_transform,(AffineMap(I,v),), s...)
 """
     raise(z, s...)
 
-Equivalent to `translate([0,0,z], s...)`.
+For volumes: equivalent to `translate([0,0,z], s...)`.
+For shapes: equivalent to `translate([0,z], s...)`.
 """
-@inline raise(z, x...) = translate(SA[0,0,z], x...)
+@inline raise(z, s...) = operator(_raise, (z,), s...)
+@inline _raise(z, s::AbstractGeometry{2}) = translate(SA[0,z], s)
+@inline _raise(z, s::AbstractGeometry{3}) = translate(SA[0,0,z], s)
 """
     lower(z, s...)
 
-Equivalent to `translate([0,0,-z], s...)`.
+For volumes: equivalent to `translate([0,0,-z], s...)`.
+For shapes: equivalent to `translate([0,z], s...)`.
 """
 @inline lower(z, x...) = raise(-z, x...)
 
@@ -1654,6 +1658,8 @@ The following dimensions are allowed: (2,2), (3,3), and (2,3).
 In the latter case, the 3d object will be intersected with the horizontal
 plane via the `slice()` operation.
 """
+@inline setdiff(a::AbstractGeometry, b::AbstractGeometry,
+	c::AbstractGeometry...) = setdiff(setdiff(a,b), c...)
 @inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGDiff{D}(SA[a,b])
 @inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =

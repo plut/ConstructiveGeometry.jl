@@ -1,5 +1,8 @@
 # Bug fixes
- - [ ] hull of 2d points: hull([1,1], ...)
+ - [ ] `raise` in 2d
+ - [ ] volume - volume - volume
+ - [x] implement *n*-ary `setdiff`
+ - [x] hull of 2d points: hull([1,1], ...)
  - [x] linear extrude of repositioned 2d mesh: use normal (this would
    also fix Minkowski)
  - [x] `polygon([[0,0], bezier(...)...])`: element type
