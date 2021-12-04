@@ -1,5 +1,5 @@
 # Bug fixes
- - [ ] `raise` in 2d
+ - [x] `raise` in 2d
  - [ ] volume - volume - volume
  - [x] implement *n*-ary `setdiff`
  - [x] hull of 2d points: hull([1,1], ...)
@@ -71,9 +71,10 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] path type: e.g. take a rectangular path, round corners, then create the shape defined by 1-directional offset
  - [ ] ellipse
  - [ ] test if point is in shape and random sample of shapes
- - [ ] add some relational definitions
+ - [ ] add some relational definitions: mutual tangent, intersection, etc.
  - [ ] path sweep: use straight skeleton/medial axis for disappearing vertices
   - [ ] compute medial axis
   - [ ] compute straight skeleton

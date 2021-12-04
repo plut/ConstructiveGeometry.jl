@@ -1,0 +1,177 @@
+\documentclass{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{unicode,math}
+\usepackage[margin=30mm]{geometry}
+
+
+\begin{document}
+\title{Polygonal approximation of a parabolic arc}
+
+
+\section{Repartition of points}
+\begin{prop}\label{prop:points}
+Let~$𝒫$ be the parabola with equation $y = f(x) = a/2 + x²/2a$.
+Let~$H$ be the hypergeometric function
+$H(u) = {}_2F_1(1/4,1/2;\;3/2\;-u^2)$.
+
+Choose real numbers~$s_1$, $s_2$ and an integer~$n ≥ 1$
+and define, for~$i = 0, …, n$,
+$x_i = a H^{-1}((1-i/n) s_1 + (i/n) s_2)$.
+
+Then, for $n$ large enough,
+the polygonal line with vertices~$A_i = (x_i, f(x_i))$
+lies within a Minkowski distance~$δ = \frac{a}{8n^2}
+(s_2-s_1)^2+O(n^{-4})$ of the parabola~$𝒫$.
+\end{prop}
+
+\begin{proof}
+It is enough to prove this for an individual segment of the polygonal line,
+for example the segment $(A_0, A_1)$.
+For~$x_0 ≤ x ≤ x_1$, the distance between a point~$(x, f(x)) ∈ 𝒫$
+and the segment~$(A_0, A_1)$ is given by the function
+% 	the maximum on the interval~$[x_0,x_1]$ of the function
+\begin{equation}\begin{split}
+g(x)
+%  &= \frac{(x_0+x_1)/(2a) x - f(x) + x_0 x_1/(2a) + a/2}{√{1+(x_0+x_1/2a)^2}}\\
+ &= \frac{(x_0+x_1) x - 2a f(x) + x_0 x_1 + a^2}{√{(2a)^2+(x_0+x_1)^2}}\\
+%  &= \frac{(x_0+x_1) x - a^2 - x^2 + x_0 x_1 + a^2}{√{(2a)^2+(x_0+x_1)^2}}\\
+ &= \frac{(x-x_0)(x_1-x)}{√{(2a)^2+(x_0+x_1)^2}}.\\
+\end{split}\end{equation}
+The maximum value~$δ_0$ of~$g$ on the interval~$[x_0,x_1]$
+is reached for~$x = (x_0+x_1)/2$
+and amounts to $δ_0 = \frac{(x_1-x_0)^2}{4√{(2a)^2+(x_0+x_1)^2}}$.
+
+Let~$G = H^{-1}$ and~$x(t) = a G((1-t) s_1 + t s_2)$.
+Then for all~$i = 0,…, n$, $x_i = x(i/n)$
+and $x_{i+1} - x_i = x'(i/n)/n + O(1/n^2)$.
+Therefore
+\begin{equation}
+δ_i = \frac{x'(i/n)^2}{8n^2 √{a^2 + x_i^2}} + O(1/n^4).
+\end{equation}
+
+Since $H'(u)^4 = 1/(1+u^2)$,
+the inverse~$G$ of~$H$ satisfies the differential equation
+$(G')^4 = 1 + G^2$,
+and hence $x'(t)^2 = a (s_2 - s_1)^2 √{a^2 + x(t)^2}$.
+Accordingly, one finds
+\begin{equation}
+δ_i = \frac{a}{8n^2} (s_2-s_1)^2 + O(1/n^4).
+\end{equation}
+Since this is true for all~$i = 0,…,n-1$, the proposition follows.
+\end{proof}
+
+
+\begin{prop}\label{prop:approx}
+The following algorithm approximates the parabola~$𝒫$
+on the interval~$[X_1,X_2]$ within a distance~$≤ δ + O(δ^2)$.
+\begin{enumerate}
+\item For~$i = 1,2$, define $s_i = H(X_i/a)$.
+\item Let~$n ≥ \abs{s_2-s_1} √{a/(8δ)}$.
+\item Define the points~$(x_i=a H^{-1}(s_1 + \frac{i}{n}(s_2-s_1), f(x_i))$
+as in Prop.~\ref{prop:points}.
+\end{enumerate}
+\end{prop}
+
+% \section{Evaluation of the hypergeometric function~$H$ and its inverse}
+% 
+% The algorithm given in Prop.~\ref{prop:approx}
+% requires computing two values of the hypergeometric function
+% $H(u) = {}_2F_1(1/4,1/2;\;3/2\;-u^2)$
+% and $n-1$~values of its inverse function~$H^{-1}$.
+% 
+% At infinity one finds
+% \begin{equation}
+% H(x) = √{π} \frac{Γ(-1/4)}{2Γ(1/4)} + √{x} \pa{2 + \frac{1}{6} x^{-2}
+%  + O(x^{-4})}
+% %  + \frac{1}{6} x^{-3/2} + O(x)^{-7/2}.
+% % H(x) = 2√{x} \;+\; √{π} \frac{Γ(-1/4)}{2Γ(1/4)}
+% %  + \frac{1}{6} x^{-3/2} + O(x)^{-7/2}.
+% \end{equation}
+% 
+% Let $a$ be a point in the plane, $L$ a line,
+% $P$ be the parabola with focus~$a$ and directrix~$L$,
+% and $g_1, g_2$ be two distinct points on~$P$.
+% 
+% Let~$h = d(a, L)$.
+% In the coordinate system~$(x,y)$ where~$L$ is the line $[y=0]$,
+% and $a = (0,h)$, the equation of~$P$ is
+% $y = f(x) = h/2 + x^2/(2h)$. Let~$x_1, x_2$ be the abscissae of $g_1, g_2$.
+% 
+% Let~$ℓ(g_1, g_2)$ be the arc length from $g_1$ to~$g_2$ on the parabola;
+% then
+% \begin{equation}
+% \begin{split}
+% ℓ(g_1, g_2) &= ∫_{x_1}^{x_2} √{1+(x/h)^2}\, dx \\
+%  &= \frac 12 \cro{x √{1+(x/h)^2} + h\, \mathrm{arcsh}(x/h)}_{x=x_1}^{x_2}
+% \end{split}
+% \end{equation}
+% 
+% We want to interpolate the parabola arc~$(g_1, g_2)$ as a polygon
+% with $(n+1)$ vertices~$(v_0 = g_1, …, v_n = g_2)$,
+% such that the Minkowski distance between the polygon and the parabola
+% is smaller than some value~$ε$.
+% 
+% Let~$v_0 = g_1$ and $v_1 = (x_1, h/2+x_1²/(2h))$;
+% write~$m = (x_0 + x_1)/2$ and~$p = x_0 x_1$.
+% The line $L_{01} = (v_0, v_1)$ has the equation
+% $-m/h x + y + p/(2h) - h/2 = 0$.
+% Let~$x(t) = (1-t) x_0 + t x_1$ and $(x(t), f(x(t)))$ be a parametrization
+% of the parabola arc $(v_0, v_1)$.
+% Then $d(x(t), L_{01})$ maximal for~$t = 1/2$
+% with the value~$δ = \frac{(x_1 -x_0)^2}{8 √{h^2+m^2}}$.
+% 
+% Assume that $x_i = x(i/n)$ for~$i = 0, …, n$.
+% Then the error for the parabola arc~$(v_i, v_{i+1})$ is
+% \begin{equation}
+% \begin{split}
+% δ(i, i+1)
+% &≈ \frac{(x'(i/n)/n)^2}{8 √{h^2 + x(i/n)^2}} \\
+% \end{split}
+% \end{equation}
+% This is constant (for $n → ∞$)
+% if $x$ satisfies the ordinary differential equation
+% % $(x')^2/n^2 = 8 δ √{h^2 + x^2}$
+% $(x')^4 = (8 n^2 δ)^2 (h^2 + x^2)$.
+% Writing~$x = u h$ and~$s = n √{8 δ/h} t$,
+% the equation becomes the elliptic differential equation
+% $(u')^4 = 1 + u^2$,
+% or $ds = du/√[4]{1+u^2}$.
+% 
+% Let~$u$ be a solution of this differential equation
+% and let~$s_1, s_2$ be such that $u(s_1) = x(g_1)/h$,
+% $u(s_2) = x(g_2)/h$.
+% Define $x(t) = h u((1-t) s_1 + t s_2)$:
+% then the error for the points~$(x(i/n); i = 0, …, n)$
+% is approximated by$δ = h/(8 n^2)$.
+% 
+% Accordingly, to obtain a global error no larger than some set value~$δ$,
+% one may pick~$n ≥ √{h/(8δ)}$ and define~$x_i$ accordingly.
+% 
+% The differential equation $(du/ds)^4 = 1+u^2$
+% may also be written as $ds = du/(1+u^2)^{1/4}$,
+% which has as a solution
+% the hypergeometric function~$s = H(u) = {}_2F_1(1/4,1/2;3/2;-u^2)$.
+% 
+% % $du^4/ds^4 = 1 + u^2$
+% % $du^4/(1+u^2) = ds^4$
+% % $ds = du/(1+u^2)^{1/4}$
+% % 
+% The final algorithm for approximating the parabola
+% within a distance~$≤ δ$ is as follows.
+% \begin{enumerate}
+% \item Let~$H$ be the hypergeometric function
+% $H(u) = {}_2F_1(1/4,1/2;\;3/2\;-u^2)$.
+% \item Define $s_i = H(x(g_i)/h)$ for~$i = 1,2$.
+% \item For any~$t ∈ [0,1]$, define $x(t) = h H^{-1}((1-t) s_1 + t s_2)$.
+% \item Let~$n ≥ √{h/(8δ)}$
+% and define~$x_i = x(i/n)$ for~$i = 0, …, n$.
+% % \item Define $u$ as the solution to the differential equation
+% % $u'^4 = 1 + u^2$ with initial value $u(
+% \end{enumerate}
+% 
+% 
+% % Assuming $x1 - x0 = ε$ is small,
+% % one finds $ℓ(x_0, x_1) ≈ ε √{1+(m/h)^2}$, so that in turn
+% % $δ ≈ \frac{ε^3}{8h ℓ(x_0,x_1)}.
+\end{document}
