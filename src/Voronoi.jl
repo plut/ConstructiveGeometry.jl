@@ -113,7 +113,7 @@ end
 	# imagine our segment as an x-axis; both points are on the same side,
 	# we reorient the segment so they both have y > 0
 	pqa = det2(p,q,a)
-	@assert pqa ≠ 0
+	@assert !iszero(pqa)
 	(pqa < 0) && ((p,q) = (q,p); pqa = -pqa)
 	pqb = det2(p,q,b)
 	@assert pqb > 0
@@ -168,7 +168,7 @@ function equidistant_pss(a, p, q, r, s)
 		pqa < 0 && ((p,q, pqa) = (q,p, -pqa)) # ensure orientation
 		pq = q-p
 		pq2 = norm²(pq)
-# 	pqr, pqs = det2(p,q,r), det2(p,q,s)
+	pqr, pqs = det2(p,q,r), det2(p,q,s)
 # 	# `a` is not allowed to be on any of the two lines pq, rs
 # 	if pqr == pqs # special case: parallel lines
 		# let v = quarterturn(q-p)
@@ -204,6 +204,22 @@ function equidistant_pss(a, p, q, r, s)
 	t = (B + ε*√(Δ))/A
 	z = c+t*u
 	return c + t*u
+end
+
+function equidistant_sss_parallel(a, u, b, p, pq)
+	# returns the point equidistant from lines (a, a+u), (b,b+u), (p, pq)
+	# (in this order)
+	# parametrized as z = c+tu (with c = (a+b)/2)
+	c, ab = (a+b)/2, b-a
+	# d²(z, (a,a+u)) = ab²/4
+	# so (<pqc> + t <pqu>)² = |ab|⋅|pq|/2, or t=-<pqc>±|ab|.|pq|/(2<pqu>)
+	# if <u,ab> > 0 then a lies to the right of the line (c, c+u)
+	# and we take the + sign:
+	pqc, pqu = det2(pq, c-p), det2(pq, u)
+	ab2, pq2 = norm²(ab), norm²(pq)
+	t = (-pqc + sign(det2(u,ab))*sqrt(ab2*pq2)/2)/pqu
+	z = c + t*u
+	return z
 end
 
 # Bisectors ««2
@@ -513,7 +529,6 @@ function insert!(t::AbstractTriangulation, q::Node, c::Cell)#««
 end#»»
 "swap cell indices for those two cells."
 function swapcells!(t::AbstractTriangulation, c1::Cell, c2::Cell)#««
-	println("swapping cells $c1 and $c2")
 	c1 == c2 && return
 	for e in star(t, c1); tail!(t, e, c2); end
 	for e in star(t, c2); tail!(t, e, c1); end
@@ -807,68 +822,54 @@ struct VoronoiDiagram{J,P,T} <: AbstractTriangulation{J}
 	# P: geometric point type
 	# T: real distance type
 	triangulation::CornerTable{J}
-	# indexation for edges (this completes the corner table)
-	firstarrow::Vector{J} # indexed by edges
-	edge::Vector{J} # indexed by arrows
-
-	# geometric information
 	points::Vector{P}
-	segments::Vector{NTuple{2,J}} # indices into `points`
-	noderadius::Vector{T} # indexed by nodes
-	separator::Vector{Separator{T}} # indexed by edges
-	arrowtype::Vector{UInt8} # indexed by arrows;
-	# this encodes the relative position of the bisector minimum and the
-	# tail of this arrow on the bisector; the values mean:
-	# 0: this edge is between parallel segments (degenerate case)
-	# 1: the node is *after* the minimum value:  ←← →→•→→
-	# 2: the node is *before* the minimum value: ←←•←← →→
+	segments::Vector{NTuple{2,J}} # indices into points
+	geomnode::Vector{P}
+	noderadius::Vector{T}
 end
 
-@inline function VoronoiDiagram(t::CornerTable{J},
-		points::AbstractVector{P}, segments::AbstractVector) where{J,P}
-	edge = Vector{J}(undef, narrows(t))
-	ne = narrows(t) ÷ J(2)
-	firstarrow = sizehint!(J[], ne)
-	for a in eacharrow(t)
-		b = opposite(t, a)
-		(b < a) && continue
-		push!(firstarrow, a)
-		edge[a] = edge[b] = length(firstarrow)
-	end
-	separator = [ Separator(points[int(right(t,Arrow(a)))],
-		points[int(left(t,Arrow(a)))]) for a in firstarrow ]
-# 	noderadius = [ circumradius(points[SA[int.(triangle(t,q))...]]...)
-# 		for q in eachnode(t)]
-	noderadius = sizehint!(eltype(P)[], nnodes(t))
-	arrowtype = [ UInt8(2) for _ in 1:narrows(t) ]
-	for q in eachnode(t)
-		tri = triangle(t,q)
-		a,b,c = points[tri[1]], points[tri[2]], points[tri[3]]
-		ab, bc, ca = b-a, c-b, a-c
-		push!(noderadius, circumradius(a,b,c))
-		# if there is an obtuse angle, the corresponding edge
-		# has the shape •→→
-		if     dot(ab, ca) > 0 # a is obtuse
-			arrowtype[3*int(q)-2] = UInt8(1)
-		elseif dot(bc, ab) > 0 # b is obtuse
-			arrowtype[3*int(q)-1] = UInt8(1)
-		elseif dot(ca, bc) > 0 # c is obtuse
-			arrowtype[3*int(q)-0] = UInt8(1)
-		else  # all angles are acute; 1 is already the correct value here
-		end
-		
-	end
-	return VoronoiDiagram{J,P,eltype(P)}(t, firstarrow, edge,
-		points, segments, noderadius, separator, arrowtype)
-end
-
-# @inline VoronoiDiagram(t::CornerTable{J}, p::AbstractVector{P},
-# 	s::AbstractVector, pos::AbstractVector, r::AbstractVector{T}) where{J,P,T} =
-# 	VoronoiDiagram{J,P,T}(t, p, NTuple{2,J}.(s), P.(pos), r)
-# @inline VoronoiDiagram(t::CornerTable{J}, p::AbstractVector{P},
-# 	s::AbstractVector) where{J,P} =
-# 	VoronoiDiagram{J,P,eltype(P)}(t, p, NTuple{2,J}.(s),
-# 	Vector{P}(undef, nnodes(t)), Vector{eltype(P)}(undef, nnodes(t)))
+# @inline function VoronoiDiagram(t::CornerTable{J},
+# 		points::AbstractVector{P}, segments::AbstractVector) where{J,P}
+# 	v = VoronoiDiagram{J,P,eltype(P)}(t, points, NTuple{2,J}.(segments),
+# 		Vector{P}(undef, nnodes(t)), vector{eltype(P)}(undef, nnodes(t))
+# 	for q in allnodes(t); geometricnode!(v, q); end
+# 	return v
+# end
+# 	edge = Vector{J}(undef, narrows(t))
+# 	ne = narrows(t) ÷ J(2)
+# 	firstarrow = sizehint!(J[], ne)
+# 	for a in eacharrow(t)
+# 		b = opposite(t, a)
+# 		(b < a) && continue
+# 		push!(firstarrow, a)
+# 		edge[a] = edge[b] = length(firstarrow)
+# 	end
+# 	separator = [ Separator(points[int(right(t,Arrow(a)))],
+# 		points[int(left(t,Arrow(a)))]) for a in firstarrow ]
+# # 	noderadius = [ circumradius(points[SA[int.(triangle(t,q))...]]...)
+# # 		for q in eachnode(t)]
+# 	noderadius = sizehint!(eltype(P)[], nnodes(t))
+# 	arrowtype = [ UInt8(2) for _ in 1:narrows(t) ]
+# 	for q in eachnode(t)
+# 		tri = triangle(t,q)
+# 		a,b,c = points[tri[1]], points[tri[2]], points[tri[3]]
+# 		ab, bc, ca = b-a, c-b, a-c
+# 		push!(noderadius, circumradius(a,b,c))
+# 		# if there is an obtuse angle, the corresponding edge
+# 		# has the shape •→→
+# 		if     dot(ab, ca) > 0 # a is obtuse
+# 			arrowtype[3*int(q)-2] = UInt8(1)
+# 		elseif dot(bc, ab) > 0 # b is obtuse
+# 			arrowtype[3*int(q)-1] = UInt8(1)
+# 		elseif dot(ca, bc) > 0 # c is obtuse
+# 			arrowtype[3*int(q)-0] = UInt8(1)
+# 		else  # all angles are acute; 1 is already the correct value here
+# 		end
+# 		
+# 	end
+# 	return VoronoiDiagram{J,P,eltype(P)}(t, firstarrow, edge,
+# 		points, segments, noderadius, separator, arrowtype)
+# end
 @inline triangulation(v::VoronoiDiagram) = v.triangulation
 
 @inline npoints(v::VoronoiDiagram) = length(v.points)
@@ -927,17 +928,28 @@ end
 
 function equidistant_sss(v::VoronoiDiagram, c1, c2, c3)
 	(i1,j1),(i2,j2),(i3,j3)=cellsegment(v,c1),cellsegment(v,c2),cellsegment(v,c3)
-	a = lineinter(v,i2,j2,i3,j3)
-	b = lineinter(v,i3,j3,i1,j1)
-	c = lineinter(v,i1,j1,i2,j2)
-	# for parallel lines, there is no real distinction incenter/excenter...
-	@assert a ≠ nothing
-	@assert b ≠ nothing
-	@assert c ≠ nothing
+	a1,b1,a2,b2,a3,b3 =
+		point(v,i1),point(v,j1),point(v,i2),point(v,j2),point(v,i3),point(v,j3)
+	u1,u2,u3 = b1-a1, b2-a2, b3-a3
+	d1,d2,d3 = det2(u2,u3), det2(u3,u1), det2(u1,u2)
+
+	iszero(d1) && return equidistant_sss_parallel(a2, u2, a3, a1, u1)
+	iszero(d2) && return equidistant_sss_parallel(a3, u3, a1, a2, u2)
+	iszero(d3) && return equidistant_sss_parallel(a1, u1, a2, a3, u3)
+
+	p1 = lineinter(a2,b2, a3,b3)
+	p2 = lineinter(a3,b3, a1,b1)
+	p3 = lineinter(a1,b1, a2,b2)
+# 	a = lineinter(v,i2,j2,i3,j3)
+# 	b = lineinter(v,i3,j3,i1,j1)
+# 	c = lineinter(v,i1,j1,i2,j2)
+	@assert p1 ≠ nothing
+	@assert p2 ≠ nothing
+	@assert p3 ≠ nothing
 # 	a == nothing && return incenter_parallel(v, b, c, i2, j2, i3, j3)
 # 	b == nothing && return incenter_parallel(v, c, a, i3, j3, i1, j1)
 # 	c == nothing && return incenter_parallel(v, a, b, i1, j1, i2, j2)
-	return incenter(a,b,c)
+	return incenter(p1,p2,p3)
 end
 
 function lineinter(v,i1,j1,i2,j2)
@@ -992,10 +1004,8 @@ function findrootnode(v::VoronoiDiagram, i,j)
 	a, b = point(v,i), point(v,j)
 	emin, dmin = nothing, nothing
 	global V=v
-	println("in star($i): $(collect(star(v,i)))")
 	for e in star(v,i)
 		influences(v,i,j,node(e)) || continue
-		println("   ($i,$j) influences node $(node(e))")
 		d = segdistance²(a,b,geometricnode(v, node(e)))
 		(emin == nothing || d < dmin) && ((emin, dmin) = (e, d))
 	end
@@ -1012,7 +1022,6 @@ function meetscircle(v::VoronoiDiagram, q::Node, i, j)
 end
 function influences(v::VoronoiDiagram, i, j, q)
 	a,b,g = point(v, i), point(v,j), geometricnode(v,q)
-	println("influences: ($i,$j,$q) points ($a,$b,$g)")
 	ab, ag = b-a, g-a
 	return (0 < dot(ab,ag) < dot(ab,ab))
  # (det2(ab,ag) ≥ 0) &&
@@ -1045,7 +1054,8 @@ function edgeexit(v::VoronoiDiagram, e, i, j)
 			return edgeexit_ss(a1,b1,a2,b2,g1,g2, p,q)
 		end
 		c1,c2 = c2,c1 # this replaces _sp case by equivalent _ps case just below:
-	elseif issegment(v, c2) # _ps case
+	end
+	if issegment(v, c2) # _ps case
 		(i2, j2) = cellsegment(v, c2)
 		a, a2, b2 = point(v,c1), point(v,i2), point(v,j2)
 		return edgeexit_ps(a, a2,b2,g1,g2,p,q)
@@ -1058,7 +1068,7 @@ end
 "returns min on [0,1] of a*x^2+b*x+c"
 @inline function quadratic_min01(v)
 	a,b,c = v
-	@assert a >0
+	a ≤ 0 && return min(c, a+b+c)
 	(b ≥ 0) && return c
 	(b ≤ -2a) && return (a+b+c)
 	return (4*a*c-b*b)/(4*a)
@@ -1083,16 +1093,19 @@ function edgeexit_pp(a,b,g1,g2,p,q)
 end
 
 function edgeexit_ss(a,b, a2,b2, g1,g2, p,q)
+	# on the segment (g1,g2) of the mediator of ((ab), (a2b2)),
+	# compute min(d²(z,(ab)) - d²(z,(pq)))
+	
 	# z = g1 + tv just as in the pp case
 	# d²(z,(ab)) = <abz>²/ab² = (<abg>+t<abv>)²/ab²
 	# d²(z,(pq)) = <pqz>²/pq² = (<pqg>+t<pqv>)²/pq²
 	v = g2-g1
 	ag, ab = g1-a, b-a
 	pg, pq = g1-p, q-p
-	abg, abv, ab2 = det2(ab, ag), det2(ab, v-a), norm²(ab)
-	pqg, pqv, pq2 = det2(pq, pg), det2(pq, v-p), norm²(pq)
-	dab_quadratic = SA[abv^2, 2*abv*abg, abg^2]/ab^2
-	dpq_quadratic = SA[pqv^2, 2*pqv*pqg, pqg^2]/pq^2
+	abg, abv, ab2 = det2(ab, ag), det2(ab, v), norm²(ab)
+	pqg, pqv, pq2 = det2(pq, pg), det2(pq, v), norm²(pq)
+	dab_quadratic = SA[abv^2, 2*abv*abg, abg^2]/ab2
+	dpq_quadratic = SA[pqv^2, 2*pqv*pqg, pqg^2]/pq2
 	return quadratic_min01(dab_quadratic - dpq_quadratic)
 end
 
@@ -1232,9 +1245,17 @@ function star!(v::VoronoiDiagram, s, tree, doubleedges)#««
 		geometricnode!(v, q)
 	end
 end#»»
-# Triangulation ««2
-@inline voronoi(points, segments=[]) = VoronoiDiagram{Int32}(points, segments)
-function VoronoiDiagram{J}(points, segments) where{J}#««
+# Compute Voronoi diagram ««2
+@inline VoronoiDiagram(points, segments=[]) =
+	VoronoiDiagram{Int32}(points, segments)
+# @inline function VoronoiDiagram(t::CornerTable{J},
+# 		points::AbstractVector{P}, segments::AbstractVector) where{J,P}
+# 	v = VoronoiDiagram{J,P,eltype(P)}(t, points, NTuple{2,J}.(segments),
+# 		Vector{P}(undef, nnodes(t)), vector{eltype(P)}(undef, nnodes(t))
+# 	for q in allnodes(t); geometricnode!(v, q); end
+# 	return v
+# end
+function VoronoiDiagram{J}(points::AbstractVector{P}, segments) where{J,P}#««
 	Random.seed!(0)
 	np = length(points)
 	ns= length(segments)
@@ -1242,8 +1263,8 @@ function VoronoiDiagram{J}(points, segments) where{J}#««
 	points = SVector{2,Float64}.(points)
 	t = CornerTable{J}(points; trim=false)
 	ncells!(t, ncells(t) + ns)
-	v = VoronoiDiagram(t, points, segments)
-	return v
+	v = VoronoiDiagram{J,P,eltype(P)}(t, points, NTuple{2,J}.(segments),
+		similar(points, nnodes(t)), Vector{eltype(P)}(undef, nnodes(t)))
 	for q in eachnode(t); geometricnode!(v, q); end
 
 	# incrementally add all segments ««
@@ -1406,7 +1427,8 @@ function shownode(io::IO, t::AbstractTriangulation, q::Node)
 	end
 end
 function shownode(io::IO, v::VoronoiDiagram, q::Node)
-	println(io, "\e[33m", q, triangle(v,q), "\e[m: ", noderadius(v,q))
+	println(io, "\e[33m", q, triangle(v,q), "\e[m: ",
+		geometricnode(v, q), " r²=", noderadius(v,q))
 # 	for i in (1,2,3)
 # 		e = side(q, i); o = opposite(v, e); oo = opposite(v,o)
 # 		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
@@ -1441,7 +1463,7 @@ function Base.display(io::IO, v::VoronoiDiagram)
 	println(io, "\e[1m begin Voronoi diagram with $(nnodes(v)) nodes and $(ncells(v)) cells:\e[m")
 	for q in eachnode(v); shownode(io, v, q); end
 	for c in eachcell(v); showcell(io, v, c); end
-	for e in 1:length(v.firstarrow); showedge(io, v, Edge(e)); end
+# 	for e in 1:length(v.firstarrow); showedge(io, v, Edge(e)); end
 	println(io, "\e[1m end Voronoi diagram\e[m")
 end
 @inline Base.display(v::VoronoiDiagram) = display(stdout, v)
