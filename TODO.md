@@ -71,6 +71,9 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] `refine`: shorten all edges until no longer than given length
+  - [ ] 2d (just divide edges)
+  - [ ] 3d (split triangles)
  - [ ] path type: e.g. take a rectangular path, round corners, then create the shape defined by 1-directional offset
  - [ ] ellipse
  - [ ] test if point is in shape and random sample of shapes
