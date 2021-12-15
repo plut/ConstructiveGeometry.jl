@@ -206,18 +206,30 @@ function equidistant_pss(a, p, q, r, s)
 	return c + t*u
 end
 
+function equidistant_sss(a1,b1,a2,b2,a3,b3)
+	# returns the point equidistant from the *oriented* lines (ai, bi)
+	# (i.e. either the incenter, or an excenter, of the triangle, according
+	# to the orientations).
+	u1 = quarterturn(b1 - a1); u1 /= √(norm²(u1))
+	u2 = quarterturn(b2 - a2); u2 /= √(norm²(u2))
+	u3 = quarterturn(b3 - a3); u3 /= √(norm²(u3))
+	p1 = lineinter(a2, b2, a3, b3)
+	p2 = lineinter(a3, b3, a1, b1)
+	return lineinter(p1, p1+u2+u3, p2, p2+u1+u3)
+end
+
 function equidistant_sss_parallel(a, u, b, p, pq)
 	# returns the point equidistant from lines (a, a+u), (b,b+u), (p, pq)
 	# (in this order)
 	# parametrized as z = c+tu (with c = (a+b)/2)
 	c, ab = (a+b)/2, b-a
-	# d²(z, (a,a+u)) = ab²/4
+	# d²(z, (a,a+u)) = l²/4 where l is the distance between the parallel lines
 	# so (<pqc> + t <pqu>)² = |ab|⋅|pq|/2, or t=-<pqc>±|ab|.|pq|/(2<pqu>)
 	# if <u,ab> > 0 then a lies to the right of the line (c, c+u)
 	# and we take the + sign:
 	pqc, pqu = det2(pq, c-p), det2(pq, u)
-	ab2, pq2 = norm²(ab), norm²(pq)
-	t = (-pqc + sign(det2(u,ab))*sqrt(ab2*pq2)/2)/pqu
+	l2, pq2 = det2(u,ab)^2/norm²(u), norm²(pq)
+	t = (-pqc + sign(det2(u,ab))*sqrt(l2*pq2)/2)/pqu
 	z = c + t*u
 	return z
 end
@@ -228,22 +240,12 @@ function mediator(a,b)
 	return SA[2*(a[1]-b[1]), 2*(a[2]-b[2]), norm²(b)-norm²(a)]
 end
 
-"intersection point of segments (ab) and (cd)"
-function intersection(a,b,c,d)
-end
-
-"angle bisector of the non-crossing segments (ab) and (cd)"
-function bisector(a,b,c,d)
-	# since these segments are non-crossing, at least one of them lies
-	# fully on one side of their intersection point.
-	error("not implemented")
-end
-
 # Lines ««2
 #
 Point{T} = SVector{2,T}
 "the equation for a (normalized, oriented) straight line in the plane."
 struct Line{T}
+	# orientation: the normal vector points to the *right* of the line
 	normal::SVector{2,T} # normalized to ‖u‖=1
 	offset::T # line equation is normal⋅z + offset == 0
 end
@@ -252,8 +254,11 @@ end
 @inline Base.:-(l::Line) = (-1)*l
 
 @inline direction(l::Line) = quarterturn(l.normal)
+# one arbitrary point on the line (actually the projection of the origin)
+@inline point(l::Line) = -l.normal*l.offset/(l.normal[1]^2+l.normal[2]^2)
+
 @inline Line(a::AbstractVector, b::AbstractVector) = # oriented from a to b
-	normalize(Line(SA[a[2]-b[2], b[1]-a[1]], a[1]*b[2]-a[2]*b[1]))
+	normalize(Line(SA[b[2]-a[2], a[1]-b[1]], a[2]*b[1]-a[1]*b[2]))
 
 # signed distance from l to a; positive sign corresponds to right side of l.
 @inline evaluate(l::Line, a::AbstractVector) = dot(l.normal, a) + l.offset
@@ -264,7 +269,7 @@ function intersection(l1::Line, l2::Line)
 	(a2, b2), c2 = l2.normal, l2.offset
 	d = a1*b2-a2*b1
 	iszero(d) && return nothing
-	return SA[b1*c2-c1*b2,c1*a2-c1*a2]/d
+	return SA[b1*c2-c1*b2,c1*a2-a1*c2]/d
 end
 
 # Parametrized bisectors ««2
@@ -297,38 +302,42 @@ The `+` branch sees `a` on its right and `b` on its left.
 """
 @inline function evaluate(b::Separator, t, s) # s is a sign
 	if iszero(b.normal) # straight line
-		return b.origin + s*sqrt(t^2-b.t0^2)*b.tangent
+		return b.origin + s*sqrt(max(t^2-b.t0^2, 0))*b.tangent
 	else # parabola arc
-		u = t-b.t0
+		u = max(t-b.t0, 0)
 		return b.origin + u*b.normal + s*sqrt(u)*b.tangent
 	end
 end
 
 function Separator(a::AbstractVector, b::AbstractVector)# bisector of two points
-	c = (a+b)/2
+	c = SVector{2}(a+b)/2
 	d = √(distance²(a,b))
-	u = quarterturn(a-b)/(2d)
+	u = quarterturn(a-b)/(d)
 	return Separator(c, u, zero(u), d/2)
 end
 
-function Separator(a::AbstractVector, l::Line)
+function Separator(a::AbstractVector, l::Line; k=1)
 	t0 = evaluate(l, a)/2
+	if iszero(t0)
+	# the degenerate case (t0==0) also makes sense (segment/endpoint boundary)
+		return Separator(SVector{2}(a), zero(direction(l)), l.normal, zero(a[1]))
+	end
 	c = a-t0*l.normal
 	# if t0 > 0: a is on the right side of l; parabola is oriented as l
 	# if t0 < 0: a is on left side, parabola is oriented opposite to l
-	# the degenerate case (t0==0) kind of makes sense...
-	@assert !iszero(t0)
-	return Separator(c, 2*sign(t0)*√(t0)*direction(l), l.normal, t0)
+	return Separator(c, 2k*sign(t0)*√(abs(t0))*direction(l), sign(t0)*l.normal,
+		abs(t0))
 end
+@inline Separator(l::Line, a::AbstractVector) = Separator(a, l; k=-1)
 
 function Separator(l1::Line, l2::Line)
-	u, v = direction(l1), direction(l2)
-	d = u[1]*v[2]-u[2]*v[1]
-	if iszero(d)
-		error("not implemented: parallel lines")
+	d = det2(l1.normal, l2.normal)
+	if iszero(d) # special case: two parallel lines
+		c = (point(l1) + point(l2))/2
+		return Separator(c, direction(l1), NaN16*l1.normal, abs(evaluate(l1, c)))
 	end
 	c = intersection(l1, l2)
-	w = (u+sign(d)*v) / abs(d)
+	w = (l1.normal + l2.normal); w/= dot(w, l1.normal)
 	return Separator(c, w, zero(w), zero(w[1]))
 end
 
@@ -391,6 +400,7 @@ for f in (:tail, :tail!, :opposite, :opposite!, :anyarrow, :anyarrow!,
 end
 
 # Methods ««2
+@inline head(t::AbstractTriangulation, e::Arrow) = tail(t, opposite(t, e))
 @inline tail!(t::AbstractTriangulation, l::Pair{<:Arrow, <:Cell}...) =
 	for (e,s) in l; tail!(t, e, s); end
 @inline opposites!(t::AbstractTriangulation, l::Pair{<:Arrow,<:Arrow}...) =
@@ -455,7 +465,7 @@ end
 """
     star(cornertable, cell)
 
-Iterates all arrows from the same cell.
+Iterates all arrows sharing the same tail cell.
 """
 @inline star(t::AbstractTriangulation{J}, e::Arrow) where{J} =
 	ATIterator{star,Arrow{J}}(t, e)
@@ -472,11 +482,18 @@ Iterates all arrows from the same cell.
 	ATIterator{revstar,T}(it.table, it.start)
 @inline Base.reverse(it::ATIterator{revstar,T}) where{T} =
 	ATIterator{star,T}(it.table, it.start)
+function arrow(t::AbstractTriangulation, c1::Cell, c2::Cell)
+	for e in star(t, c1)
+		head(t, e) == c2 && return e
+	end
+	return nothing
+end
 
 """
-    ring(cornertable, corner)
+    ring(cornertable, cell)
 
 Iterates all arrows left-adjacent to the indicated cell.
+Equivalent to next.(star(...)).
 """
 @inline ring(t::AbstractTriangulation{J}, e::Arrow) where{J} =
 	ATIterator{ring,Arrow{J}}(t, next(e))
@@ -486,6 +503,7 @@ Iterates all arrows left-adjacent to the indicated cell.
    neighbours(cornertable, cell)
 
 Iterates all cells adjacent to the indicated cell.
+Equivalent to right.(ring(...)).
 """
 @inline neighbours(t::AbstractTriangulation{J}, c::Cell) where{J} =
 	(tail(t, x) for x in ring(t, anyarrow(t, c)))
@@ -762,7 +780,6 @@ function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#«
 		cellcorner!(t, s=>e, c1=>n, c2=>p)
 		c1 = c2
 	end
-	check(t)
 end#»»
 # Triangulation
 """
@@ -777,19 +794,19 @@ The sites are encoded as follows:
 """
 @inline triangulate(points; trim=true) = CornerTable{Int32}(points; trim)
 function CornerTable{J}(points; trim=true) where{J}#««
-	npoints = length(points)
-# 	npoints < 3 && return CornerTable{J}(undef, 0)
-	t = CornerTable{J}(J[4,6,5,1,3,2],J(npoints).+J[1,3,2,1,2,3],
-		Vector{J}(undef, npoints+3))
-	anyarrow!(t, Cell(npoints+1), Arrow(J(1)))
-	anyarrow!(t, Cell(npoints+2), Arrow(J(2)))
-	anyarrow!(t, Cell(npoints+3), Arrow(J(3)))
+	np = length(points)
+# 	np < 3 && return CornerTable{J}(undef, 0)
+	t = CornerTable{J}(J[4,6,5,1,3,2],J(np).+J[1,3,2,1,2,3],
+		Vector{J}(undef, np+3))
+	anyarrow!(t, Cell(np+1), Arrow(J(1)))
+	anyarrow!(t, Cell(np+2), Arrow(J(2)))
+	anyarrow!(t, Cell(np+3), Arrow(J(3)))
 
 	m = maximum(abs(x) for p in points for x in p)
 	push!(points, [0,-3m], [3m,2m], [-3m,2m])
   #»»
 	# incrementally add all points ««
-	for i in 1:npoints # Random.randperm(npoints)
+	for i in 1:np # Random.randperm(np)
 		tree = badnodes(t, points, i)
 		star!(t, Cell(i), tree)
 	end
@@ -803,21 +820,22 @@ function CornerTable{J}(points; trim=true) where{J}#««
 	k = nnodes(t)
 	swapnodes!(t, Node(1), Node(k))
 	k-= 1
-	fakecells = npoints+1:npoints+3
+	fakecells = np+1:np+3
 	for i in nnodes(t)-1:-1:1; q = Node{J}(i)
 		w = Int.(triangle(t,q))
-		any(>(npoints), Int.(triangle(t, q))) || continue
+		any(>(np), Int.(triangle(t, q))) || continue
 		swapnodes!(t, q, Node(k))
 		k-= 1
 	end
 	# »»
-		resize!(points, npoints)
+		resize!(points, np)
 	end
 	return t
 end#»»
 # Voronoi diagram ««1
 # Data structure ««2
-struct VoronoiDiagram{J,P,T} <: AbstractTriangulation{J}
+abstract type AbstractVoronoi{J} <: AbstractTriangulation{J} end
+struct VoronoiDiagram{J,P,T} <: AbstractVoronoi{J}
 	# J: integer index type
 	# P: geometric point type
 	# T: real distance type
@@ -873,10 +891,13 @@ end
 @inline triangulation(v::VoronoiDiagram) = v.triangulation
 
 @inline npoints(v::VoronoiDiagram) = length(v.points)
+@inline nsegments(v::VoronoiDiagram) = length(v.segments)
 @inline point(v::VoronoiDiagram, c::Cell) = v.points[int(c)]
-@inline issegment(v::VoronoiDiagram, c::Cell) = int(c) > npoints(v)
+@inline issegment(v::AbstractVoronoi, c::Cell) = int(c) > npoints(v)
 @inline cellsegment(v::VoronoiDiagram, c::Cell) =
 	Cell.(v.segments[int(c)-npoints(v)])
+@inline geometricnode(v::VoronoiDiagram, q::Node) = v.geomnode[int(q)]
+@inline noderadius(v::VoronoiDiagram, q::Node) = v.noderadius[int(q)]
 
 function nnodes!(v::VoronoiDiagram, n)
 	nnodes!(triangulation(v), n)
@@ -892,7 +913,7 @@ end
 # Geometric node computation ««2
 @inline function geometricnode!(v::VoronoiDiagram, q::Node, g=equidistant(v,q))
 	v.geomnode[int(q)] = g
-	s = cell(triangulation(v), q, 1)
+	s = cell(v, q, 1)
 	v.noderadius[int(q)] = if issegment(v, s)
 		(c1, c2) = cellsegment(v, s)
 		segdistance²(point(v, c1), point(v, c2), g)
@@ -900,11 +921,8 @@ end
 		distance²(point(v, s), g)
 	end
 end
-@inline geometricnode(v::VoronoiDiagram, q::Node) = v.geomnode[int(q)]
-@inline noderadius(v::VoronoiDiagram, q::Node) = v.noderadius[int(q)]
 
-
-function equidistant(v::VoronoiDiagram, q::Node)
+function equidistant(v::AbstractVoronoi, q::Node)#««
 	s = triangle(v, q)
 	# orientation is important! some curves have two intersection points...
 	if issegment(v, s[1])
@@ -924,9 +942,8 @@ function equidistant(v::VoronoiDiagram, q::Node)
 			return equidistant_ppp(v, s[1], s[2], s[3])
 		end
 	end
-end
-
-function equidistant_sss(v::VoronoiDiagram, c1, c2, c3)
+end#»»
+function equidistant_sss(v::AbstractVoronoi, c1, c2, c3)#««
 	(i1,j1),(i2,j2),(i3,j3)=cellsegment(v,c1),cellsegment(v,c2),cellsegment(v,c3)
 	a1,b1,a2,b2,a3,b3 =
 		point(v,i1),point(v,j1),point(v,i2),point(v,j2),point(v,i3),point(v,j3)
@@ -937,31 +954,32 @@ function equidistant_sss(v::VoronoiDiagram, c1, c2, c3)
 	iszero(d2) && return equidistant_sss_parallel(a3, u3, a1, a2, u2)
 	iszero(d3) && return equidistant_sss_parallel(a1, u1, a2, a3, u3)
 
-	p1 = lineinter(a2,b2, a3,b3)
-	p2 = lineinter(a3,b3, a1,b1)
-	p3 = lineinter(a1,b1, a2,b2)
-# 	a = lineinter(v,i2,j2,i3,j3)
-# 	b = lineinter(v,i3,j3,i1,j1)
-# 	c = lineinter(v,i1,j1,i2,j2)
-	@assert p1 ≠ nothing
-	@assert p2 ≠ nothing
-	@assert p3 ≠ nothing
-# 	a == nothing && return incenter_parallel(v, b, c, i2, j2, i3, j3)
-# 	b == nothing && return incenter_parallel(v, c, a, i3, j3, i1, j1)
-# 	c == nothing && return incenter_parallel(v, a, b, i1, j1, i2, j2)
-	return incenter(p1,p2,p3)
-end
+	return equidistant_sss(a1,b1,a2,b2,a3,b3)
+# 	p1 = lineinter(a2,b2, a3,b3)
+# 	p2 = lineinter(a3,b3, a1,b1)
+# 	p3 = lineinter(a1,b1, a2,b2)
+# # 	a = lineinter(v,i2,j2,i3,j3)
+# # 	b = lineinter(v,i3,j3,i1,j1)
+# # 	c = lineinter(v,i1,j1,i2,j2)
+# 	@assert p1 ≠ nothing
+# 	@assert p2 ≠ nothing
+# 	@assert p3 ≠ nothing
+# # 	a == nothing && return incenter_parallel(v, b, c, i2, j2, i3, j3)
+# # 	b == nothing && return incenter_parallel(v, c, a, i3, j3, i1, j1)
+# # 	c == nothing && return incenter_parallel(v, a, b, i1, j1, i2, j2)
+# 	return incenter(p1,p2,p3)
+end#»»
 
-function lineinter(v,i1,j1,i2,j2)
+function lineinter(v,i1,j1,i2,j2)#««
 	i1 ∈ (i2,j2) && return point(v,i1)
 	j1 ∈ (i2,j2) && return point(v,j1)
 	return lineinter(point(v,i1), point(v,j1), point(v,i2), point(v,j2))
-end
-@inline equidistant_ppp(v::VoronoiDiagram, c1, c2, c3) =
+end#»»
+@inline equidistant_ppp(v::AbstractVoronoi, c1, c2, c3) =
 	# all three cells are single points
 	circumcenter(point(v,c1), point(v,c2), point(v,c3))
 
-function equidistant_pps(v::VoronoiDiagram, c1, c2, c3)
+function equidistant_pps(v::AbstractVoronoi, c1, c2, c3)#««
 	(i,j) = cellsegment(v, c3)
 	# treat cases where one of the points is one end of the segment
 	c1 == i && return equidistant_pxs(v, i, j, c2)
@@ -969,17 +987,15 @@ function equidistant_pps(v::VoronoiDiagram, c1, c2, c3)
 	c1 == j && return equidistant_pxs(v, j, i, c2)
 	c2 == j && return equidistant_pxs(v, j, i, c1)
 	return equidistant_pps(point(v, c1), point(v, c2), point(v, i), point(v, j))
-end
-
-function equidistant_pxs(v::VoronoiDiagram, c1, c2, c3)
+end#»»
+function equidistant_pxs(v::AbstractVoronoi, c1, c2, c3)#««
 	# node equidistant from: segment (c1,c2), points c1 & c3
 	a, b, c = point(v,c1), point(v,c2), point(v,c3)
 	ab, ac = b-a, c-a
 	t = norm²(ac)/(2det2(ab,ac))
 	return a+t*quarterturn(ab)
-end
-
-function equidistant_pss(v::VoronoiDiagram, s, c2,c3)
+end#»»
+function equidistant_pss(v::AbstractVoronoi, s, c2,c3)#««
 	(i1,j1),(i2,j2) = cellsegment(v,c2), cellsegment(v, c3)
 	# equidistant from s, (i1,j1), (i2,j2)
 	s == i1 && return equidistant_pxs(v, i1, j1, i2, j2, 1)
@@ -988,15 +1004,22 @@ function equidistant_pss(v::VoronoiDiagram, s, c2,c3)
 	s == j2 && return equidistant_pxs(v, j2, i2, i1, j1, -1)
 	return equidistant_pss(point(v, s), point(v,i1), point(v,j1),
 		point(v, i2), point(v, j2))
-end
-
-function equidistant_pxs(v::VoronoiDiagram, i1, j1, i2, j2, ε)
+end#»»
+function equidistant_pxs(v::AbstractVoronoi, i1, j1, i2, j2, ε)#««
 	i1 ∈ (i2,j2) && return point(v, i1)
 	return equidistant_pxs(point(v,i1), point(v,j1), point(v,i2), point(v,j2), ε)
+end#»»
+
+function separator(v::AbstractVoronoi, c1, c2)
+	a1 = issegment(v, c1) ? let (i1, j1) = cellsegment(v, c1)
+		Line(point(v, i1), point(v, j1)) end : point(v, c1)
+	a2 = issegment(v, c2) ? let (i2, j2) = cellsegment(v, c2)
+		Line(point(v, i2), point(v, j2)) end : point(v, c2)
+	return Separator(a1, a2)
 end
 
 # Cell location functions ««2
-function findrootnode(v::VoronoiDiagram, i,j)
+function findrootnode(v::AbstractVoronoi, i,j)
 	# here the table is assumed built (for points)
 	# so we can search in the nodes around the cell for point a
 	# which one is closest to segment ab
@@ -1013,14 +1036,14 @@ function findrootnode(v::VoronoiDiagram, i,j)
 	return node(emin)
 end
 
-function meetscircle(v::VoronoiDiagram, q::Node, i, j)
+function meetscircle(v::AbstractVoronoi, q::Node, i, j)
 	g, r = geometricnode(v, q), noderadius(v, q)
 	a, b = point(v, i), point(v, j)
 	ab2 = norm²(b-a)
 	d = dot(g-a,b-a)
 	return segdistance²(a, b, g) < r
 end
-function influences(v::VoronoiDiagram, i, j, q)
+function influences(v::AbstractVoronoi, i, j, q)
 	a,b,g = point(v, i), point(v,j), geometricnode(v,q)
 	ab, ag = b-a, g-a
 	return (0 < dot(ab,ag) < dot(ab,ab))
@@ -1038,7 +1061,7 @@ given the edge e and a new segment (i,j),
 returns the minimum for z∈e of d²(z,s1)-d²(z,(ij))
 (s1 being one of the two sites defining e)
 """
-function edgeexit(v::VoronoiDiagram, e, i, j)
+function edgeexit(v::AbstractVoronoi, e, i, j)
 	# running between the geometric nodes g1 and g2,
 	c1, c2 = left(v,e), right(v,e)
 	c2 = right(v, e)
@@ -1173,7 +1196,7 @@ than to their defining sites.
 TODO: return a closed loop of edges which are fully closer to (i,j)
 than to their defining sites, i.e. the boundary of the new cell for (i,j).
 """
-function badnodes(v::VoronoiDiagram{J}, i, j) where{J} # segment case
+function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 	println("\e[34;1;7m badnodes($i, $j)\e[m")
 	rootnode = findrootnode(v,i,j)
 	println("\e[34;1m root node = $rootnode\e[m")
@@ -1236,7 +1259,7 @@ function badnodes(v::VoronoiDiagram{J}, i, j) where{J} # segment case
 	return (tree, doubleedges) # the tree is usually small, no need to sort it
 end
 # end#»»
-function star!(v::VoronoiDiagram, s, tree, doubleedges)#««
+function star!(v::AbstractVoronoi, s, tree, doubleedges)#««
 	star!(triangulation(v), s, tree, doubleedges)
 	global V = v
 	resize!(v.geomnode, length(v.geomnode)+2)
@@ -1313,6 +1336,148 @@ function VoronoiDiagram{J}(points::AbstractVector{P}, segments) where{J,P}#««
 # 	resize!(points, np)
 	return v
 end#»»
+# Displaying and debugging ««2
+function gnuplot(io::IO, v::AbstractVoronoi; scale=10.)
+# 	f1 = identity
+	f1 = @closure x -> scale*sign(x)*log(1+abs(x)/scale)
+	pt = @closure c -> f1.(point(v,c))
+	# index 0: points (x y label)
+	# index 1: segments (x y dx dy label)
+	println(io, "# index 0: points (x y label)")
+	for c in 1:npoints(v); c = Cell(c)
+		g = pt(c)
+		println(io, g[1], "\t", g[2], "\t", c)
+	end
+	println(io, "\n\n# index 1: segments (x y dx dy lx ly label)")
+	for c in 1:nsegments(v); c = Cell(c+npoints(v))
+		(c1, c2) = cellsegment(v, c)
+		(g1, g2) = pt(c1), pt(c2)
+		dg = g2 - g1; u = g1 + .5*dg - .1*quarterturn(dg)
+		println(io, g1[1], "\t", g1[2], "\t", dg[1], "\t", dg[2], "\t",
+			u[1], "\t", u[2], "\t", c, "\t# = ", (c1, c2))
+	end
+	nodepos = Vector{SVector{2,Float64}}(undef, nnodes(v))
+	cellpos = Vector{SVector{2,Float64}}(undef, ncells(v))
+	for q in eachnode(v)
+		g = geometricnode(v, q)
+		d = zero(g)
+		for i in 1:3
+			c = tail(v, side(q, i))
+			if issegment(v, c)
+				(c1, c2) = cellsegment(v, c)
+				d += .5*(pt(c1)+pt(c2))
+			else
+				d += pt(c)
+			end
+		end
+		nodepos[int(q)] = f1.(g + .3*(d - g))
+	end
+	for c in eachcell(v)
+		n = 0; g = zero(first(nodepos))
+		for e in star(v, c)
+			n+= 1; g += nodepos[int(node(e))]
+		end
+		cellpos[int(c)] = g/n
+	end
+	println(io, "\n\n# index 2: nodes (x y label)")
+	for q in eachnode(v)
+		g = nodepos[int(q)]
+		println(io, g[1], "\t", g[2], "\t", q, "\t# ", triangle(v,q))
+	end
+	println(io, "\n\n# index 3: edges (x y dx dy x1 y1 label1 x2 y2 label2)")
+	for e in eacharrow(v)
+		o = opposite(v, e); o < e && continue
+		q1, q2 = node(e), node(o)
+		g1, g2 = nodepos[int(q1)], nodepos[int(q2)]
+		dg = g2 - g1
+		l1 = g1 + .5*dg + .1*f1.(quarterturn(dg))
+		l2 = g1 + .5*dg - .1*f1.(quarterturn(dg))
+		println(io, g1[1], "\t", g1[2], "\t", dg[1], "\t", dg[2],
+			"\t", l1[1], "\t", l1[2], "\t", e,
+			"\t", l2[1], "\t", l2[2], "\t", o,
+			"\t# ", e, o, q1, q2)
+	end
+	println(io, "\n\n# index 4: cells (x y label)")
+	for c in eachcell(v)
+		g = cellpos[int(c)]
+		println(io, g[1], "\t", g[2], "\t", c)
+	end
+end
+function gnuplot(v::AbstractVoronoi; scale=10.)
+	f_dat = "/tmp/a.dat"
+	open(f_dat, "w") do io gnuplot(io, v; scale); end
+	f_gpi = "/tmp/a.gpi"
+	open(f_gpi, "w") do io
+		println(io, """
+set style textbox 1 opaque border lc "blue"
+set style textbox 2 opaque border lc "red"
+f='$f_dat'
+plot \\
+  f index 1 u 1:2:3:4 w vectors lc "blue" lw 2, \\
+	f index 3 u 1:2:3:4 w vectors lc "red", \\
+	f index 4 u 1:2:3 w labels center textcolor "forest-green", \\
+	f index 3 u 5:6:7 w labels center textcolor "red", \\
+	f index 3 u 8:9:10 w labels center textcolor "red", \\
+	f index 2 u 1:2:3 w labels center boxed bs 2 textcolor "red", \\
+  f index 0 u 1:2:3 w labels center boxed bs 1
+		""")
+	end
+end
+function showall(io::IO, t::AbstractTriangulation)
+	for q in eachnode(t); shownode(io, t, q); end
+	for c in eachcell(t); showcell(io, t, c); end
+end
+
+function shownode(io::IO, t::AbstractTriangulation, q::Node)
+	println(io, "\e[33m", q, triangle(t,q), "\e[m ")
+	for i in (1,2,3)
+		e = side(q, i); o = opposite(t, e); oo = opposite(t,o)
+		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
+	end
+end
+function shownode(io::IO, v::AbstractVoronoi, q::Node)
+	println(io, "\e[33m", q, triangle(v,q), "\e[m: ",
+		geometricnode(v, q), " r²=", noderadius(v,q))
+# 	for i in (1,2,3)
+# 		e = side(q, i); o = opposite(v, e); oo = opposite(v,o)
+# 		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
+# 	end
+end
+function showcell(io::IO, v::AbstractTriangulation, c::Cell)
+	print(io, "\e[31m", c, "\e[m:");
+	for e in ring(v, c)
+		print(io, " ", node(e), "→", e, "(", right(v,e), ")→")
+	end
+	println(io)
+# 	println(io, "\e[34m", c, "\e[m: ", [node(e) for e in star(v,c)])
+	for e in star(v,c)
+		c1 = tail(v, e)
+		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")
+	end
+end
+
+function showedge(io::IO, v::AbstractVoronoi, e::Edge)
+	a = Arrow(v.firstarrow[int(e)])
+	o = opposite(v, a)
+	print(io, "\e[32m", e, " = (", a, ",", o, ")\e[m  ")
+	print(io, left(v,a), "|", right(v,a), " ")
+	print(io, tail(v, a), ("==", "->", "<-")[v.arrowtype[int(a)]+1],
+	  " ", ("==", "<-", "->")[v.arrowtype[int(o)]+1], tail(v,o))
+	println(io)
+	ea, eo = Edge(v.edge[int(a)]), Edge(v.edge[int(o)])
+	ea ≠ e && println(io, "  \e[31;7m edge($a) = $ea, should be $e\e[m")
+	eo ≠ e && println(io, "  \e[31;7m edge($o) = $eo, should be $e\e[m")
+end
+function Base.display(io::IO, v::AbstractVoronoi)
+	println(io, "\e[1m begin Voronoi diagram with $(nnodes(v)) nodes and $(ncells(v)) cells:\e[m")
+	for q in eachnode(v); shownode(io, v, q); end
+	for c in eachcell(v); showcell(io, v, c); end
+# 	for e in 1:length(v.firstarrow); showedge(io, v, Edge(e)); end
+	println(io, "\e[1m end Voronoi diagram\e[m")
+end
+@inline Base.display(v::AbstractVoronoi) = display(stdout, v)
+# end »»1
+# Offset ««1
 # Split segments ««2
 """
     splitsegments!(voronoidiagram)
@@ -1340,135 +1505,101 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 	end
 	# now split each cell in two
 	for i in 1:ns
-		c1, c2 = Cell(np+2i-1), Cell(np+2i)
-		(a,b) = cellsegment(v, c1)
-		(pa, pb) = point(v, a), point(v, b); ab = pb - pa
-		println("\e[7m splitting cell $c1 = ($a,$b)\e[m")
-# 		for e in star(v,c1)
-# 			g = geometricnode(v, node(e))
-# # 			println("  edge $e ↔ node $(node(e)) ↔ cells $(triangle(v,node(e))):")
-# # 			println("  geom. $g: ", sign(det2(g-pa, ab)))
-# 		end
-		# find the two positions where the nodes go from one side to the««
-		# other of this segment:
-		elist = star(v,c1)
-		(e, status) = iterate(elist)
-		sidechange=MVector(e,e)
-		g = geometricnode(v, node(e))
-		sd = (det2(g-pa, ab) ≥ 0)
-		while true
-			next = iterate(elist, status)
-			next == nothing && break
-			sd1 = sd
-			(e, status) = next
-			g = geometricnode(v, node(e))
-			sd = (det2(g-pa, ab) ≥ 0)
-# 			sd || tail!(v, e, c2)
-			sd1 ≠ sd && (sidechange[1+sd] = e)
-		end#»»
-		println(" \e[34msidechange $sidechange\e[m = nodes $(node.(sidechange))")
-		# split the cell by inserting two new nodes««
-		e1, e2 = sidechange
+		s12, s21 = Cell(np+2i-1), Cell(np+2i)
+		(c1,c2) = cellsegment(v, s12)
+		(p1,p2) = point(v, c1), point(v, c2)
+# 		println("\e[7m splitting cell $s12 = ($c1,$c2)\e[m")
+		showcell(stdout, v, s12)
+		# find the edges connecting to the two endpoints
+		e2 = anyarrow(v, s12)
+		while right(v, e2) ≠ c2; e2 = after(v, e2); end
+		e1 = e2
+		while right(v, e1) ≠ c1; tail!(v, e1, s21); e1 = after(v, e1); end
+		# split the cell by inserting two new nodes
 		pe1, pe2 = prev(e1), prev(e2)
 		ope1, ope2 = opposite(v, prev(e1)), opposite(v, prev(e2))
 		q1, q2 = newnodes!(v, 2)
 		tail!(v,
-			side(q1,1)=>right(v,e1), side(q1,2)=>c2, side(q1,3)=>c1,
-			side(q2,1)=>right(v,e2), side(q2,2)=>c1, side(q2,3)=>c2)
+			side(q1,1)=>c1, side(q1,2)=>s12, side(q1,3)=>s21,
+			side(q2,1)=>c2, side(q2,2)=>s21, side(q2,3)=>s12)
 		opposites!(v, side(q1,1) => side(q2,1),
 			pe1=>side(q1,3), ope1=>side(q1,2),
 			pe2=>side(q2,3), ope2=>side(q2,2))
-		geometricnode!(v, q1, pb)
-		geometricnode!(v, q2, pa)
-# 		shownode(stdout, v, q1)
-# 		shownode(stdout, v, q2)
-		for e in star(v, e1) # iterate on left side to change tail
-			tail!(v, e, c2)
-		end
-		anyarrow!(v, c1, side(q2,2)); anyarrow!(v, c2, side(q1,2))
-# 		showcell(stdout, v, c1)
-# 		showcell(stdout, v, c2)
-		#»»»»
+		geometricnode!(v, q1, p1)
+		geometricnode!(v, q2, p2)
+		shownode(stdout, v, q1)
+		shownode(stdout, v, q2)
+		anyarrow!(v, s12, side(q1,2)); anyarrow!(v, s21, side(q2,2))
+		showcell(stdout, v, s12)
+		showcell(stdout, v, s21)
 	end
 	return v
 end#»»
-# function flip_rec(t::CornerTable, points, c::Arrow)#««
-# 	# c is the corner (p,new cell, a, b)
-# 	# o is the opposite corner
-# 	# if o is in circle of (a,b,p) then flip the corner c
-# 	sc, sa, sb, so = tail(t, c), tail(t, next(c)), tail(t, prev(c)),
-# 		tail(t, opposite(t, c))
-# 	isincircle(points[Int.(SA[sc,sa,sb,so])]...) || return
-# 	(c1, c2) = flip!(t, c)
-# 	flip_rec(t, points, c1)
-# 	flip_rec(t, points, c2)
-# end#»»
 
-function check(t::AbstractTriangulation)
-	for i in 1:3*nnodes(t)
-		e = Arrow(i)
-		@assert opposite(t,opposite(t,e)) == e "opposite($e)=$(opposite(t,e)); opposite($(opposite(t,e)))=$(opposite(t,opposite(t,e)))"
-	end
-# 	for i in 1:ncells(t)
-# 		s = Cell(i)
-# 		@assert Int(tail(t, anyarrow(t,s))) == Int(s) "tail(anyarrow($s))"
-# 	end
-end
-function showall(io::IO, t::AbstractTriangulation)
-	for q in eachnode(t); shownode(io, t, q); end
-	for c in eachcell(t); showcell(io, t, c); end
+# Data type ««2
+struct OffsetDiagram{J,P,T} <: AbstractVoronoi{J}
+	voronoi::VoronoiDiagram{J,P,T}
+	# arrows ↔ edges:
+	edge::Vector{J}       # arrow → edge
+	firstarrow::Vector{J} # edge → arrow
+	# parametrizations of edges by distance to sites:
+	separator::Vector{Separator{T}} # indexed by edges
+	arrowtype::Vector{UInt8} # indexed by arrows;
+	# this encodes the relative position of the bisector minimum and the
+	# tail of this arrow on the bisector; the values mean:
+	# 0: this edge is between parallel segments (degenerate case)
+	# 1: the node is *after* the minimum value:  ←← →→•→→
+	# 2: the node is *before* the minimum value: ←←•←← →→
 end
 
-function shownode(io::IO, t::AbstractTriangulation, q::Node)
-	println(io, "\e[33m", q, triangle(t,q), "\e[m ")
-	for i in (1,2,3)
-		e = side(q, i); o = opposite(t, e); oo = opposite(t,o)
-		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
-	end
-end
-function shownode(io::IO, v::VoronoiDiagram, q::Node)
-	println(io, "\e[33m", q, triangle(v,q), "\e[m: ",
-		geometricnode(v, q), " r²=", noderadius(v,q))
-# 	for i in (1,2,3)
-# 		e = side(q, i); o = opposite(v, e); oo = opposite(v,o)
-# 		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
-# 	end
-end
-function showcell(io::IO, v::AbstractTriangulation, c::Cell)
-	print(io, "\e[31m", c, "\e[m:");
-	for e in ring(v, c)
-		print(io, " ", node(e), "→", e, "(", right(v,e), ")→")
-	end
-	println(io)
-# 	println(io, "\e[34m", c, "\e[m: ", [node(e) for e in star(v,c)])
-	for e in star(v,c)
-		c1 = tail(v, e)
-		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")
-	end
+@inline voronoi(v::OffsetDiagram) = v.voronoi
+for f in (:triangulation, :npoints, :nsegments, :point, :issegment,
+	:cellsegment, :geometricnode, :noderadius)
+	@eval @inline $f(t::AbstractVoronoi, args...;kwargs...) =
+		$f(voronoi(t), args...;kwargs...)
 end
 
-function showedge(io::IO, v::VoronoiDiagram, e::Edge)
-	a = Arrow(v.firstarrow[int(e)])
-	o = opposite(v, a)
-	print(io, "\e[32m", e, " = (", a, ",", o, ")\e[m  ")
-	print(io, left(v,a), "|", right(v,a), " ")
-	print(io, tail(v, a), ("==", "->", "<-")[v.arrowtype[int(a)]+1],
-	  " ", ("==", "<-", "->")[v.arrowtype[int(o)]+1], tail(v,o))
-	println(io)
-	ea, eo = Edge(v.edge[int(a)]), Edge(v.edge[int(o)])
-	ea ≠ e && println(io, "  \e[31;7m edge($a) = $ea, should be $e\e[m")
-	eo ≠ e && println(io, "  \e[31;7m edge($o) = $eo, should be $e\e[m")
+@inline OffsetDiagram(points, segments) = OffsetDiagram{Int32}(points, segments)
+function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
+	v = VoronoiDiagram{J}(points, segments)
+	showall(stdout, v)
+	splitsegments!(v)
+	ne = narrows(v) ÷ J(2)
+	edge = Vector{J}(undef, narrows(v))
+	sep = sizehint!(Separator{eltype(P)}[], ne)
+	firstarrow = sizehint!(J[], ne)
+	for a in eacharrow(v)
+		b = opposite(v, a)
+		b < a && continue
+		push!(firstarrow, a)
+		edge[a] = edge[b] = length(firstarrow)
+# 		println("separator($(length(firstarrow))) = $(right(v,a))/ $(left(v,a))")
+		push!(sep, separator(v, right(v, a), left(v, a)))
+	end
+	arrowtype = sizehint!(UInt8[], narrows(v))
+	for q in eachnode(v), i in 1:3
+		g, t = geometricnode(v, q), √(noderadius(v, q))
+		a = side(q, i)
+		s = sep[edge[int(a)]]
+		println("""
+\e[7marrow $a (edge=$(edge[int(a)]), $(left(v,a))/$(right(v,a))):\e[m
+  node $q = $g, $t (s.t0=$(s.t0))
+  separator $s""")
+		sg1, sg2 = evaluate(s, t, +1), evaluate(s, t, -1)
+		println("  candidates $sg1, $sg2")
+		if any(isnan, s.normal); push!(arrowtype, UInt8(0))
+		elseif sg1 ≈ g; push!(arrowtype, UInt8(1))
+		elseif sg2 ≈ g; push!(arrowtype, UInt8(2))
+		else
+			println("\e[31;1m no good candidate!\e[m")
+		end
+	end
+
+	return OffsetDiagram{J,P,eltype(P)}(v, edge, firstarrow,
+		sep, arrowtype)
 end
-function Base.display(io::IO, v::VoronoiDiagram)
-	println(io, "\e[1m begin Voronoi diagram with $(nnodes(v)) nodes and $(ncells(v)) cells:\e[m")
-	for q in eachnode(v); shownode(io, v, q); end
-	for c in eachcell(v); showcell(io, v, c); end
-# 	for e in 1:length(v.firstarrow); showedge(io, v, Edge(e)); end
-	println(io, "\e[1m end Voronoi diagram\e[m")
-end
-@inline Base.display(v::VoronoiDiagram) = display(stdout, v)
-# end »»1
-# Offset ««1
+# Single cell offset ««2
+
 function cut_parabola(a, b, c, g1, g2, r)
 	# given a parabola (focus a, directrix (bc)),
 	# returns the two points (if any) at distance²=r from the focus
@@ -1491,12 +1622,12 @@ function cut_parabola(a, b, c, g1, g2, r)
 	z1, z2 = (a1-s*bc+ρ*ibc, a1+s*bc+ρ*ibc)
 	return (z1,z2)
 end
-@inline cut_parabola(v::VoronoiDiagram, a::Cell, b::Cell, c::Cell,
+@inline cut_parabola(v::AbstractVoronoi, a::Cell, b::Cell, c::Cell,
 		q1::Node, q2::Node, r) =
 	cut_parabola(point(v,a), point(v,b), point(v,c),
 		geometricnode(v, q1), geometricnode(v, q2), r)
 
-function segmentoffset(v::VoronoiDiagram, c::Cell, ::typeof(+), radius)
+function segmentoffset(v::AbstractVoronoi, c::Cell, ::typeof(+), radius)
 	# compute the boundary of the offset for a segment-cell (right side)
 	# i.e. all intersection points of the edges of the cell and the offset line
 	println(" walking the boundary of cell $c:")
@@ -1513,7 +1644,7 @@ function segmentoffset(v::VoronoiDiagram, c::Cell, ::typeof(+), radius)
 		println("  arrival $q1: $(geometricnode(v,q1)), d²=$(noderadius(v,q1))")
 		if is_in1 ≠ is_in
 			println("  \e[32;1m offset line crosses this edge!\e[m")
-		elseif issegment(v, c2)
+		elseif c2 ∈ (a,b) || issegment(v, c2)
 			println("  this is a straight line, no crossing")
 		else
 			println("  this is a parabola arc! does it cross twice?")
@@ -1528,10 +1659,10 @@ function segmentoffset(v::VoronoiDiagram, c::Cell, ::typeof(+), radius)
 	end
 end
 function offset(points, segments, radius)
-	v = voronoi(points, segments)
+	v = OffsetDiagram(points, segments)
 	return offset(v, radius)
 end
-function offset(v::VoronoiDiagram, radius)
+function offset(v::OffsetDiagram, radius)
 	# do a walk on the set of segments by connectivity
 	#   (we only start on segments but we can walk to points if an edge
 	#   points us to them)
@@ -1540,8 +1671,6 @@ function offset(v::VoronoiDiagram, radius)
 	# then glue along the edges
 	# as long as there are segments remaining...
 end
-
-
 
 #»»1
 end
@@ -1552,9 +1681,10 @@ V=Voronoi
 # V = Voronoi
 # t=V.triangulate([[-10,0],[10,0],[0,10.]])
 # v=V.voronoi([(0,0),(10,0),(11,3),(6,2),(5,9),(1,10)],[(6,1),(1,2),(2,3),(3,4),(4,5),(5,6)])
-# v=V.voronoi([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(3,4),(5,6)])
-# V.splitsegments!(v)
-# V.segmentoffset(v, V.Cell(10), +, .5)
+# v=V.VoronoiDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(3,4),(5,6)])
+
+# v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(4,3),(3,1)])
+# o = V.segmentoffset(v, V.Cell(10), +, .5)
 
 # m = V.edgeexit_pp([5,9],[5,1],[1.6,5],[8.4,5],[0,10],[10,10])
 # V.equidistant_pss([0,0],[5,9],[5,1],[0,10],[10,10]) # [5,5]
