@@ -1343,18 +1343,6 @@ plot \\
 		""")
 	end
 end
-function showall(io::IO, t::AbstractTriangulation)
-	for q in eachnode(t); shownode(io, t, q); end
-	for c in eachcell(t); showcell(io, t, c); end
-end
-
-function shownode(io::IO, t::AbstractTriangulation, q::Node)
-	println(io, "\e[33m", q, triangle(t,q), "\e[m ")
-	for i in (1,2,3)
-		e = side(q, i); o = opposite(t, e); oo = opposite(t,o)
-		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
-	end
-end
 function shownode(io::IO, v::AbstractVoronoi, q::Node)
 	println(io, "\e[33m", q, triangle(v,q), "\e[m: ",
 		geometricnode(v, q), " r²=", noderadius(v,q))
@@ -1363,19 +1351,6 @@ function shownode(io::IO, v::AbstractVoronoi, q::Node)
 # 		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
 # 	end
 end
-function showcell(io::IO, v::AbstractTriangulation, c::Cell)
-	print(io, "\e[31m", c, "\e[m:");
-	for e in ring(v, c)
-		print(io, " ", node(e), "→", e, "(", right(v,e), ")→")
-	end
-	println(io)
-# 	println(io, "\e[34m", c, "\e[m: ", [node(e) for e in star(v,c)])
-	for e in star(v,c)
-		c1 = tail(v, e)
-		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")
-	end
-end
-
 function showarrow(io::IO, v::OffsetDiagram, a::Arrow)
 	if !iszero(branch(v, a))
 		q = node(a)

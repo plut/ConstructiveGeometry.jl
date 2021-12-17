@@ -1424,6 +1424,22 @@ instead, it tends to “round out” the solid.
 """
 @inline loop_subdivide(n::Integer, s...) = operator(LoopSubdivide, (n,), s...)
 
+# refine««2
+struct Refine{D} <: AbstractTransform{D}
+	maxlen::Float64
+	child::AbstractGeometry{D}
+end
+@inline mesh(g::MeshOptions, s::Refine{3}, (m,)) =
+	VolumeMesh(TriangleMeshes.splitedges(m.mesh, s.maxlen^2))
+
+"""
+    refine(maxlen, volume...)
+
+Splits all edges of `volume` repeatedly, until no edge is
+longer than `maxlen`.
+"""
+@inline refine(maxlen::Real, s...) = operator(Refine, (maxlen,), s...)
+
 # SetParameters etc.««1
 # SetParameters ««2
 struct SetParameters{D} <: AbstractTransform{D}

@@ -1,19 +1,26 @@
 module TriangleMeshes
 using StaticArrays
 using FastClosures
+using DataStructures # heappush!, 
 using IGLWrap_jll
 # libiglwrap="/home/jerome/src/iglwrap/local/libiglwrap.so"
-const Vec3d = MVector{3,Cdouble}
-const Mat3d = MMatrix{3,3,Cdouble,9}
-
-# Data type ««1
-@inline det(a::SVector{2}, b::SVector{2}) = a[1]*b[2]-a[2]*b[1]
-@inline det(a::SVector{2}, b::SVector{2}, c::SVector{2}) = det(a-c, b-c)
-
 # the bits types are hard-coded on the C side:
 const Point=SVector{3,Cdouble}
 const Face=NTuple{3,Cint}
 @inline _face(a)=(Cint.(a[1:3])...,)
+
+const Vec3d = MVector{3,Cdouble}
+const Mat3d = MMatrix{3,3,Cdouble,9}
+
+include("CornerTables.jl")
+using .CornerTables
+
+# Geometry««1
+@inline det(a::SVector{2}, b::SVector{2}) = a[1]*b[2]-a[2]*b[1]
+@inline det(a::SVector{2}, b::SVector{2}, c::SVector{2}) = det(a-c, b-c)
+@inline distance2(a::SVector{3}, b::SVector{3}) = norm2(a-b)
+@inline norm2(a::SVector{3}) = a[1]^2+a[2]^2+a[3]^2
+# Data type ««1
 
 struct TriangleMesh{T,A}
 	vertices::Vector{SVector{3,T}}
@@ -220,8 +227,7 @@ end#»»
 @inline Base.symdiff(m1::CTriangleMesh, m2::CTriangleMesh) = boolean(3, m1, m2)
 
 # Own functions ««1
-
-
+# plane_splice ««2
 """
     plane_slice(m::TriangleMesh)
 
@@ -293,7 +299,7 @@ function plane_slice(z::Real, m::TriangleMesh)
 end
 
 
-# project««
+# project««2
 """
     project(mesh)
 
@@ -309,9 +315,98 @@ function project(m::TriangleMesh{T}) where{T}
 		push!(triangles, d > 0 ? SA[a1,b1,c1] : SA[a1,c1,b1])
 	end
 	return triangles
-end#»»
+end
+
+# Corner table structure ««2
+struct CTMesh{J,T,A} <: AbstractTriangulation{J}
+	triangulation::CornerTable{J}
+	points::Vector{SVector{3,T}}
+	attributes::Vector{A}
+end
+
+Base.show(io::IO, t::CTMesh) = CornerTables.showall(io, t)
+
+@inline CornerTables.triangulation(t::CTMesh) = t.triangulation
+@inline point(t::CTMesh, c::Cell) = t.points[int(c)]
+@inline edgelength(t::CTMesh, a::Arrow) =
+	distance2(point(t, CornerTables.head(t,a)), point(t, CornerTables.tail(t,a)))
+
+# conversion to and from `TriangleMesh`
+
+@inline CTMesh{J}(m::TriangleMesh{T,A}) where{J,T,A} =
+	CTMesh{J,T,A}(CornerTable{J}(faces(m)), vertices(m), attributes(m))
+@inline CTMesh(m::TriangleMesh) = CTMesh{Int32}(m)
+
+@inline TriangleMesh(t::CTMesh{J,T,A}) where{J,T,A} =
+	TriangleMesh(t.points, [ Int.(f) for f in alltriangles(t) ], t.attributes)
+
+# splitedges ««2
+# The following structure is used as a heap for the edges of the mesh,
+# sorted by size; we will always remove (and split) the longest edge:
+struct VecSortedSet{J,V}
+	set::SortedSet{Tuple{V,J}}
+	size::Vector{V}
+end
+@inline VecSortedSet{J}(s::AbstractVector{V}) where{J,V} =
+	VecSortedSet{J,V}(SortedSet{Tuple{V,J}}((x,i) for (i,x) in pairs(s)), s)
+@inline VecSortedSet(s::AbstractVector) = VecSortedSet{Int}(s)
+
+@inline Base.last(s::VecSortedSet) = last(s.set)[2]
+@inline function Base.setindex!(s::VecSortedSet, v, k)
+	delete!(s.set, (s.size[k], k))
+	s.size[k] = v
+	push!(s.set, (s.size[k], k))
+	return s
+end
+@inline function Base.push!(s::VecSortedSet, vlist...)
+	for v in vlist
+		push!(s.size, v)
+		push!(s.set, (last(s.size), length(s.size)))
+	end
+	return s
+end
+"""
+    splitedges!(m::TriangleMesh, maxlen)
+
+Repeatedly split all edges of `m`, starting by the longest ones,
+until no edge has length² > `maxlen`.
+"""
+@inline splitedges(m::TriangleMesh, maxlen) =
+	TriangleMesh(splitedges!(CTMesh(m), maxlen))
+
+function splitedges!(t::CTMesh{J,T,A}, maxlen) where{J,T,A}
+	elist = VecSortedSet{J}(T[ a > opposite(t, a) ? zero(T) : edgelength(t, a)
+		for a in eacharrow(t) ])
+	while true
+	e = Arrow(last(elist)); o = opposite(t, e)
+	elist.size[e] ≤ maxlen && break
+	ne, po = next(e), prev(o)
+	o_ne, o_po = opposite(t, ne), opposite(t, po)
+	
+	ct, ch = CornerTables.tail(t, e), CornerTables.head(t, e)
+	pm = (point(t,ct) + point(t,ch))/2
+	push!(t.points, pm)
+	push!(t.attributes, t.attributes[int(node(e))], t.attributes[int(node(o))])
+	(q1, q2, cm) = CornerTables.split!(t, e)
+	# update elist accordingly:
+	# edge (ct, cm) is now (e, opp(e))  (with e < opp(e))
+	# edge (cm, ch) is (side(q1,1) < side(q2,1))
+	# edge (cm, cl) is (next(e) < side(q1,3))
+	# edge (cm, cr) is (prev(o) < side(q2,2))
+	# edge (ch, cl) is (opp(next(e)) < side(q1,2))
+	# edge (ch, cr) is (opp(prev(o)) < side(q2,3))
+	pt, ph, pl, pr = point(t, ct), point(t, ch),
+		point(t, left(t,e)), point(t, right(t,e))
+	elist[e] = distance2(ph, pm) # elist[o] is already 0
+	push!(elist, distance2(pm, ph), 0, 0, 0, 0, 0)
+	elist[ne] = distance2(pm, pl)
+	elist[po] = distance2(pm, pr)
+	elist[o_ne] = distance2(ph, pl)
+	elist[o_po] = distance2(ph, pr)
+	end
+	return t
+end
 
 #  »»1
-
 export TriangleMesh
 end

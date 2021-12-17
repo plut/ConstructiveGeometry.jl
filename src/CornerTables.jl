@@ -68,12 +68,16 @@ end
 @inline cellcorner!(t::AbstractTriangulation, l::Pair{<:Cell, <:Arrow}...) =
 	for(s,e) in l; anyarrow!(t, s, e); tail!(t, e, s); end
 
-@inline right(t::AbstractTriangulation, e::Arrow) = tail(t, next(e))
 @inline left(t::AbstractTriangulation, e::Arrow) = tail(t, prev(e))
+@inline right(t::AbstractTriangulation, e::Arrow) = left(t, opposite(t, e))
+# @inline right(t::AbstractTriangulation, e::Arrow) = tail(t, next(e))
+# @inline left(t::AbstractTriangulation, e::Arrow) = tail(t, prev(e))
 # @inline base(t::AbstractTriangulation, e::Arrow) = (left(t,e),right(t,e))
 # `after`, `before`: next/previous arrows with same tail
-@inline after(t::AbstractTriangulation, e::Arrow) = next(opposite(t, next(e)))
-@inline before(t::AbstractTriangulation, e::Arrow) = prev(opposite(t, prev(e)))
+# @inline after(t::AbstractTriangulation, e::Arrow) = next(opposite(t, next(e)))
+# @inline before(t::AbstractTriangulation, e::Arrow) = prev(opposite(t, prev(e)))
+@inline after(t::AbstractTriangulation, e::Arrow) = opposite(t, prev(e))
+@inline before(t::AbstractTriangulation, e::Arrow) = next(opposite(t, e))
 
 @inline cell(t::AbstractTriangulation, q::Node, i) = tail(t, side(q,i))
 @inline triangle(t::AbstractTriangulation, q::Node) =
@@ -91,10 +95,15 @@ end
 @inline adjnodes(t::AbstractTriangulation, q::Node) =
 	(adjnode(t,q,1), adjnode(t,q,2), adjnode(t,q,3))
 
-function newnodes!(t::AbstractTriangulation{J}, k) where{J}
+@inline function newnodes!(t::AbstractTriangulation{J}, k) where{J}
 	n = nnodes(t)
 	nnodes!(t, n+k)
-	return Node{J}.(n+1:n+k)
+	return Node(J(n+1)):Node(J(n+k))
+end
+@inline function newcells!(t::AbstractTriangulation{J}, k) where{J}
+	n = ncells(t)
+	ncells!(t, n+k)
+	return Cell(J(n+1)):Cell(J(n+k))
 end
 
 # Iterators ««2
@@ -167,6 +176,29 @@ Equivalent to right.(ring(...)).
 	(tail(t, x) for x in ring(t, anyarrow(t, c)))
 
 # Elementary modifications ««2
+"""
+    split!(triangulation, edge)
+
+Splits an edge in two, creating two new triangles.
+Returns (newtriangle1, newtriangle2, newcell).
+"""
+function split!(t::AbstractTriangulation, e::Arrow)
+	o = opposite(t, e)
+	c1, c2, cl, cr = tail(t, e), tail(t, o),
+		tail(t, prev(e)), tail(t, prev(o))
+	(c3,) = newcells!(t, 1)
+# 	c3 = pushpoint!(t, (point(t, c1)+point(t, c2))/2)
+	x, y = newnodes!(t, 2)
+	opposites!(t, side(x,1) => side(y,1),
+		side(x,2) => opposite(t, next(e)), side(x,3) => next(e),
+		side(y,2) => prev(o), side(y,3) => opposite(t, prev(o)))
+	tail!(t, o=>c3, next(e)=>c3,
+		side(x,1) => c3, side(x,2) => c2, side(x,3) => cl,
+		side(y,1) => c2, side(y,2) => c3, side(y,3) => cr)
+	anyarrow!(t, c2=>side(y,1), c3=>o)
+	return (x, y, c3)
+end
+# FIXME: check that flip! is still up-to-date
 """
     flip!(triangulation, corner)
 
@@ -296,7 +328,7 @@ end
 
 # Constructor from triangle list ««2
 function CornerTable{J}(triangles) where{J}
-	nf = length(triangles); nc = 3nt
+	nf = length(triangles); nc = 3nf
 	nv = 0
 	vlist = sizehint!(J[], nc)
 	olist = Vector{J}(undef, nc)
@@ -305,27 +337,53 @@ function CornerTable{J}(triangles) where{J}
 		push!(vlist, v)
 	end
 	clist = Vector{J}(undef, nv)
-	# edge[v] = list of all corners seeing `v` on their right
-	edge = [ sizehint!(J[], 6) for _ in 1:nv ]
-# 	clist[vlist] .= 1:nc
-	for (e, s) in pairs(vlist)
-		clist[s] = e
-		n = next3(e); sn = vlist[n]
-		push!(edge[sn], e)
+	# edgeto[v] = list of all edges pointing to `v`
+	edgeto = [ sizehint!(J[], 6) for _ in 1:nv ]
+	for (e, v) in pairs(vlist)
+		clist[v] = e
+		push!(edgeto[v], prev3(e))
 	end
-	for (e, s) in pairs(vlist)
-		sn, sp = vlist[next3(e)], vlist[prev3(e)]
-		for e1 in edge[sp]
-			vlist[prev3(e1)] == sn || continue
-			olist[e] = e1; olist[e1] = e
+	for (e, v1) in pairs(vlist)
+		v2 = vlist[next3(e)]
+		for o in edgeto[v1]
+			vlist[o] == v2 || continue
+			olist[e], olist[o] = o, e
 		end
 	end
 	return CornerTable{J}(olist, vlist, clist)
 end
 
+# Displaying & debugging ««1
+function showall(io::IO, t::AbstractTriangulation)
+	for q in eachnode(t); shownode(io, t, q, "\n"); end
+	for c in eachcell(t); showcell(io, t, c, "\n"); end
+end
+
+function shownode(io::IO, t::AbstractTriangulation, q::Node, s = "\n")
+	print(io, "\e[33m", q, triangle(t,q), "\e[m ", s)
+	for i in (1,2,3)
+		e = side(q, i); o = opposite(t, e); oo = opposite(t,o)
+		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
+		e1 = next(e); t1 = tail(t, e1); to = tail(t, o)
+		t1 ≠ to && println(io, "  \e[31;7m tail($o) = $to, should be $t1\e[m")
+	end
+end
+function showcell(io::IO, v::AbstractTriangulation, c::Cell, s = "\n")
+	print(io, "\e[31m", c, "\e[m:");
+	for e in star(v, c)
+		print(io, " ", node(e), "→", e, "(", head(v,e), ")→")
+	end
+	print(io, s)
+# 	println(io, "\e[34m", c, "\e[m: ", [node(e) for e in star(v,c)])
+	for e in star(v,c)
+		c1 = tail(v, e)
+		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")
+	end
+end
+
 #»»1
 export AbstractTriangulation, CornerTable, Arrow, Cell, Edge, Node, int
-export tail, tail!, opposite, opposite!, anyarrow, anyarrow!
+export tail, tail!, head, opposite, opposite!, anyarrow, anyarrow!
 export narrows, nnodes, nnodes!, ncells, ncells!
 export next, prev, node, side, arrows
 export opposites!, cellcorner!
