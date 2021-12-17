@@ -1435,8 +1435,8 @@ end
 """
     refine(maxlen, volume...)
 
-Splits all edges of `volume` repeatedly, until no edge is
-longer than `maxlen`.
+Splits all edges of `volume` repeatedly (preserving global geometry),
+until no edge is longer than `maxlen`.
 """
 @inline refine(maxlen::Real, s...) = operator(Refine, (maxlen,), s...)
 
@@ -1487,6 +1487,19 @@ Colors objects `s...` in the given color.
 	color(parse(MeshColor, c), s...)
 @inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
+
+struct RandomColor{D} <: AbstractTransform{D}
+	child::AbstractGeometry{D}
+end
+@inline mesh(g::MeshOptions, c::RandomColor{3}, (m,)) =
+	VolumeMesh(TriangleMesh(vertices(m), faces(m),
+		rand(MeshColor, size(faces(m)))))
+"""
+    randomcolor(s...)
+
+Paints each triangle of `s` in a random color. Intended for debugging purposes.
+"""
+@inline randomcolor(s...) = operator(RandomColor, (), s...)
 
 # Highlight ««2
 struct Highlight{D,C<:Colorant} <: AbstractTransform{D}
@@ -2549,9 +2562,9 @@ export cube, sphere, cylinder, cone, surface
 export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, reflect, raise, lower
 export project, slice, half
-export decimate, loop_subdivide
+export decimate, loop_subdivide, refine
 export linear_extrude, rotate_extrude, sweep
-export color, set_parameters
+export color, randomcolor, highlight, set_parameters
 export mesh, stl, svg
 export ×
 

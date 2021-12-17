@@ -212,6 +212,10 @@ png("loop_subdivide", s); # hide
 ```
 ![example: loop subdivision of a cube](loop_subdivide.png)
 
+```@docs
+refine
+```
+
 ## Coloring objects
 
 ```@docs
@@ -243,6 +247,10 @@ and (invertible) affine transformations. For other transformations:
    transformations, and would cover highlighted parts anyway;
  - projection, slicing and extrusion modify the dimension of object,
    making it impossible to preserve highlighted parts.
+
+```@docs
+randomcolor
+```
 
 ## Modifying meshing parameters
 ```@docs
