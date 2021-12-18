@@ -1,0 +1,165 @@
+\documentclass{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{unicode,math}
+\usepackage[margin=30mm]{geometry}
+\newenvironment{eqsplit}{\equation\aligned}{\endaligned\endequation}
+
+
+\begin{document}
+\title{Useful geometric computatoins}
+
+
+\section{Uniform approximation of a parabolic arc by a polygonal chain}%««1
+\begin{prop}\label{prop:points}
+Let~$𝒫$ be the parabola with equation $y = f(x) = a/2 + x²/2a$.
+Let~$H$ be the hypergeometric function
+$H(u) = {}_2F_1(1/4,1/2;\;3/2\;-u^2)$.
+
+Choose real numbers~$s_1$, $s_2$ and an integer~$n ≥ 1$
+and define, for~$i = 0, …, n$,
+$x_i = a H^{-1}((1-i/n) s_1 + (i/n) s_2)$.
+
+Then, for $n$ large enough,
+the polygonal line with vertices~$A_i = (x_i, f(x_i))$
+lies within a Minkowski distance~$δ = \frac{a}{8n^2}
+(s_2-s_1)^2+O(n^{-4})$ of the parabola~$𝒫$.
+\end{prop}
+
+\begin{proof}
+It is enough to prove this for an individual segment of the polygonal line,
+for example the segment $(A_0, A_1)$.
+For~$x_0 ≤ x ≤ x_1$, the distance between a point~$(x, f(x)) ∈ 𝒫$
+and the segment~$(A_0, A_1)$ is given by the function
+% 	the maximum on the interval~$[x_0,x_1]$ of the function
+\begin{equation}\begin{split}
+g(x)
+%  &= \frac{(x_0+x_1)/(2a) x - f(x) + x_0 x_1/(2a) + a/2}{√{1+(x_0+x_1/2a)^2}}\\
+ &= \frac{(x_0+x_1) x - 2a f(x) + x_0 x_1 + a^2}{√{(2a)^2+(x_0+x_1)^2}}\\
+%  &= \frac{(x_0+x_1) x - a^2 - x^2 + x_0 x_1 + a^2}{√{(2a)^2+(x_0+x_1)^2}}\\
+ &= \frac{(x-x_0)(x_1-x)}{√{(2a)^2+(x_0+x_1)^2}}.\\
+\end{split}\end{equation}
+The maximum value~$δ_0$ of~$g$ on the interval~$[x_0,x_1]$
+is reached for~$x = (x_0+x_1)/2$
+and amounts to $δ_0 = \frac{(x_1-x_0)^2}{4√{(2a)^2+(x_0+x_1)^2}}$.
+
+Let~$G = H^{-1}$ and~$x(t) = a G((1-t) s_1 + t s_2)$.
+Then for all~$i = 0,…, n$, $x_i = x(i/n)$
+and $x_{i+1} - x_i = x'(i/n)/n + O(1/n^2)$.
+Therefore
+\begin{equation}
+δ_i = \frac{x'(i/n)^2}{8n^2 √{a^2 + x_i^2}} + O(1/n^4).
+\end{equation}
+
+Since $H'(u)^4 = 1/(1+u^2)$,
+the inverse~$G$ of~$H$ satisfies the differential equation
+$(G')^4 = 1 + G^2$,
+and hence $x'(t)^2 = a (s_2 - s_1)^2 √{a^2 + x(t)^2}$.
+Accordingly, one finds
+\begin{equation}
+δ_i = \frac{a}{8n^2} (s_2-s_1)^2 + O(1/n^4).
+\end{equation}
+Since this is true for all~$i = 0,…,n-1$, the proposition follows.
+\end{proof}
+
+
+\begin{prop}\label{prop:approx}
+The following algorithm approximates the parabola~$𝒫$
+on the interval~$[X_1,X_2]$ within a distance~$≤ δ + O(δ^2)$.
+\begin{enumerate}
+\item For~$i = 1,2$, define $s_i = H(X_i/a)$.
+\item Let~$n ≥ \abs{s_2-s_1} √{a/(8δ)}$.
+\item Define the points~$(x_i=a H^{-1}(s_1 + \frac{i}{n}(s_2-s_1), f(x_i))$
+as in Prop.~\ref{prop:points}.
+\end{enumerate}
+\end{prop}
+
+
+\section{Arc length of an Archimedean spiral (wrapped line segment)}%««1
+
+Let~$F$ be the transformation on~$ℝ^2$ defined by
+$F(x,y) = (x \cos(y/x), x \sin(y/x)$.
+
+\begin{prop}
+Let~$S = (p_0, p_1)$ be a line segment, with $p_i = (x_i, y_i)$,
+such that $0 < x_0 < x_1$.
+Let~$a = x_0 - x_1$, $D = x_0 y_1 - y_0 x_1$,
+and $z_i = D+√{a^2 x_i^2 + D^2}$.
+Then the arc length of the image curve~$F(S)$ is
+\[ \begin{cases}
+  \frac{D}{a} \log \frac{x_1 z_0}{x_0 z_1}
+	+ a \pa{\frac{x_1^2}{z_1}-\frac{x_0^2}{z_0}}&
+	\text{if $x_0 ≠ x_1$;}\\
+	x_0 \abs{y_0 - y_1} &\text{if $x_0 = x_1$.}\end{cases}
+\]
+\end{prop}
+\begin{proof}
+The segment is parametrized as $p(t) = (1-t) p_0 + p_1
+ = (t (x_1-x_0) + x_0, t (y_1 - y_0) + y_0).
+ = (a t +  b, c t + d)$
+with $a = (x_1-x_0)$, $b = x_0$, $c = (y_1 - y_0)$, $d = y_0$.
+In complex notation, one finds
+$F(p(t)) = (a t + b) \exp(i \frac{ct+d}{at+b})$ and hence
+\begin{eqsplit} F'(p(t))
+&= a e^{i…} + (a t + b) i \frac{bc-ad}{(at+b)^2} e^{i…} \\
+&= \pa{a + i \frac{bc - ad}{at + b}} \exp\pa{i \frac{ct+d}{at+b}};\\
+\abs{F'(p(t))}
+&= √{a^2 + \frac{(ad-bc)^2}{(at+b)^2}}.
+\end{eqsplit}
+The arc length is therefore
+\begin{eqsplit}
+&= ∫_0^1 \abs{F'(p(t))} dt
+&= ∫_0^1 √{a^2 + \frac{(ad-bc)^2}{(at+b)^2}} dt\\
+&= ∫_0^1 √{a^2(at+b)^2 + (ad-bc)^2} \;\frac{dt}{at+b} \\
+% &= a ∫_0^1 √{(at+b)^2 + (d-bc/a)^2} \;\frac{dt}{at+b} \\
+\end{eqsplit}
+Define $s = (at+b)/(D+√{a^2(at+b)^2+D^2})$,
+so that $t = -b/a+2sD/(a^2(1-s^2))$,
+$√{(at+b)^2+D^2/a^2} = D\frac{1+s^2}{1-s^2}$,
+and $dt = 2D/a^2 \frac{1+s^2}{(1-s^2)^2} ds$.
+Then
+\begin{eqsplit}
+G(t) = ∫ \abs{F'(p(t))} dt
+&= \frac{D}{a} ∫ \pa{\frac{1+s^2}{1-s^2}}^2 \frac{ds}{s}\\
+&= \frac{D}{a} ∫ \pa{\frac 1s +\frac{1}{(s-1)^2} - \frac{1}{(s+1)^2}} ds\\
+&= \frac{D}{a} \pa{\log s + \frac{2}{1-s^2}}\\
+&= \frac{D}{a} \pa{\log \frac{at+b}{D+√{a^2(at+b)^2+D^2}}
+ + 2 \frac{(D+√{a^2(at+b)^2+D^2})^2}{(D+√{a^2(at+b)^2+D^2})^2-(at+b)^2}}\\
+&= \frac{D}{a} \pa{\log \frac{at+b}{D+√{…}}
+ + 2 + \frac{a^2}{D}\frac{(at+b)^2}{D+√{…}}}\\
+&= \frac{D}{a} \log \frac{at+b}{D+√{a^2(at+b)^2+D^2}} + \frac{2D}{a}
+ + a \frac{(at+b)^2}{D+√{a^2(at+b)^2+D^2}}
+\end{eqsplit}
+The primitive~$G-2D/a$ takes the following values:
+\begin{eqsplit}
+G(0)
+&= \frac{D}{a} \log \frac{x_0}{D+√{a^2 x_0^2 + D^2}}
+ + \frac{a x_0^2}{D+√{a^2 x_0^2+D^2}}\\
+G(1)
+&= \frac{D}{a} \log \frac{x_1}{D+√{a^2 x_1^2+D^2}}
+ + \frac{a x_1^2}{D+√{a^2 x_1^2+D^2}}\\
+\end{eqsplit}
+This concludes the case where~$a ≠ 0$. The other case is trivial.
+\end{proof}
+
+% &= ∫_0^1 √{1+\frac{(ad-bc)^2}{a^2 (at+b)^2}}\; a dt\\
+% % u = at + b; dt = 1/a du
+% &= ∫_b^{a+b} √{1+\frac{(ad-bc)^2}{a^2 u^2}}\; du\\
+% &= ∫_{x_0}^{x_1} √{1+k^2/u^2}\; du,
+% \end{eqsplit}
+% where~$k = (bc-ad)/a = \frac{x_0 y_1 - y_0 x_1}{x_1 - x_0}$.
+% (Warning: if $x_0 = x_1$ then $k$ is infinite, we need asymptotics)
+% 
+% Let $v = u/(k+√{u^2+k^2})$, so that
+% $u = 2 k^2 v/(1-v^2)$, $√{u^2+k^2} = k(1+v^2)/(1-v^2)$
+% and $du = 2k(1+v^2)/(1-v^2)^2$. Then
+% \begin{eqsplit}
+% ∫ √{k^2+u^2} du/u
+% &= ∫ \pa{\frac{1+v^2}{1-v^2}}^2 \frac{k\, dv}{v} \\
+% &= k ∫ \pa{1
+% +\frac{1}{v-1}-\frac{1}{v+1}+\frac{1}{(v-1)^2}+\frac{1}{(v+1)^2}} dv \\
+% &= k (v + \log(1-v) - \log(v+1) +\frac{1}{1-v} -\frac{1}{1+v}) \\
+% &= k (v + \log\frac{1-v}{1+v} + \frac{2v}{1-v^2}) \\
+% &= \frac{k u}{k+√{u^2+k^2}} + k \log\frac{k-u+√{k^2+u^2}}{k+u+√{k^2+u^2}} + u \\
+% \end{eqsplit}
+\end{document}

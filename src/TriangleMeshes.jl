@@ -328,7 +328,7 @@ Base.show(io::IO, t::CTMesh) = CornerTables.showall(io, t)
 
 @inline CornerTables.triangulation(t::CTMesh) = t.triangulation
 @inline point(t::CTMesh, c::Cell) = t.points[int(c)]
-@inline edgelength(t::CTMesh, a::Arrow) =
+@inline edgelength(t::CTMesh, a::Arrow; distance2 = distance2) =
 	distance2(point(t, CornerTables.head(t,a)), point(t, CornerTables.tail(t,a)))
 
 # conversion to and from `TriangleMesh`
@@ -374,9 +374,9 @@ until no edge has length² > `maxlen`.
 @inline splitedges(m::TriangleMesh, maxlen) =
 	TriangleMesh(splitedges!(CTMesh(m), maxlen))
 
-function splitedges!(t::CTMesh{J,T,A}, maxlen) where{J,T,A}
-	elist = VecSortedSet{J}(T[ a > opposite(t, a) ? zero(T) : edgelength(t, a)
-		for a in eacharrow(t) ])
+function splitedges!(t::CTMesh{J,T,A}, maxlen; distance2=distance2) where{J,T,A}
+	elist = VecSortedSet{J}(T[ a > opposite(t, a) ? zero(T) :
+		edgelength(t, a; distance2) for a in eacharrow(t) ])
 	while true
 	e = Arrow(last(elist)); o = opposite(t, e)
 	elist.size[e] ≤ maxlen && break
