@@ -71,6 +71,7 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] replace `attributes` by a pointer to the original colored object; this could allow detecting edges etc.
  - [x] `refine`: shorten all edges until no longer than given length
   - [ ] 2d (just divide edges)
   - [x] 3d (split triangles)
@@ -115,7 +116,7 @@ For MeshIO: stl needs
  - [x] plane intersection: `slice`
  - [x] projection
  - [ ] path wrapping
- - [ ] wrapped volumes
+ - [x] wrapped volumes
  - [ ] `text`
    - OpenSCAD: `src/FreetypeRenderer.cc`, `::render` function
    - [ ] use `Pango` for text and `FreeType` for fonts

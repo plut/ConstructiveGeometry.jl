@@ -75,91 +75,160 @@ as in Prop.~\ref{prop:points}.
 \end{prop}
 
 
-\section{Arc length of an Archimedean spiral (wrapped line segment)}%««1
-
-Let~$F$ be the transformation on~$ℝ^2$ defined by
-$F(x,y) = (x \cos(y/x), x \sin(y/x)$.
-
-\begin{prop}
-Let~$S = (p_0, p_1)$ be a line segment, with $p_i = (x_i, y_i)$,
-such that $0 < x_0 < x_1$.
-Let~$a = x_0 - x_1$, $D = x_0 y_1 - y_0 x_1$,
-and $z_i = D+√{a^2 x_i^2 + D^2}$.
-Then the arc length of the image curve~$F(S)$ is
-\[ \begin{cases}
-  \frac{D}{a} \log \frac{x_1 z_0}{x_0 z_1}
-	+ a \pa{\frac{x_1^2}{z_1}-\frac{x_0^2}{z_0}}&
-	\text{if $x_0 ≠ x_1$;}\\
-	x_0 \abs{y_0 - y_1} &\text{if $x_0 = x_1$.}\end{cases}
-\]
-\end{prop}
-\begin{proof}
-The segment is parametrized as $p(t) = (1-t) p_0 + p_1
- = (t (x_1-x_0) + x_0, t (y_1 - y_0) + y_0).
- = (a t +  b, c t + d)$
-with $a = (x_1-x_0)$, $b = x_0$, $c = (y_1 - y_0)$, $d = y_0$.
-In complex notation, one finds
-$F(p(t)) = (a t + b) \exp(i \frac{ct+d}{at+b})$ and hence
-\begin{eqsplit} F'(p(t))
-&= a e^{i…} + (a t + b) i \frac{bc-ad}{(at+b)^2} e^{i…} \\
-&= \pa{a + i \frac{bc - ad}{at + b}} \exp\pa{i \frac{ct+d}{at+b}};\\
-\abs{F'(p(t))}
-&= √{a^2 + \frac{(ad-bc)^2}{(at+b)^2}}.
-\end{eqsplit}
-The arc length is therefore
-\begin{eqsplit}
-&= ∫_0^1 \abs{F'(p(t))} dt
-&= ∫_0^1 √{a^2 + \frac{(ad-bc)^2}{(at+b)^2}} dt\\
-&= ∫_0^1 √{a^2(at+b)^2 + (ad-bc)^2} \;\frac{dt}{at+b} \\
-% &= a ∫_0^1 √{(at+b)^2 + (d-bc/a)^2} \;\frac{dt}{at+b} \\
-\end{eqsplit}
-Define $s = (at+b)/(D+√{a^2(at+b)^2+D^2})$,
-so that $t = -b/a+2sD/(a^2(1-s^2))$,
-$√{(at+b)^2+D^2/a^2} = D\frac{1+s^2}{1-s^2}$,
-and $dt = 2D/a^2 \frac{1+s^2}{(1-s^2)^2} ds$.
-Then
-\begin{eqsplit}
-G(t) = ∫ \abs{F'(p(t))} dt
-&= \frac{D}{a} ∫ \pa{\frac{1+s^2}{1-s^2}}^2 \frac{ds}{s}\\
-&= \frac{D}{a} ∫ \pa{\frac 1s +\frac{1}{(s-1)^2} - \frac{1}{(s+1)^2}} ds\\
-&= \frac{D}{a} \pa{\log s + \frac{2}{1-s^2}}\\
-&= \frac{D}{a} \pa{\log \frac{at+b}{D+√{a^2(at+b)^2+D^2}}
- + 2 \frac{(D+√{a^2(at+b)^2+D^2})^2}{(D+√{a^2(at+b)^2+D^2})^2-(at+b)^2}}\\
-&= \frac{D}{a} \pa{\log \frac{at+b}{D+√{…}}
- + 2 + \frac{a^2}{D}\frac{(at+b)^2}{D+√{…}}}\\
-&= \frac{D}{a} \log \frac{at+b}{D+√{a^2(at+b)^2+D^2}} + \frac{2D}{a}
- + a \frac{(at+b)^2}{D+√{a^2(at+b)^2+D^2}}
-\end{eqsplit}
-The primitive~$G-2D/a$ takes the following values:
-\begin{eqsplit}
-G(0)
-&= \frac{D}{a} \log \frac{x_0}{D+√{a^2 x_0^2 + D^2}}
- + \frac{a x_0^2}{D+√{a^2 x_0^2+D^2}}\\
-G(1)
-&= \frac{D}{a} \log \frac{x_1}{D+√{a^2 x_1^2+D^2}}
- + \frac{a x_1^2}{D+√{a^2 x_1^2+D^2}}\\
-\end{eqsplit}
-This concludes the case where~$a ≠ 0$. The other case is trivial.
-\end{proof}
-
-% &= ∫_0^1 √{1+\frac{(ad-bc)^2}{a^2 (at+b)^2}}\; a dt\\
-% % u = at + b; dt = 1/a du
-% &= ∫_b^{a+b} √{1+\frac{(ad-bc)^2}{a^2 u^2}}\; du\\
-% &= ∫_{x_0}^{x_1} √{1+k^2/u^2}\; du,
-% \end{eqsplit}
-% where~$k = (bc-ad)/a = \frac{x_0 y_1 - y_0 x_1}{x_1 - x_0}$.
-% (Warning: if $x_0 = x_1$ then $k$ is infinite, we need asymptotics)
+% \section{Arc length of an Archimedean spiral (wrapped line segment)}%««1
 % 
-% Let $v = u/(k+√{u^2+k^2})$, so that
-% $u = 2 k^2 v/(1-v^2)$, $√{u^2+k^2} = k(1+v^2)/(1-v^2)$
-% and $du = 2k(1+v^2)/(1-v^2)^2$. Then
-% \begin{eqsplit}
-% ∫ √{k^2+u^2} du/u
-% &= ∫ \pa{\frac{1+v^2}{1-v^2}}^2 \frac{k\, dv}{v} \\
-% &= k ∫ \pa{1
-% +\frac{1}{v-1}-\frac{1}{v+1}+\frac{1}{(v-1)^2}+\frac{1}{(v+1)^2}} dv \\
-% &= k (v + \log(1-v) - \log(v+1) +\frac{1}{1-v} -\frac{1}{1+v}) \\
-% &= k (v + \log\frac{1-v}{1+v} + \frac{2v}{1-v^2}) \\
-% &= \frac{k u}{k+√{u^2+k^2}} + k \log\frac{k-u+√{k^2+u^2}}{k+u+√{k^2+u^2}} + u \\
+% Let~$F$ be the transformation on~$ℝ^2$ defined by
+% $F(x,y) = (x \cos(y/x), x \sin(y/x)$.
+% 
+% \begin{prop}
+% Let~$S = (p_0, p_1)$ be a line segment, with $p_i = (x_i, y_i)$,
+% such that $0 < x_0 < x_1$.
+% Let~$a = x_0 - x_1$, $D = x_0 y_1 - y_0 x_1$,
+% and $z_i = D+√{a^2 x_i^2 + D^2}$.
+% Then the arc length of the image curve~$F(S)$ is
+% \[ \begin{cases}
+%   \frac{D}{a} \log \frac{x_1 z_0}{x_0 z_1}
+% 	+ a \pa{\frac{x_1^2}{z_1}-\frac{x_0^2}{z_0}}&
+% 	\text{if $x_0 ≠ x_1$;}\\
+% 	x_0 \abs{y_0 - y_1} &\text{if $x_0 = x_1$.}\end{cases}
+% \]
+% \end{prop}
+% \begin{proof}
+% The segment is parametrized as $p(t) = (1-t) p_0 + p_1
+%  = (t (x_1-x_0) + x_0, t (y_1 - y_0) + y_0).
+%  = (a t +  b, c t + d)$
+% with $a = (x_1-x_0)$, $b = x_0$, $c = (y_1 - y_0)$, $d = y_0$.
+% In complex notation, one finds
+% $F(p(t)) = (a t + b) \exp(i \frac{ct+d}{at+b})$ and hence
+% \begin{eqsplit} F(p(t))'
+% &= a e^{i…} + (a t + b) i \frac{bc-ad}{(at+b)^2} e^{i…} \\
+% &= \pa{a + i \frac{bc - ad}{at + b}} \exp\pa{i \frac{ct+d}{at+b}};\\
+% \abs{F'(p(t))}
+% &= √{a^2 + \frac{(ad-bc)^2}{(at+b)^2}}.
 % \end{eqsplit}
+% The arc length is therefore
+% \begin{eqsplit}
+% &= ∫_0^1 \abs{F'(p(t))} dt
+% &= ∫_0^1 √{a^2 + \frac{(ad-bc)^2}{(at+b)^2}} dt\\
+% &= ∫_0^1 √{a^2(at+b)^2 + (ad-bc)^2} \;\frac{dt}{at+b} \\
+% % &= a ∫_0^1 √{(at+b)^2 + (d-bc/a)^2} \;\frac{dt}{at+b} \\
+% \end{eqsplit}
+% Define $s = (at+b)/(D+√{a^2(at+b)^2+D^2})$,
+% so that $t = -b/a+2sD/(a^2(1-s^2))$,
+% $√{(at+b)^2+D^2/a^2} = D\frac{1+s^2}{1-s^2}$,
+% and $dt = 2D/a^2 \frac{1+s^2}{(1-s^2)^2} ds$.
+% Then
+% \begin{eqsplit}
+% G(t) = ∫ \abs{F'(p(t))} dt
+% &= \frac{D}{a} ∫ \pa{\frac{1+s^2}{1-s^2}}^2 \frac{ds}{s}\\
+% &= \frac{D}{a} ∫ \pa{\frac 1s +\frac{1}{(s-1)^2} - \frac{1}{(s+1)^2}} ds\\
+% &= \frac{D}{a} \pa{\log s + \frac{2}{1-s^2}}\\
+% &= \frac{D}{a} \pa{\log \frac{at+b}{D+√{a^2(at+b)^2+D^2}}
+%  + 2 \frac{(D+√{a^2(at+b)^2+D^2})^2}{(D+√{a^2(at+b)^2+D^2})^2-(at+b)^2}}\\
+% &= \frac{D}{a} \pa{\log \frac{at+b}{D+√{…}}
+%  + 2 + \frac{a^2}{D}\frac{(at+b)^2}{D+√{…}}}\\
+% &= \frac{D}{a} \log \frac{at+b}{D+√{a^2(at+b)^2+D^2}} + \frac{2D}{a}
+%  + a \frac{(at+b)^2}{D+√{a^2(at+b)^2+D^2}}
+% \end{eqsplit}
+% The primitive~$G-2D/a$ takes the following values:
+% \begin{eqsplit}
+% G(0)
+% &= \frac{D}{a} \log \frac{x_0}{D+√{a^2 x_0^2 + D^2}}
+%  + \frac{a x_0^2}{D+√{a^2 x_0^2+D^2}}\\
+% G(1)
+% &= \frac{D}{a} \log \frac{x_1}{D+√{a^2 x_1^2+D^2}}
+%  + \frac{a x_1^2}{D+√{a^2 x_1^2+D^2}}\\
+% \end{eqsplit}
+% This concludes the case where~$a ≠ 0$. The other case is trivial.
+% \end{proof}
+% % »»1
+% \section{Arc length of wrapped segment (correct)}%««1
+% Let~$F(x,y,z) = ((x+r) \cos(y/r), (x+r) \sin(y/r), z)$.
+% \begin{prop}
+% Let~$S = (p_0, p_1)$ be a line segment, with $p_i = (x_i, y_i, z_i)$.
+% Define~$a = x_0 - x_1$ and~$c = z_0 - z_1$,
+% and $λ_i = √{b^2 x_i^2/r^2 + a^2 + c^2}$.
+% If $a ≠ 0$ and $b ≠ 0$ then the arc length of the image curve~$F(S)$ is
+% \[
+%   \frac{1}{2a}(λ_1 x_1 - λ_0 x_0)
+% + \frac{a^2 b^2+c^2 r^2}{2a b r} \log \frac{b x_1 + r λ_1}{b x_0 + r λ_0}.
+% \]
+% If $a = 0$ or~$b = 0$ then this arc length is $√{a^2 + b^2 x_0^2/r^2 + c^2}$.
+% \end{prop}
+% The segment is parametrized as
+% $p(t) = (1-t) p_0 + p_1
+%  = (t(x_1-x_0) + x_0, t (y_1 - y_0) + y_0, t (z_1 - z_0) + z_0)
+%  = (a t + x_0, b t + y_0, c t + z_0)$.
+% \begin{eqsplit}
+% F(p(t))
+% &= ((a t+x_0+r) \cos \frac{b t+y_0}{r}, (at+x_0+r)\sin\frac{bt+y_0}{r},
+% ct+z_0) \\
+% F(p(t))'
+% &= (a \cos φ(t) - x(t)b/r \sin φ(t) , a \sin φ(t) + x(t)b/r \cos φ(t), c) \\
+% \norm{F(p(t))'}
+% &= √{a^2 + (at+x_0)^2 b^2/r^2 + c^2}
+% \end{eqsplit}
+% Using $∫ √{(α t+β)^2+γ^2} d t = \frac{α t+β}{2 α} √{…}
+%   + \frac{γ^2}{2 α} \log(α t+β+√{…})$
+% with $α = ab/r$, $β=x_0 b/r$, $γ^2 = a^2+c^2$:
+% \begin{eqsplit}
+% ∫ \norm{F(p(t))'} dt
+% &= \frac{(b/r)(a t+x_0)}{2ab/r} √{…}
+%   + \frac{a^2 b^2/r^2+c^2}{2ab/r} \log((b/r)(at+x_0)+√{(at+b)^2+a^2+c^2})\\
+% &= \frac{x(t)}{2a} √{b^2 x(t)^2/r^2+a^2+c^2}
+%   + \frac{a^2 b^2+c^2 r^2}{2a b r} \log(b x(t)/r+√{b^2 x(t)^2/r^2+a^2+c^2})\\
+% \end{eqsplit}
+% % Define $q = √{a^2+e^2}$ and~$s = (at+b)/(q+√{q^2+(at+b)^2})$; then
+% % $t = -b/a+2sq/a(1-s^2)$, $√{q^2+(at+b)^2} = q(1+s^2)/(1-s^2)$,
+% % and $dt = 2q/a (1+s^2)/(1-s^2)^2$.
+% % Thus the arc length~$L$ is
+% % \begin{eqsplit}
+% % ∫_0^1 |F(p(t))'|\;dt
+% % &= ∫_0^1 √{q^2+(at+b)^2}\; dt \\
+% % &= \frac{2 q^2}{a} ∫ \frac{(1+s^2)^2}{(1-s^2)^3}\;ds \\
+% % &= \frac{2 q^2}{a} ∫
+% % \pa{\frac{1/4}{s+1}-\frac{1/4}{s-1}+\frac{s^4+6s^2+1}{2(1-s^2)^3}}\; ds\\
+% % &= \frac{2 q^2}{a} \pa{ \frac 14 \log \frac{s+1}{s-1}
+% %   + \frac 12 \frac{s(s^2+1)}{(1-s^2)^2}}\\
+% % &= \frac{2 q^2}{a} \pa{\frac 14 \log \frac{q+b+u}{q-b+u}
+% %  + \frac 12 
+% % \end{eqsplit}
+% 
+% % »»1
+\section{Sagitta of wrapped segment}%««1
+Let~$F(x,y,z) = ((x+r) \cos(y/r), (x+r) \sin(y/r))$.
+\begin{prop}
+Let~$S = (p_0, p_1)$ be a line segment, with $p_i = (x_i, y_i)$.
+% Define~$a = x_0 - x_1$ and~$c = z_0 - z_1$,
+% and $λ_i = √{b^2 x_i^2/r^2 + a^2 + c^2}$.
+The \emph{sagitta} of~$F(S)$ is the Minkowski distance
+between the image curve $F(S)$ and the straight segment $(F(p_0),F(p_1))$.
+
+\end{prop}
+Distance in polar coordinates $(r e^{iθ})$:
+\begin{eqsplit}
+\norm{r_0 e^{iθ_0} - r_1 e^{iθ_1}}^2
+&= \norm{r_0 e^{iθ_0}}^2 + \norm{r_1 e^{i θ_1}}^2
+  - 2 (r_0 e^{iθ_0})⋅(r_1 e^{i θ_1}) \\
+&= r_0^2 + r_1^2 - 2 r_0 r_1 \cos(θ_0 - θ_1).
+\end{eqsplit}
+Let~$Σ = (F(p_0), F(p_1))$,
+then $ℓ(Σ)^2 = (x_0+r)^2 + (x_1+r)^2 - 2 (x_0+r)(x_1+r) \cos((y_0-y_1)/r)$.
+
+The segment $(p_0, p_1)$ is parametrized as
+$p(t) = (1-t) p_0 + p_1
+ = (t(x_1-x_0) + x_0, t (y_1 - y_0) + y_0)
+ = (a t + x_0, b t + y_0)$,
+so that
+$F(p(t)) = (ξ(t), η(t)) = ((r+x(t)) \cos(y(t)/r), (r+x(t)) \sin(y(t)/r))$.
+The squared distance of a point $F(p(t))$ to the
+segment~$Σ=(F(p_0),F(p_1))$
+is
+\begin{eqsplit}
+δ(t)^2
+&= \frac{1}{\norm{Σ}^2} \chev{F(p(t))-F(p_0),F(p_1)-F(p_0)}^2\\
+&= \frac{(x(t)-x_0)(y_1 -y_0) - (y(t) - y_0)(x_1 - x_0)}{\norm{Σ}^2}\\
+\end{eqsplit}
+
 \end{document}
+% vim: fdm=marker fmr=««,»»:

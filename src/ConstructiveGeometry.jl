@@ -246,6 +246,8 @@ struct FullMesh{T,U,A}
 	aux::Vector{Pair{A,U}}
 end
 
+# @inline FullMesh(main::T, aux::Vector{Pair{A,U}}) where{T,U,A} =
+# 	FullMesh{T,U,A}(main, aux)
 @inline auxtype(::Type{FullMesh{T,U,A}}) where{T,U,A} = Pair{A,U}
 
 @inline fullmesh(s::AbstractGeometry; kwargs...) =
@@ -1310,6 +1312,83 @@ defining an affine transform.
 	nsteps=32, maxgrid=32, isolevel=0) =
 	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
 
+# Generic coordinate transform ««1
+struct CoordinateTransform{D} <: AbstractTransform{D}
+	transform::Function
+	isvalid::Function
+	distance2::Function
+	child::AbstractGeometry{D}
+end
+
+function mesh(g::MeshOptions, s::CoordinateTransform{3}, (m,))
+	mref = TriangleMeshes.splitedges(m.mesh, get(g,:atol)^2;
+		distance2=s.distance2)
+	vlist = [ (@assert s.isvalid(v); s.transform(v)) for v in mref.vertices ]
+	return self_union(VolumeMesh(TriangleMesh(g, vlist, mref.faces, mref.attributes)))
+end
+
+"""
+    coordinate_transform(f, s...; isvalid, distance2)
+
+Image of the volume `s` by the vertex-wise transformation `f`
+(as a function on `SVector{3}` points).
+
+After applying the transformation, overlapping parts of the volume are
+cleaned by a self-union operation. **It is however the user's
+responsibility to ensure that the image still forms a valid,
+positively-oriented mesh.**
+
+Since `f` is (in principle) not a linear function,
+all edges longer than the the current `atol` meshing parameter
+will be split, using the `refine` transformation,
+before applying `f` to the vertices.
+
+Optional parameters:
+ - `isvalid`: a predicate which will be asserted on all points of the solid
+   before applying the transformation;
+ - `distance2`: a function for evaluating which edges should be split.
+   The default is to use the Euclidean distance.
+
+"""
+@inline coordinate_transform(transform, s...; isvalid=(@closure x->true),
+	distance2=TriangleMeshes.distance2) =
+	operator(CoordinateTransform, (transform,isvalid, distance2), s...)
+
+# function wrapd2(r,p0,p1)
+# 	v = p1-p0
+# 	l0= sqrt(p0[1]^2*v[2]^2/r^2+v[1]^2+v[3]^2)
+# 	l1= sqrt(p1[1]^2*v[2]^2/r^2+v[1]^2+v[3]^2)
+# 	(iszero(v[1]) || iszero(v[2])) && return l0
+# 	return (1/(2*v[1])*(l1*p1[1]-l0*p0[1])
+# 	+ (v[1]^2*v[2]^2+v[3]^2*r^2)/(2*v[1]*v[2]*r)
+# 	  *log((v[2]*p1[1]+r*l1)/(v[2]*p0[1]+r*l0)))
+# end
+function wrapsagitta(r,p,q)
+# c = chord, s = sagitta, R = radius
+# R^2 = c^2/4 + (R-s)^2
+# c^2/4 = R^2-R^2-s^2+2Rs = s(2R-s), hence c^2 ≈ 8Rs or s ≈ c^2/8R
+# we want d2(p,q) == sagitta^2, hence d2(p,q) = c^4/64R^2
+# ≈ ‖pq‖^4/64r^2
+	chord =(p[1]-q[1])^2+(p[2]-q[2])^2
+	chord*=(1+max(p[1],q[1])/r)^2
+	radius = 8*(r+min(p[1],q[1]))
+	return (chord/radius)^2
+end
+
+"""
+    wrap(r, s...)
+
+Wraps the solid `s` around a cylinder with radius `r`
+by applying the coordinate transformation
+``(x \\cos(y/r), x \\sin(y/r), z)``.
+Long edges will be split so that their image resembles the correct spirals.
+"""
+@inline wrap(r::Real, s...) = coordinate_transform(
+	(@closure p->SA[(r+p[1])*cos(p[2]/r),(r+p[1])*sin(p[2]/r), p[3]]), s...;
+	isvalid=(@closure p->p[1]+r ≥ 0),
+	distance2=(@closure (p,q)->wrapsagitta(r,p,q)))
+
+
 # Offset««1
 
 struct SurfaceOffset <: AbstractTransform{2}
@@ -1493,7 +1572,7 @@ struct RandomColor{D} <: AbstractTransform{D}
 end
 @inline mesh(g::MeshOptions, c::RandomColor{3}, (m,)) =
 	VolumeMesh(TriangleMesh(vertices(m), faces(m),
-		rand(MeshColor, size(faces(m)))))
+		rand(Colors.RGB{N0f8}, size(faces(m)))))
 """
     randomcolor(s...)
 
@@ -1687,10 +1766,10 @@ The following dimensions are allowed: (2,2), (3,3), and (2,3).
 In the latter case, the 3d object will be intersected with the horizontal
 plane via the `slice()` operation.
 """
-@inline setdiff(a::AbstractGeometry, b::AbstractGeometry,
-	c::AbstractGeometry...) = setdiff(setdiff(a,b), c...)
 @inline setdiff(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	CSGDiff{D}(SA[a,b])
+@inline setdiff(a::AbstractGeometry, b::AbstractGeometry,
+	c::AbstractGeometry...) = setdiff(setdiff(a,b), c...)
 @inline setdiff(a::AbstractGeometry{2}, b::AbstractGeometry{3}) =
 	setdiff(a, slice(b))
 @inline setdiff(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
@@ -2563,7 +2642,7 @@ export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, reflect, raise, lower
 export project, slice, half
 export decimate, loop_subdivide, refine
-export linear_extrude, rotate_extrude, sweep
+export linear_extrude, rotate_extrude, sweep, coordinate_transform, wrap
 export color, randomcolor, highlight, set_parameters
 export mesh, stl, svg
 export ×

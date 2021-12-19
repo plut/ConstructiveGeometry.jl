@@ -371,8 +371,8 @@ end
 Repeatedly split all edges of `m`, starting by the longest ones,
 until no edge has length² > `maxlen`.
 """
-@inline splitedges(m::TriangleMesh, maxlen) =
-	TriangleMesh(splitedges!(CTMesh(m), maxlen))
+@inline splitedges(m::TriangleMesh, maxlen; distance2=distance2) =
+	TriangleMesh(splitedges!(CTMesh(m), maxlen; distance2))
 
 function splitedges!(t::CTMesh{J,T,A}, maxlen; distance2=distance2) where{J,T,A}
 	elist = VecSortedSet{J}(T[ a > opposite(t, a) ? zero(T) :

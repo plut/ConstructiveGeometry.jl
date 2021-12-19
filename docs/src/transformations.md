@@ -195,6 +195,30 @@ png("swept_cube", s); # hide
 ```
 ![example: a cube swept along a helix](swept_cube.png)
 
+## Arbitrary coordinate transformations
+```@docs
+coordinate_transform
+```
+```@repl 0
+s1 = coordinate_transform(p->p/(3+p[1]))*cube(5);
+s2 = coordinate_transform(p->p/sqrt(1+p[1]))*cube(5);
+png("homographic_cube", s1); # hide
+png("nonlinear_cube", s2); # hide
+```
+![example: homographic image of a cube](homographic_cube.png)
+![example: non-linear image of a cube](nonlinear_cube.png)
+
+### Cylindrical wrapping (experimental)
+
+```@docs
+wrap
+```
+```@repl 0
+s = wrap(3)*cube(5);
+png("wrapped_cube", s); # hide
+```
+![example: a cube wrapped around a cylinder](wrapped_cube.png)
+
 ## Decimation
 
 These operations either reduce or increase the number of faces in
@@ -251,6 +275,11 @@ and (invertible) affine transformations. For other transformations:
 ```@docs
 randomcolor
 ```
+```@repl 0
+s = randomcolor()*sphere(5);
+png("randomcolor", s); # hide
+```
+![example: sphere with random-colored triangular faces](randomcolor.png)
 
 ## Modifying meshing parameters
 ```@docs
