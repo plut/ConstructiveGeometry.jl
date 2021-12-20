@@ -1921,6 +1921,8 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline Base.:*(a::AbstractMatrix, x::AbstractGeometry) = mult_matrix(a, x)
 @inline _to_matrix(z::Complex) = [real(z) -imag(z); imag(z) real(z)]
 @inline Base.:*(z::Complex, x::AbstractGeometry) = _to_matrix(z)*x
+@inline Base.:*(a::Transform,b::AbstractMatrix) = a*mult_matrix(b)
+@inline Base.:*(a::AbstractMatrix,b::Transform) = mult_matrix(a)*b
 @inline Base.:*(a::Transform,b::Real) = a*scale(b)
 @inline Base.:*(a::Transform,z::Complex) = a*mult_matrix(_to_matrix(z))
 
@@ -1998,6 +2000,8 @@ the Makie `plot` function.
 """
 @inline save(f::FileIO.DataFormat, io::IO, m::AbstractGeometry; kwargs...) =
 	save(f, io, fullmesh(m; kwargs...).main)
+@inline save(f::FileIO.DataFormat, io::IO, m::VolumeMesh; kwargs...) =
+	error("recursion detected in save($f)")
 
 # .jl file reading (experimental)««1
 
@@ -2155,8 +2159,8 @@ function load(::Union{format"PLY_ASCII",format"PLY_BINARY"}, io)#««
 	end
 	return surface(v,f)
 end#»»
-function save(::format"PLY_ASCII", io::IO, m::TriangleMeshes.TriangleMesh)#««
-	v,f = TriangleMeshes.vertices(m), TriangleMeshes.faces(m)
+function save(::format"PLY_ASCII", io::IO, m::VolumeMesh)#««
+	v,f = TriangleMeshes.vertices(m.mesh), TriangleMeshes.faces(m.mesh)
 	print(io, "ply\nformat ascii 1.0\nelement vertex ",
 		length(v),
 	"\nproperty float32 x\nproperty float32 y\nproperty float32 z\nelement face ",

@@ -2,6 +2,7 @@ using ConstructiveGeometry
 using StaticArrays
 using FastClosures
 using GLMakie
+using Colors
 
 write_stls = false
 
@@ -24,18 +25,9 @@ lis(n=15) = (demi_lis(n) ∪ [-1 0;0 1]*demi_lis(n))
 # 15 points seems enough, compile the polygon for the fleurdelis:
 lis_poly = polygon(lis(15))
 
-# reserve space for inset stones:
 tol = 0.2;
 lozenge = polygon([[0,-4],[6,0],[0,4],[-6,0]]);
 lozenge1 = offset(tol)*lozenge
-pyramid = [0 0 1;1 0 0;0 1 0]*([lis_w,7.5,.8]+cone(3)*lozenge)
-pyramid_stone = def*pyramid
-write_stls && save("crown-pyramid.stl", rotate(90,axis=[0,-1,0])*pyramid_stone)
-
-oval = [0 0 1;1 0 0;0 1 0]*([0,7.5,.8]+half(:top)*sphere(4))
-oval_stone = def*oval
-write_stls && save("crown-oval.stl", rotate(90,axis=[0,-1,0])*oval_stone)
-
 # define the flat 3d shape of a section of the crown:
 lis3d = surface([0 0 1;1 0 0;0 1 0]*(set_parameters(atol=1e-2,rtol=1e-3)*
   intersect(union(
@@ -43,13 +35,14 @@ lis3d = surface([0 0 1;1 0 0;0 1 0]*(set_parameters(atol=1e-2,rtol=1e-3)*
 		sweep(lis_poly; miter_limit=10.)*half(:top)*circle(2),
 # 	linear_extrude(1.6)*offset(-5)*lis
 		),
+	# reserve space for inset stones:
 	~([0,7.5,.8]+cylinder(10,4+tol)),
 	~([lis_w,7.5,.8]+linear_extrude(10)*lozenge1),
 	~([-lis_w,7.5,.8]+linear_extrude(10)*lozenge1),
 	translate([-lis_w, 0, 0])*cube([2*lis_w, 1000, 100]))))
 
 # and deform it by wrapping; ConstructiveGeometry wraps on a cylinder,
-# here we use a 1-branch revolution hyperboloid:
+# here we use a one-sheet revolution hyperboloid:
 function hyperboloid(r, (x,y,z))
 	θ = y/r
 	k = 1+(z+17.4)^2/2e4
@@ -65,6 +58,15 @@ lis3d_def1 = surface(lis3d_def)
 crown=union((rotate(45*i)*lis3d_def1 for i in 1:8)...)
 crown1 = surface(crown)
 write_stls && save("crown-main.stl", crown1)
+
+
+pyramid = [0 0 1;1 0 0;0 1 0]*([lis_w,7.5,.8]+cone(3)*lozenge)
+pyramid_stone = def*pyramid
+write_stls && save("crown-pyramid.stl", rotate(90,axis=[0,-1,0])*pyramid_stone)
+
+oval = [0 0 1;1 0 0;0 1 0]*([0,7.5,.8]+half(:top)*sphere(4))
+oval_stone = def*oval
+write_stls && save("crown-oval.stl", rotate(90,axis=[0,-1,0])*oval_stone)
 
 
 # display a nice color image:
