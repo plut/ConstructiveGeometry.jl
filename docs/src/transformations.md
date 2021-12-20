@@ -195,13 +195,13 @@ png("swept_cube", s); # hide
 ```
 ![example: a cube swept along a helix](swept_cube.png)
 
-## Arbitrary coordinate transformations
+## User-defined volume deformations
 ```@docs
-coordinate_transform
+deform
 ```
 ```@repl 0
-s1 = coordinate_transform(p->p/(3+p[1]))*cube(5);
-s2 = coordinate_transform(p->p/sqrt(1+p[1]))*cube(5);
+s1 = deform(p->p/(3+p[1]))*cube(5);
+s2 = deform(p->p/sqrt(1+p[1]))*cube(5);
 png("homographic_cube", s1); # hide
 png("nonlinear_cube", s2); # hide
 ```
