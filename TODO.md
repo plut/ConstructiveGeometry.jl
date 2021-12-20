@@ -1,4 +1,5 @@
 # Bug fixes
+ - [ ] `matrix*set_parameters` etc.; `raise(.8)*mat*cone(3)*lozenge`...
  - [x] `raise` in 2d
  - [ ] volume - volume - volume
  - [x] implement *n*-ary `setdiff`
@@ -71,6 +72,8 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
+ - [ ] `multiply`: dispose copies of a mesh (better than `union` because
+   we compute the child mesh only once)
  - [ ] replace `attributes` by a pointer to the original colored object; this could allow detecting edges etc.
  - [x] `refine`: shorten all edges until no longer than given length
   - [ ] 2d (just divide edges)
@@ -125,6 +128,7 @@ For MeshIO: stl needs
    find some easy syntax allowing also `symmetrize(m)*s`
  - [ ] 2d Minkowski difference
 ## Misc.
+ - [x] `surface(volume)` = instantiate as a mesh (avoids recomputation)
  - [ ] `plot(...; zoom=...)`
 ## Attachments
  - [ ] anchor/attachment system

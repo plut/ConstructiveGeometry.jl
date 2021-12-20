@@ -345,6 +345,7 @@ function polygon(paths::AbstractVector...; fill=:nonzero)
 	T = float(promote_type((promote_type(Int,eltype.(p)...) for p in paths)...))
 	ShapeMesh(Shapes.simplify(Shapes.PolygonXor{T}([paths...]); fill))
 end
+@inline polygon(s::AbstractGeometry{2}) = fullmesh(s).main
 """
     bezier(p0,p1,p2,p3,n)
 
@@ -566,6 +567,7 @@ function surface(vertices, faces)
 	return VolumeMesh(TriangleMesh{Float64,MeshColor}(vertices, triangles,
 		fill(_DEFAULT_COLOR, size(triangles))))
 end
+@inline surface(s::AbstractGeometry{3}) = fullmesh(s).main
 
 # Cube««1
 struct Cube{T} <: AbstractGeometry{3}
@@ -1307,20 +1309,20 @@ defining an affine transform.
 	operator(_sweep, (path,), s...; kwargs...)
 
 @inline _sweep(path, s::AbstractGeometry{2}; kwargs...) =
-	ShapeSweep(path, s)
+	ShapeSweep(path, s; kwargs...)
 @inline _sweep(transform, s::AbstractGeometry{3};
 	nsteps=32, maxgrid=32, isolevel=0) =
 	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
 
 # Generic coordinate transform ««1
-struct CoordinateTransform{D} <: AbstractTransform{D}
+struct Deformation{D} <: AbstractTransform{D}
 	transform::Function
 	isvalid::Function
 	distance2::Function
 	child::AbstractGeometry{D}
 end
 
-function mesh(g::MeshOptions, s::CoordinateTransform{3}, (m,))
+function mesh(g::MeshOptions, s::Deformation{3}, (m,))
 	mref = TriangleMeshes.splitedges(m.mesh, get(g,:atol)^2;
 		distance2=s.distance2)
 	vlist = [ (@assert s.isvalid(v); s.transform(v)) for v in mref.vertices ]
@@ -1328,7 +1330,7 @@ function mesh(g::MeshOptions, s::CoordinateTransform{3}, (m,))
 end
 
 """
-    coordinate_transform(f, s...; isvalid, distance2)
+    deform(f, s...; isvalid, distance2)
 
 Image of the volume `s` by the vertex-wise transformation `f`
 (as a function on `SVector{3}` points).
@@ -1350,9 +1352,9 @@ Optional parameters:
    The default is to use the Euclidean distance.
 
 """
-@inline coordinate_transform(transform, s...; isvalid=(@closure x->true),
+@inline deform(transform, s...; isvalid=(@closure x->true),
 	distance2=TriangleMeshes.distance2) =
-	operator(CoordinateTransform, (transform,isvalid, distance2), s...)
+	operator(Deformation, (transform,isvalid, distance2), s...)
 
 # function wrapd2(r,p0,p1)
 # 	v = p1-p0
@@ -1383,7 +1385,7 @@ by applying the coordinate transformation
 ``(x \\cos(y/r), x \\sin(y/r), z)``.
 Long edges will be split so that their image resembles the correct spirals.
 """
-@inline wrap(r::Real, s...) = coordinate_transform(
+@inline wrap(r::Real, s...) = deform(
 	(@closure p->SA[(r+p[1])*cos(p[2]/r),(r+p[1])*sin(p[2]/r), p[3]]), s...;
 	isvalid=(@closure p->p[1]+r ≥ 0),
 	distance2=(@closure (p,q)->wrapsagitta(r,p,q)))
@@ -1484,7 +1486,7 @@ end
 
 Decimates a 3d surface to at most `n` triangular faces.
 """
-@inline decimate(n::Integer, s...) = operator(Decimate, (n,), s...)
+@inline decimate(n::Real, s...) = operator(Decimate, (Int(n),), s...)
 
 # subdivide««2
 struct LoopSubdivide <: AbstractTransform{3}
@@ -1557,6 +1559,7 @@ end
     color(c::AbstractString, s...)
     color(c::AbstractString, α::Real, s...)
     color(c) * s...
+    colorant"color" * s...
 
 Colors objects `s...` in the given color.
 """
@@ -2642,7 +2645,7 @@ export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, reflect, raise, lower
 export project, slice, half
 export decimate, loop_subdivide, refine
-export linear_extrude, rotate_extrude, sweep, coordinate_transform, wrap
+export linear_extrude, rotate_extrude, sweep, deform, wrap
 export color, randomcolor, highlight, set_parameters
 export mesh, stl, svg
 export ×

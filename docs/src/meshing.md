@@ -184,3 +184,14 @@ Three-dimensional objects are represented as a triangle mesh,
 in a way compatible with LibIGL's functions.
 The triangles are oriented so that their normal vector points outside the
 volume of the object.
+
+## Explicitly instantiating meshes
+
+It is possible to explictly compute the mesh associated to a geometric
+object by converting this object to either a `polygon` or a `surface`:
+```julia
+x = some_complicated_object()
+s = surface(x) # this is an explicit `Surface` object
+```
+This can avoid repeating the mesh computation when e.g.
+using several copies of the object.

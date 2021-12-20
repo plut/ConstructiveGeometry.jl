@@ -9,11 +9,10 @@ Defining CSG objects from within Julia.
 and 3d solids via basic primitives and CSG operations, as well as
 functions for displaying these objects and output to SVG or STL files.
 
-It is possible to use this module to define basic 3d models: namely,
-the following image is the result of [this short
-file](examples/sphere_cube.jl):
-![CSG operations on a sphere and a cube](examples/sphere_cube.png)
-
+It is possible to use this module to define basic 3d models.
+Examples are included in the [examples subdirectory](examples/):
+ - [![CSG operations on a sphere and a cube](examples/sphere_cube.png)](examples/sphere_cube.jl);
+ - [![Crown with fleur-de-lis](examples/crown.png)](examples/crown.jl);
 The images were rendered by the `CairoMakie` back-end.
 It is also possible to export a model as a `.svg` (for 2d shapes)
 or `.stl` (for 3d volumes) file.
@@ -22,11 +21,12 @@ The following features should be mostly working now:
  - 2d shapes: square, circle, polygon, path stroke;
  - 3d shapes: cube, sphere, cylinder, cone, explicit surface;
  - boolean operations, linear transformations;
- - 2d->3d extrusions (linear, revolution, curvilinear);
+ - 2d->3d extrusions (linear, cone, revolution, curvilinear);
  - 3d->2d projection and slicing;
- - Minkowski sum (2d and 3d);
+ - convex hull and Minkowski sum (2d, 3d, mixed dimensions);
  - offset (2d and 3d);
- - surface decimation and Loop subdivision;
+ - surface decimation, refining, and Loop subdivision;
+ - volume deformation using user-supplied functions;
  - import from STL and PLY, and export to STL, PLY and SVG.
 
 ## Global philosophy

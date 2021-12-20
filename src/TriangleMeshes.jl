@@ -334,7 +334,7 @@ Base.show(io::IO, t::CTMesh) = CornerTables.showall(io, t)
 # conversion to and from `TriangleMesh`
 
 @inline CTMesh{J}(m::TriangleMesh{T,A}) where{J,T,A} =
-	CTMesh{J,T,A}(CornerTable{J}(faces(m)), vertices(m), attributes(m))
+	CTMesh{J,T,A}(CornerTable{J}(faces(m)), copy(vertices(m)), copy(attributes(m)))
 @inline CTMesh(m::TriangleMesh) = CTMesh{Int32}(m)
 
 @inline TriangleMesh(t::CTMesh{J,T,A}) where{J,T,A} =
