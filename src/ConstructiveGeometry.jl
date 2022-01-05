@@ -1029,6 +1029,7 @@ Linear extrusion to height `h`.
 	m = Prism(height, twist, scale, s)
 	center ? translate([0,0,-one_half(height)], m) : m
 end
+@inline prism(height, s...; kwargs...) = linear_extrude(height, s...; kwargs...)
 
 # Cylinder ««2
 #     cylinder(h, (r1, r2) [, center=false])
@@ -2649,7 +2650,7 @@ export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, reflect, raise, lower
 export project, slice, half
 export decimate, loop_subdivide, refine
-export linear_extrude, rotate_extrude, sweep, deform, wrap
+export linear_extrude, prism, rotate_extrude, sweep, deform, wrap
 export color, randomcolor, highlight, set_parameters
 export mesh, stl, svg
 export ×

@@ -13,6 +13,7 @@ using Random
 
 include("CornerTables.jl")
 using .CornerTables
+import .CornerTables: showall, showcell, shownode
 
 # Geometry ««1
 # Elementary geometry ««2
@@ -410,6 +411,10 @@ function tree_boundary(t::AbstractTriangulation{J}, tree, doubleedges=()) where{
 	# returns the list of half-edges pointing *into* the tree,
 	# cyclically ordered around the tree (random start).
 	boundary = sizehint!(Arrow{J}[], length(tree)+2)
+	for e in doubleedges
+		shownode(stdout, t, node(e))
+	end
+	@assert !isempty(tree)
 	for e in arrows(first(tree))
 		stack = [e]
 		while !isempty(stack)
@@ -430,12 +435,14 @@ end#»»
 function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#««
 	# replaces all nodes in `tree` by a star shape around `cell`,
 	# adding two new nodes in the process.
+	println("\e[1mstar(", s, ", ", tree, ", double=", doubleedges, ")\e[m")
+	for q in tree; shownode(stdout, t, q); end
 	boundary = tree_boundary(t, tree, doubleedges)
+	println("  outer boundary = $boundary")
 	push!(tree, newnodes!(t, 2)...)
-	n = side(last(tree), 2)
 	# rewrite boundary edges for double-edges, by substituting the
 	# appropriate edge of the renamed triangle
-	c2list = [ right(t, e) for e in boundary ]
+	c2list = [ tail(t, e) for e in boundary ]
 	j = 0
 	for (i, o) in pairs(boundary)
 		o ∈ doubleedges || continue
@@ -449,16 +456,24 @@ function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#«
 		end
 	end
 	c1 = last(c2list)
+	n = side(last(tree), 2)
 	for (q, o, c2) in zip(tree, boundary, c2list)
+		# set node `q` to triangle
+		#      s
+		#    ╱p n╲
+		#   ╱  e  ╲
+		#  c₁——————c₂
+		#      o
+		println("($q, $o, edge is $c1--$c2):")
 		e = side(q, 1)
 		p = side(q, 3)
 		opposites!(t, e=>o, p=>n)
 		n = side(q, 2)
-		cellcorner!(t, s=>e, c1=>n, c2=>p)
+		arrowsfrom!(t, s=>p, c1=>e, c2=>n)
 		c1 = c2
 	end
 end#»»
-# Triangulation
+# Triangulation ««2
 """
     triangulate(points, segments)
 
@@ -471,9 +486,9 @@ The sites are encoded as follows:
 """
 @inline triangulate(points; trim=true) = CornerTable{Int32}(points; trim)
 function CornerTable{J}(points; trim=true) where{J}#««
-	np = length(points)
+	np = J(length(points))
 # 	np < 3 && return CornerTable{J}(undef, 0)
-	t = CornerTable{J}(J[4,6,5,1,3,2],J(np).+J[1,3,2,1,2,3],
+	t = CornerTable{J}(J[4,6,5,1,3,2],J(np).+J[2,1,3,1,2,3],
 		Vector{J}(undef, np+3))
 	anyarrow!(t, Cell(np+1), Arrow(J(1)))
 	anyarrow!(t, Cell(np+2), Arrow(J(2)))
@@ -589,7 +604,7 @@ end
 
 # Geometric node computation ««2
 @inline function geometricnode!(v::VoronoiDiagram, q::Node, g=equidistant(v,q))
-	println("geometricnode!($q); $(nnodes(v)), $(length(v.geomnode))")
+	println("geometricnode!($q)/$(nnodes(v))")
 	v.geomnode[int(q)] = g
 	s = cell(v, q, 1)
 	v.noderadius[int(q)] = if issegment(v, s)
@@ -967,6 +982,7 @@ function VoronoiDiagram{J}(points::AbstractVector{P}, segments) where{J,P}#««
 	v = VoronoiDiagram{J,P,eltype(P)}(t, points, NTuple{2,J}.(segments),
 		similar(points, nnodes(t)), Vector{eltype(P)}(undef, nnodes(t)))
 	for q in eachnode(t); geometricnode!(v, q); end
+	showall(stdout, v)
 
 	# incrementally add all segments ««
 	ns = length(segments)
@@ -975,6 +991,7 @@ function VoronoiDiagram{J}(points::AbstractVector{P}, segments) where{J,P}#««
 		println("\e[31;1;7minserting segment $s = ($a,$b)\e[m")
 		tree, doubleedges = badnodes(v, a, b)
 		star!(v, s, tree, doubleedges)
+		showcell(stdout, v, s)
 	end
 	#»»
 # 	# for each segment, identify the delimitation between both sides of the
@@ -1407,7 +1424,7 @@ V=Voronoi
 # v=V.VoronoiDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(3,4),(5,6)])
 
 v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(4,3),(3,1)])
-o = V.segmentoffset(v, V.Cell(10), +, .5)
+# o = V.segmentoffset(v, V.Cell(10), +, .5)
 
 # m = V.edgeexit_pp([5,9],[5,1],[1.6,5],[8.4,5],[0,10],[10,10])
 # V.equidistant_pss([0,0],[5,9],[5,1],[0,10],[10,10]) # [5,5]

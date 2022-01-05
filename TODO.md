@@ -1,7 +1,7 @@
 # Bug fixes
- - [ ] `matrix*set_parameters` etc.; `raise(.8)*mat*cone(3)*lozenge`...
+ - [x] `matrix*set_parameters` etc.; `raise(.8)*mat*cone(3)*lozenge`...
  - [x] `raise` in 2d
- - [ ] volume - volume - volume
+ - [x] volume - volume - volume
  - [x] implement *n*-ary `setdiff`
  - [x] hull of 2d points: hull([1,1], ...)
  - [x] linear extrude of repositioned 2d mesh: use normal (this would

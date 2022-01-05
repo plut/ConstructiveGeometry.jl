@@ -4,8 +4,6 @@ using FastClosures
 using GLMakie
 using Colors
 
-write_stls = false
-
 b1(p0,u0,t0,p1,u1,t1,n) = ConstructiveGeometry.bezier(p0,p0+t0*u0,p1+t1*u1,p1,n)
 
 # first define a half-fleurdelis shape using Bézier curves
@@ -57,16 +55,13 @@ lis3d_def = def*lis3d
 lis3d_def1 = surface(lis3d_def)
 crown=union((rotate(45*i)*lis3d_def1 for i in 1:8)...)
 crown1 = surface(crown)
-write_stls && save("crown-main.stl", crown1)
 
 
 pyramid = [0 0 1;1 0 0;0 1 0]*([lis_w,7.5,.8]+cone(3)*lozenge)
 pyramid_stone = def*pyramid
-write_stls && save("crown-pyramid.stl", rotate(90,axis=[0,-1,0])*pyramid_stone)
 
 oval = [0 0 1;1 0 0;0 1 0]*([0,7.5,.8]+half(:top)*sphere(4))
 oval_stone = def*oval
-write_stls && save("crown-oval.stl", rotate(90,axis=[0,-1,0])*oval_stone)
 
 
 # display a nice color image:
@@ -79,5 +74,13 @@ fullcrown = union(gold*crown1,
 	emerald*union((rotate(45*i)*(def*pyramid) for i in 1:8)...))
 
 save("crown.png", plot(fullcrown))
+
+# save("crown-main.stl", crown1)
+# save("crown-pyramid.stl", rotate(90,axis=[0,-1,0])*pyramid_stone)
+# save("crown-oval.stl", rotate(90,axis=[0,-1,0])*oval_stone)
+
+# save("crown-main.ply", crown1)
+# save("crown-pyramid.ply", rotate(90,axis=[0,-1,0])*pyramid_stone)
+# save("crown-oval.ply", rotate(90,axis=[0,-1,0])*oval_stone)
 
 nothing

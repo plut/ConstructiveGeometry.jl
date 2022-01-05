@@ -65,7 +65,7 @@ end
 	for(e1, e2) in l; opposite!(t, e1, e2); opposite!(t, e2, e1); end
 @inline anyarrow!(t::AbstractTriangulation, l::Pair{<:Cell, <:Arrow}...) =
 	for (s,e) in l; anyarrow!(t, s, e); end
-@inline cellcorner!(t::AbstractTriangulation, l::Pair{<:Cell, <:Arrow}...) =
+@inline arrowsfrom!(t::AbstractTriangulation, l::Pair{<:Cell, <:Arrow}...) =
 	for(s,e) in l; anyarrow!(t, s, e); tail!(t, e, s); end
 
 @inline left(t::AbstractTriangulation, e::Arrow) = tail(t, prev(e))
@@ -266,7 +266,7 @@ function swapnodes!(t::AbstractTriangulation, q1::Node, q2::Node)#««
 		opposites!(t, x=>y)
 # 	opposites!(t, e2=>oc1, n2=>on1, p2=>op1, e1=>oc2, n1=>on2, p1=>op2)
 	end
-	cellcorner!(t, sc1=>e2, sn1=>n2, sp1=>p2, sc2=>e1, sn2=>n1, sp2=>p1)
+	arrowsfrom!(t, sc1=>e2, sn1=>n2, sp1=>p2, sc2=>e1, sn2=>n1, sp2=>p1)
 end#»»
 
 # CornerTable««1
@@ -386,7 +386,7 @@ export AbstractTriangulation, CornerTable, Arrow, Cell, Edge, Node, int
 export tail, tail!, head, opposite, opposite!, anyarrow, anyarrow!
 export narrows, nnodes, nnodes!, ncells, ncells!
 export next, prev, node, side, arrows
-export opposites!, cellcorner!
+export opposites!, arrowsfrom!
 export right, left, after, before, cell, triangle
 export lastcell, eachcell, lastnode, eachnode, lastarrow, eacharrow
 export alltriangles, adjnode, adjnodes, newnodes!
