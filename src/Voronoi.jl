@@ -1143,10 +1143,11 @@ function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
 	end
 	branch = sizehint!(Int8[], narrows(v))
 	for q in eachnode(v), i in 1:3
-		g, t = geometricnode(v, q), √(noderadius(v, q))
 		a = side(q, i)
 		ea = edge[int(a)]
 		s = sep[ea]
+		println("computing geometric branch for arrow $a:$(tail(v,a))->$(head(v,a)), edge $ea, separator $sep")
+		g, t = geometricnode(v, q), √(noderadius(v, q))
 		orient = (firstarrow[ea] == int(a))
 		# if orient == true then the + branch lies at the head of a, - at its tail
 		sgplus, sgminus = evaluate(s, t, +1), evaluate(s, t, -1)
