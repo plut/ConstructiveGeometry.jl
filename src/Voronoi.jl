@@ -438,10 +438,9 @@ end#»»
 function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#««
 	# replaces all nodes in `tree` by a star shape around `cell`,
 	# adding two new nodes in the process.
-	println("\e[1mstar(", s, ", ", tree, ", double=", doubleedges, ")\e[m")
+# 	println("\e[1mstar!(", s, ", ", tree, ", double=", doubleedges, ")\e[m")
 	for q in tree; shownode(stdout, t, q); end
 	boundary = tree_boundary(t, tree, doubleedges)
-	println("  outer boundary = $boundary")
 	push!(tree, newnodes!(t, 2)...)
 	# rewrite boundary edges for double-edges, by substituting the
 	# appropriate edge of the renamed triangle
@@ -607,7 +606,7 @@ end
 
 # Geometric node computation ««2
 @inline function geometricnode!(v::VoronoiDiagram, q::Node, g=equidistant(v,q))
-	println("geometricnode!($q)/$(nnodes(v))")
+# 	println("geometricnode!($q)/$(nnodes(v))")
 	v.geomnode[int(q)] = g
 	s = cell(v, q, 1)
 	v.noderadius[int(q)] = if issegment(v, s)
@@ -906,7 +905,6 @@ function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 	while !isempty(stack)
 		n+=1
 		@assert n ≤ 50
-		println("stack = $stack")
 		(e, s) = pop!(stack)
 		o = opposite(v, e)
 		q = node(o)
