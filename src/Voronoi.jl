@@ -295,6 +295,10 @@ struct Separator{T}
 	t0::T
 end
 
+function Base.show(io::IO, s::Separator)
+	print(io, "Separator(origin=", s.origin, ", tg=", s.tangent, ", n=", s.normal, "t₀=", s.t0)
+end
+
 """
     evaluate(separator, t, sign)
 
@@ -1138,15 +1142,16 @@ function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
 		b < a && continue
 		push!(firstarrow, a)
 		edge[a] = edge[b] = length(firstarrow)
-		println("separator($(length(firstarrow))) = $(right(v,a))/ $(left(v,a))")
-		push!(sep, separator(v, right(v, a), left(v, a)))
+# 		println("separator($(length(firstarrow))) = $(head(v,a))/ $(tail(v,a))")
+		push!(sep, separator(v, head(v, a), tail(v, a)))
+# 		println(last(sep))
 	end
 	branch = sizehint!(Int8[], narrows(v))
 	for q in eachnode(v), i in 1:3
 		a = side(q, i)
 		ea = edge[int(a)]
 		s = sep[ea]
-		println("computing geometric branch for arrow $a:$(tail(v,a))->$(head(v,a)), edge $ea, separator $sep")
+# 		println("computing geometric branch for arrow $a:$(tail(v,a))->$(head(v,a)), edge $ea")
 		g, t = geometricnode(v, q), √(noderadius(v, q))
 		orient = (firstarrow[ea] == int(a))
 		# if orient == true then the + branch lies at the head of a, - at its tail
@@ -1161,8 +1166,8 @@ function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
 			println("""
 \e[7m arrow $a (edge=$(edge[int(a)]), $(left(v,a))/$(right(v,a))):\e[m
   node $q = $g, r=$t
-	separator $s
-	candidates $sgplus, $sgminus
+  separator $s
+  candidates $sgplus, $sgminus
 \e[31;1m no good candidate!\e[m""")
 		end
 	end
