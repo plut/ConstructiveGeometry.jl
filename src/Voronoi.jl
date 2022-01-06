@@ -412,9 +412,6 @@ function tree_boundary(t::AbstractTriangulation{J}, tree, doubleedges=()) where{
 	# returns the list of half-edges running *outside* the tree,
 	# cyclically ordered around the tree (random start).
 	boundary = sizehint!(Arrow{J}[], length(tree)+2)
-	for e in doubleedges
-		shownode(stdout, t, node(e))
-	end
 	@assert !isempty(tree)
 	c = 0
 	for e in arrows(first(tree))
@@ -439,7 +436,6 @@ function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#«
 	# replaces all nodes in `tree` by a star shape around `cell`,
 	# adding two new nodes in the process.
 # 	println("\e[1mstar!(", s, ", ", tree, ", double=", doubleedges, ")\e[m")
-	for q in tree; shownode(stdout, t, q); end
 	boundary = tree_boundary(t, tree, doubleedges)
 	push!(tree, newnodes!(t, 2)...)
 	# rewrite boundary edges for double-edges, by substituting the
@@ -757,12 +753,10 @@ returns the minimum for z∈e of d²(z,s1)-d²(z,(ij))
 (s1 being one of the two sites defining e)
 """
 function edgeexit(v::AbstractVoronoi, e, i, j)
-	println("computing edge-exit value for edge $e and new segment ($i,$j)")
 	c1, c2 = left(v,e), right(v,e)
 	c2 = right(v, e)
 	g1 = geometricnode(v, node(e))
 	g2 = geometricnode(v, node(opposite(v,e)))
-	println("  geometric nodes for edge $e = ($c1, $c2) are $g1, $g2")
 	g1 == g2 && return 0 # catch non-ternary nodes
 	p,q = point(v,i), point(v,j)
 	if issegment(v, c1)
@@ -893,9 +887,7 @@ TODO: return a closed loop of edges which are fully closer to (i,j)
 than to their defining sites, i.e. the boundary of the new cell for (i,j).
 """
 function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
-	println("\e[34;1;7m badnodes($i, $j)\e[m")
 	rootnode = findrootnode(v,i,j)
-	println("\e[34;1m root node = $rootnode\e[m")
 	# each entry in the stack is a pair (edge opposite which we are
 	# exploring, cell around which we are turning):
 	stack = [(e, Cell{J}(0)) for e in arrows(rootnode)]
@@ -1070,30 +1062,35 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		s12, s21 = Cell(np+2i-1), Cell(np+2i)
 		(c1,c2) = cellsegment(v, s12)
 		(p1,p2) = point(v, c1), point(v, c2)
-# 		println("\e[7m splitting cell $s12 = ($c1,$c2)\e[m")
+		println("\e[7m splitting cell $s12 = ($c1,$c2)\e[m")
 		showcell(stdout, v, s12)
-		# find the edges connecting to the two endpoints
 		e2 = anyarrow(v, s12)
-		while right(v, e2) ≠ c2; e2 = after(v, e2); end
+		while head(v, e2) ≠ c2; e2 = after(v, e2); end
 		e1 = e2
-		while right(v, e1) ≠ c1; tail!(v, e1, s21); e1 = after(v, e1); end
+		while head(v, e1) ≠ c1; tail!(v, e1, s21); e1 = after(v, e1); end
 		# split the cell by inserting two new nodes
-		pe1, pe2 = prev(e1), prev(e2)
-		ope1, ope2 = opposite(v, prev(e1)), opposite(v, prev(e2))
+		# (= split vertex s12 of the dual triangulation)
+		o1, o2 = opposite(v, e1), opposite(v, e2)
 		q1, q2 = newnodes!(v, 2)
-		tail!(v,
-			side(q1,1)=>c1, side(q1,2)=>s12, side(q1,3)=>s21,
-			side(q2,1)=>c2, side(q2,2)=>s21, side(q2,3)=>s12)
-		opposites!(v, side(q1,1) => side(q2,1),
-			pe1=>side(q1,3), ope1=>side(q1,2),
-			pe2=>side(q2,3), ope2=>side(q2,2))
+		q11, q12, q13 = side(q1,1), side(q1,2), side(q1,3)
+		q21, q22, q23 = side(q2,1), side(q2,2), side(q2,3)
+		tail!(v, q11=>s12, q12=>s21, q13=>c1, q21=>s21, q22=>s12, q23=>c2)
+		opposites!(v, q11=>q21, q12=>o1, q13=>e1, q22=>o2, q23=>e2)
+# 		pe1, pe2,  = prev(e1), prev(e2)
+# 		ope1, ope2 = opposite(v, prev(e1)), opposite(v, prev(e2))
+# 		tail!(v,
+# 			side(q1,1)=>c1, side(q1,2)=>s12, side(q1,3)=>s21,
+# 			side(q2,1)=>c2, side(q2,2)=>s21, side(q2,3)=>s12)
+# 		opposites!(v, side(q1,1) => side(q2,1),
+# 			pe1=>side(q1,3), ope1=>side(q1,2),
+# 			pe2=>side(q2,3), ope2=>side(q2,2))
 		geometricnode!(v, q1, p1)
 		geometricnode!(v, q2, p2)
-		shownode(stdout, v, q1)
-		shownode(stdout, v, q2)
-		anyarrow!(v, s12, side(q1,2)); anyarrow!(v, s21, side(q2,2))
-		showcell(stdout, v, s12)
-		showcell(stdout, v, s21)
+# 		shownode(stdout, v, q1)
+# 		shownode(stdout, v, q2)
+		anyarrow!(v, s12, q11); anyarrow!(v, s21, q21)
+# 		showcell(stdout, v, s12)
+# 		showcell(stdout, v, s21)
 	end
 	return v
 end#»»
@@ -1130,6 +1127,8 @@ function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
 	showall(stdout, v)
 	splitsegments!(v)
 	println("\e[1;7m after split segments!:\e[m")
+	showall(stdout, v)
+	gnuplot(v)
 	ne = narrows(v) ÷ J(2)
 	edge = Vector{J}(undef, narrows(v))
 	sep = sizehint!(Separator{eltype(P)}[], ne)
@@ -1350,7 +1349,7 @@ function gnuplot(io::IO, v::AbstractVoronoi; scale=10.)
 		println(io, g[1], "\t", g[2], "\t", c)
 	end
 end
-function gnuplot(v::AbstractVoronoi; scale=10.)
+function gnuplot(v::AbstractVoronoi; scale=10., f_png="/tmp/a.png")
 	f_dat = "/tmp/a.dat"
 	open(f_dat, "w") do io gnuplot(io, v; scale); end
 	f_gpi = "/tmp/a.gpi"
@@ -1359,6 +1358,8 @@ function gnuplot(v::AbstractVoronoi; scale=10.)
 set style textbox 1 opaque border lc "blue"
 set style textbox 2 opaque border lc "red"
 f='$f_dat'
+set terminal png fontscale .5 size 1000,800
+set output '$f_png'
 plot \\
   f index 1 u 1:2:3:4 w vectors lc "blue" lw 2, \\
 	f index 3 u 1:2:3:4 w vectors lc "red", \\
@@ -1369,6 +1370,7 @@ plot \\
   f index 0 u 1:2:3 w labels center boxed bs 1
 		""")
 	end
+	run(`gnuplot $f_gpi`)
 end
 function shownode(io::IO, v::AbstractVoronoi, q::Node)
 	println(io, "\e[33m", q, triangle(v,q), "\e[m: ",
