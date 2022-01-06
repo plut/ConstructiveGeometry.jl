@@ -377,10 +377,11 @@ function findnode(t::AbstractTriangulation{J}, points, i) where{J}
 	c = 0
 	while true
 		c+= 1; @assert c ≤ 1e3
-		v = [points[int(e)] for e in triangle(t,q)]
-		isleft(v[1], point, v[2]) && (q = adjnode(t, q, 3); continue)
-		isleft(v[2], point, v[3]) && (q = adjnode(t, q, 1); continue)
-		isleft(v[3], point, v[1]) && (q = adjnode(t, q, 2); continue)
+		# this guarantees that v[i] = tail(side(q, i)) for i in 1:3:
+		v = [points[int(tail(t, e))] for e in arrows(q)]
+		isleft(v[1], point, v[2]) && (q = adjnode(t, q, 1); continue)
+		isleft(v[2], point, v[3]) && (q = adjnode(t, q, 2); continue)
+		isleft(v[3], point, v[1]) && (q = adjnode(t, q, 3); continue)
 		return q
 	end
 end
@@ -408,16 +409,18 @@ function badnodes(t::AbstractTriangulation, points, i)#««
 	return tree # the tree is usually small, no need to sort it
 end#»»
 function tree_boundary(t::AbstractTriangulation{J}, tree, doubleedges=()) where{J}#««
-	# returns the list of half-edges pointing *into* the tree,
+	# returns the list of half-edges running *outside* the tree,
 	# cyclically ordered around the tree (random start).
 	boundary = sizehint!(Arrow{J}[], length(tree)+2)
 	for e in doubleedges
 		shownode(stdout, t, node(e))
 	end
 	@assert !isempty(tree)
+	c = 0
 	for e in arrows(first(tree))
 		stack = [e]
 		while !isempty(stack)
+			c+=1; @assert c ≤ 1e2
 			e = pop!(stack)
 			o = opposite(t, e)
 			if e ∈ doubleedges
@@ -464,7 +467,7 @@ function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#«
 		#   ╱  e  ╲
 		#  c₁——————c₂
 		#      o
-		println("($q, $o, edge is $c1--$c2):")
+# 		println("($q, $o, edge is $c1--$c2):")
 		e = side(q, 1)
 		p = side(q, 3)
 		opposites!(t, e=>o, p=>n)
@@ -755,11 +758,12 @@ returns the minimum for z∈e of d²(z,s1)-d²(z,(ij))
 (s1 being one of the two sites defining e)
 """
 function edgeexit(v::AbstractVoronoi, e, i, j)
-	# running between the geometric nodes g1 and g2,
+	println("computing edge-exit value for edge $e and new segment ($i,$j)")
 	c1, c2 = left(v,e), right(v,e)
 	c2 = right(v, e)
 	g1 = geometricnode(v, node(e))
 	g2 = geometricnode(v, node(opposite(v,e)))
+	println("  geometric nodes for edge $e = ($c1, $c2) are $g1, $g2")
 	g1 == g2 && return 0 # catch non-ternary nodes
 	p,q = point(v,i), point(v,j)
 	if issegment(v, c1)
@@ -893,6 +897,8 @@ function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 	println("\e[34;1;7m badnodes($i, $j)\e[m")
 	rootnode = findrootnode(v,i,j)
 	println("\e[34;1m root node = $rootnode\e[m")
+	# each entry in the stack is a pair (edge opposite which we are
+	# exploring, cell around which we are turning):
 	stack = [(e, Cell{J}(0)) for e in arrows(rootnode)]
 	tree = [rootnode]
 	loops = Cell{J}[]
@@ -900,6 +906,7 @@ function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 	while !isempty(stack)
 		n+=1
 		@assert n ≤ 50
+		println("stack = $stack")
 		(e, s) = pop!(stack)
 		o = opposite(v, e)
 		q = node(o)
@@ -910,14 +917,14 @@ function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 		end
 		(influences(v,i,j,q) && meetscircle(v, q, i, j)) || continue
 		push!(tree, q)
-		push!(stack, (prev(o), left(v,e)))
-		push!(stack, (next(o), right(v, e)))
+		push!(stack, (prev(o), head(v,e)), (next(o), tail(v,e)))
 	end
 # 	@assert int(i) ≠ 5
 	# break loops in tree by identifying double edges
 # 	@assert isempty(loops)
 	doubleedges = Arrow{J}[]
 	for s in loops
+		println("  breaking loop at $s")
 		if s ∈ (i,j) # is this one of the ends of the segment we are inserting?
 			u = point(v,j) - point(v,i); (s == j) && (u = -u)
 			p = point(v,s)
@@ -937,7 +944,8 @@ function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 			# s is a cell
 			# look for an edge from s which (despite having its two end nodes
 			# covered by the new segments) exits the cell of the new segment
-			elist = collect(ring(v, s))
+			elist = collect(star(v, s))
+			println("\e[32;1m elist=$elist\e[m")
 			# groumpf
 # 			e = argmin(edgeexit(v,e,i,j) for e in elist)
 			e = first(elist); eemin = edgeexit(v,e,i,j)
@@ -977,12 +985,14 @@ function VoronoiDiagram{J}(points::AbstractVector{P}, segments) where{J,P}#««
 	ns= length(segments)
 	ntotal = np+ ns
 	points = SVector{2,Float64}.(points)
+	println("generating corner table...")
 	t = CornerTable{J}(points; trim=false)
+	showall(stdout, t)
+	println("expanding corner table for segments...")
 	ncells!(t, ncells(t) + ns)
 	v = VoronoiDiagram{J,P,eltype(P)}(t, points, NTuple{2,J}.(segments),
 		similar(points, nnodes(t)), Vector{eltype(P)}(undef, nnodes(t)))
 	for q in eachnode(t); geometricnode!(v, q); end
-	showall(stdout, v)
 
 	# incrementally add all segments ««
 	ns = length(segments)
@@ -1118,8 +1128,10 @@ end
 @inline OffsetDiagram(points, segments) = OffsetDiagram{Int32}(points, segments)
 function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
 	v = VoronoiDiagram{J}(points, segments)
+	println("\e[1;7m in OffsetDiagram, got the following Voronoi diagram:\e[m")
 	showall(stdout, v)
 	splitsegments!(v)
+	println("\e[1;7m after split segments!:\e[m")
 	ne = narrows(v) ÷ J(2)
 	edge = Vector{J}(undef, narrows(v))
 	sep = sizehint!(Separator{eltype(P)}[], ne)

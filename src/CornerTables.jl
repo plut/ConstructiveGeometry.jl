@@ -355,7 +355,9 @@ end
 
 # Displaying & debugging ««1
 function showall(io::IO, t::AbstractTriangulation)
+	println("\e[33;1m", nnodes(t), " nodes:\e[m")
 	for q in eachnode(t); shownode(io, t, q, "\n"); end
+	println("\e[31;1m", ncells(t), " cells:\e[m")
 	for c in eachcell(t); showcell(io, t, c, "\n"); end
 end
 
@@ -369,12 +371,11 @@ function shownode(io::IO, t::AbstractTriangulation, q::Node, s = "\n")
 	end
 end
 function showcell(io::IO, v::AbstractTriangulation, c::Cell, s = "\n")
-	print(io, "\e[31m", c, "\e[m:");
+	print(io, "\e[31m star(", c, ")\e[m:");
 	for e in star(v, c)
-		print(io, " ", node(e), "→", e, "(", head(v,e), ")→")
+		print(io, " ", e, "(", node(e), ")→", head(v,e))
 	end
 	print(io, s)
-# 	println(io, "\e[34m", c, "\e[m: ", [node(e) for e in star(v,c)])
 	for e in star(v,c)
 		c1 = tail(v, e)
 		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")
