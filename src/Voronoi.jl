@@ -333,6 +333,13 @@ The `+` branch sees `a` on its right and `b` on its left.
 		return b.origin + u*b.normal + s*sqrt(u)*b.tangent
 	end
 end
+"""
+    reverse(separator)
+
+Given `separator(a,b)`, returns `separator(b,a)`, i.e. such that
+`evaluate(sep′,t,s) = evaluate(sep,t,-s)`.
+"""
+@inline reverse(s::Separator) = Separator(s.origin, -s.tangent, s.normal, s.t0)
 
 function Separator(a::AbstractVector, b::AbstractVector)# bisector of two points
 	c = SVector{2}(a+b)/2
@@ -1239,128 +1246,93 @@ end
 """
     edgeoffset(v, e::Arrow, r)
 
-Given an arrow bounding a cell, returns all the points on this arrow
-lying at square-distance `r` from the cell,
-as a n-uple of geometric points (n ∈ (0,1,2)).
+Given an arrow bounding a cell,
+returns the two booleans indicating whether the offset at radius `r`
+intersect the + and - branches of the separator (in this order).
 """
-@inline function edgeoffset(v::OffsetDiagram, e::Arrow, r)
-	# given an edge bounding a cell,
-	# prints all the points on this edge lying at distance `r` from the cell
-	# (edges are open at their far end and closed at their near end)
+@inline function edgecross(v::OffsetDiagram, e::Arrow, radius)
 	o = opposite(v, e)
 	ee = edge(v, e)
-	orient = (e < o)
-	@assert orient == (e == firstarrow(v, ee))
+	orient = (e < o) ? 1 : -1
 	b0, b1 = branch(v, e), branch(v, o)
 
 	sep = separator(v, edge(v, e))
 	q0, q1 = node(e), node(o)
 	r0, r1 = noderadius(v, q0), noderadius(v, q1)
-	println("\e[1medge $e (opp. $o/$(tail(v,o)); $((b0,b1,orient))\e[m")
-	println("    left node $q0 $b0 $(geometricnode(v, q0)) $r0")
-	println("   right node $q1 $b1 $(geometricnode(v, q1)) $r1")
+# 	println("\e[1medge $e (opp. $o/$(tail(v,o)); $((b0,b1,orient))\e[m")
+# 	println("    left node $q0 $b0 $(geometricnode(v, q0)) $r0")
+# 	println("   right node $q1 $b1 $(geometricnode(v, q1)) $r1")
 
 	if iszero(b0) # this is a parallel bisector
-# 		@assert iszero(b1) "iszero(b0) -> iszero(b1)"
+		@assert iszero(b1) "iszero(b0) -> iszero(b1)"
 		@assert r0 == r1
-		println("  is a parallel bisector...")
-		(r0 == radius) && println((e, q1), (e, q0))
-		return
+# 		println("  is a parallel bisector...")
+# 		(r0^2 == radius) && println((e, q1), (e, q0))
+		return (false, false)
+# 		(r0 == radius) && return (q0,)
 	end
+	@assert !iszero(b1) "!iszero(b0) -> !iszero(b1)"
 	b = b0 + 2b1
-	println("\e[34mb=$b", ("><", "<<", ">>", "<>")[(b+5)/2], "\e[m")
+# 	println("\e[34mb=$b", ("><", "<<", ">>", "<>")[(b+5)/2], "\e[m")
+# 	p0 = @closure ()->evaluate(sep, radius, b0*orient)
+# 	p1 = @closure ()->evaluate(sep, radius,-b1*orient)
 	# depending on (b0,b1), the edge is oriented this way:
 	# ++ +- -+ --
 	# <> << >> ><
 	if b == 3
+		@assert r0 ≥ sep.t0
+		@assert r1 ≥ sep.t0
 		if sep.t0 < radius
-			if r1 > radius
-				println("one intersection point (right side)")
-				println(evaluate(sep, radius, b1))
-			end
-			if r0 > radius
-				println("one intersection point (left side)")
-				println(evaluate(sep, radius, b0))
-			end
+			return (r0 > radius, r1 > radius)
+# 			if r1 > radius
+# 				r0 > radius && return (p1(), p0(),)
+# 				return (p1(),)
+# 			end
+# 			r0 > radius && return (p0(),)
 		end
 	elseif b == -1
 		@assert r0 ≥ r1
-		if r1 ≤ radius < r0
-			println("one intersection point:")
-			println(evaluate(sep, radius, b0))
-		end
+		return (r1 ≤ radius < r0, false)
+# 		if r1 ≤ radius < r0
+# 			println("one intersection point:")
+# 			println(evaluate(sep, radius, b0))
+# 		end
+# 		r1 ≤ radius < r0 && return (p0(),)
 	elseif b == 1
 		@assert r0 ≤ r1
-		if r0 ≤ radius < r1
-			println("one intersection point")
-			println(evaluate(sep, radius, b1))
-		end
+# 		if r0 ≤ radius < r1
+# 			println("one intersection point")
+# 			println(evaluate(sep, radius, b1))
+# 		end
+		return (false, r0 ≤ radius < r1)
+# 		r0 ≤ radius < r1 && return (p1(),)
 	elseif b == -3
 		println("edge is counter-oriented, ignoring...")
 	else
 		error("bad edge type: $b")
 	end
-
-# 	@assert !iszero(b1) "!iszero(b0) -> !iszero(b1)"
-# 	if r0 ≤ r < r1
-# 		println("intersection (IN) at $(evaluate(sep, radius, 1))")
-# 	elseif r1 ≤ r < r0
-# 		println("intersection (OUT) at $(evaluate(sep, radius, -1))")
-# 	elseif (t0, t1) == (1, 1)
-# 		println("monotonic edge, no intersection")
-# 	elseif (t0, t1) == (1,2)
-# 		println("  <-  -> ")
-# 	elseif (t0, t1) == (2,1)
-# 		println("  ->  <- ")
-# 	elseif (t0, t1) == (0,0)
-# 		println("parallel separator at distance $r0 == $r1")
-# 	else
-# 		error("bad edge types: ($t0, $t1)")
-# 	end
+	return (false, false)
 end
-function celloffset(v::OffsetDiagram, c::Cell, ::typeof(+), radius)
+function celloffset(v::OffsetDiagram{J,P,T}, c::Cell, radius) where{J,P,T}
 	# compute the boundary of the offset for a single cell (right side)
 	# i.e. all intersection points of the edges of the cell and the offset line
 	println(" walking the boundary of cell $c:")
 	showcell(stdout, v, c)
-	# is the previous node inside the offset line?
-	is_in = true
-	r = radius^2
-# 	(a,b) = cellsegment(v, c)
-	for e in star(v, c)
-		edgeoffset(v, e, r)
+	off = Tuple{Arrow{J},Int8}[]
+	for e  in star(v,c)
+		(bl, br) = edgecross(v,e,abs(radius))
+		bl && push!(off, (e, 1))
+		br && push!(off, (e, -1))
 	end
-	return
-# 	for e in ring(v,c)
-# 		c2 = right(v,e)
-# 		o = opposite(v, e)
-# 		q0, q1 = node(e), node(o)
-# 		is_in1 = is_in
-# 		is_in = noderadius(v, q1) ≤ radius^2
-# 		println("edge $e ($(branch(v,e)), $(branch(v,o))):")
-# 		println("  from $q0 to $q1; on our right is $c2; ($is_in1, $is_in)")
-# 		println("  arrival $q1: $(geometricnode(v,q1)), d²=$(noderadius(v,q1))")
-# 		if is_in1 ≠ is_in
-# 			println("  \e[32;1m offset line crosses this edge!\e[m")
-# 		elseif c2 ∈ (a,b) || issegment(v, c2)
-# 			println("  this is a straight line, no crossing")
-# 		else
-# 			println("  this is a parabola arc! does it cross twice?")
-# 			# compute points of intersection
-# 			pts = cut_parabola(v, c2, a, b, q0, q1, -radius)
-# 			if pts == nothing
-# 				println("   no!")
-# 			else
-# 				println("   \e[32myes! at $pts\e[m")
-# 			end
-# 		end
-# 	end
+	(radius < 0) && reverse!(off)
+	return off
+# 	return [(e, p) for e in star(v,c) for p in edgeoffset(v, e, radius)]
 end
 function offset(points, segments, radius)
 	v = OffsetDiagram(points, segments)
 	return offset(v, radius)
 end
-function offset(v::OffsetDiagram, radius)
+function offset(v::OffsetDiagram{J}, radius) where{J}
 	# do a walk on the set of segments by connectivity
 	#   (we only start on segments but we can walk to points if an edge
 	#   points us to them)
@@ -1368,6 +1340,17 @@ function offset(v::OffsetDiagram, radius)
 	# and in particular all intersection points with the edges
 	# then glue along the edges
 	# as long as there are segments remaining...
+	todo = Cell{J}[]
+	for startcell in J(npoints(v)+1+(radius < 0)):J(2):J(ncells(v))
+		push!(todo, Cell(startcell))
+		while !isempty(todo)
+			c = pop!(todo)
+			co = celloffset(v, c, radius)
+			for (e, p) in co
+				println("$c  $e -> $(head(v,e)): $p")
+			end
+		end
+	end
 end
 
 #»»1
@@ -1533,7 +1516,7 @@ V=Voronoi
 # o = V.celloffset(v, V.Cell(2), +, .5)
 
 v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(4,3),(3,1)])
-o = V.celloffset(v, V.Cell(11), +, 1.)
+o = V.celloffset(v, V.Cell(11), 1.)
 
 # m = V.edgeexit_pp([5,9],[5,1],[1.6,5],[8.4,5],[0,10],[10,10])
 # V.equidistant_pss([0,0],[5,9],[5,1],[0,10],[10,10]) # [5,5]
