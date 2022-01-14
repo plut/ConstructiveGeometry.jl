@@ -45,6 +45,7 @@ end end
 
 @inline node(e::Arrow{J}) where{J} = Node{J}(fld1(int(e), 3))
 @inline side(q::Node{J}, i) where{J} = Arrow{J}(3*int(q)-3+i)
+@inline sides(q::Node{J}) where{J} = (side(q,J(1)), side(q,J(2)), side(q,J(3)))
 @inline arrows(q::Node{J}) where{J} = let a=J(3)*int(q)
 	Arrow(a-J(2)):Arrow(a); end
 # Data type««2
@@ -253,8 +254,8 @@ end#»»
 "swaps two nodes in the triangulation"
 function swapnodes!(t::AbstractTriangulation, q1::Node, q2::Node)#««
 	q1 == q2 && return
-	e1,n1,p1 = side(q1,1), side(q1,2), side(q1,3)
-	e2,n2,p2 = side(q2,1), side(q2,2), side(q2,3)
+	e1,n1,p1 = sides(q1)
+	e2,n2,p2 = sides(q2)
 	oc1,on1,op1 = opposite(t,e1), opposite(t,n1), opposite(t,p1)
 	oc2,on2,op2 = opposite(t,e2), opposite(t,n2), opposite(t,p2)
 	sc1,sn1,sp1 = tail(t,e1), tail(t,n1), tail(t,p1)
@@ -373,7 +374,7 @@ end
 function showcell(io::IO, v::AbstractTriangulation, c::Cell, s = "\n")
 	print(io, "\e[31m star(", c, ")\e[m:");
 	for e in star(v, c)
-		print(io, " ", e, "(", node(e), ")→", head(v,e))
+		print(io, " ", e, "→", head(v,e))
 	end
 	print(io, s)
 	for e in star(v,c)
@@ -386,7 +387,7 @@ end
 export AbstractTriangulation, CornerTable, Arrow, Cell, Edge, Node, int
 export tail, tail!, head, opposite, opposite!, anyarrow, anyarrow!
 export narrows, nnodes, nnodes!, ncells, ncells!
-export next, prev, node, side, arrows
+export next, prev, node, side, arrows, sides
 export opposites!, arrowsfrom!
 export right, left, after, before, cell, triangle
 export lastcell, eachcell, lastnode, eachnode, lastarrow, eacharrow
