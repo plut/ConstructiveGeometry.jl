@@ -1236,11 +1236,17 @@ end
 	cut_parabola(point(v,a), point(v,b), point(v,c),
 		geometricnode(v, q1), geometricnode(v, q2), r)
 
-function edgeoffset(v::OffsetDiagram, e::Arrow, radius)
+"""
+    edgeoffset(v, e::Arrow, r)
+
+Given an arrow bounding a cell, returns all the points on this arrow
+lying at square-distance `r` from the cell,
+as a n-uple of geometric points (n ∈ (0,1,2)).
+"""
+@inline function edgeoffset(v::OffsetDiagram, e::Arrow, r)
 	# given an edge bounding a cell,
 	# prints all the points on this edge lying at distance `r` from the cell
 	# (edges are open at their far end and closed at their near end)
-	r = radius^2
 	o = opposite(v, e)
 	ee = edge(v, e)
 	orient = (e < o)
@@ -1319,9 +1325,10 @@ function celloffset(v::OffsetDiagram, c::Cell, ::typeof(+), radius)
 	showcell(stdout, v, c)
 	# is the previous node inside the offset line?
 	is_in = true
+	r = radius^2
 # 	(a,b) = cellsegment(v, c)
 	for e in star(v, c)
-		edgeoffset(v, e, radius)
+		edgeoffset(v, e, r)
 	end
 	return
 # 	for e in ring(v,c)
