@@ -227,7 +227,7 @@ end#»»
 @inline Base.symdiff(m1::CTriangleMesh, m2::CTriangleMesh) = boolean(3, m1, m2)
 
 # Own functions ««1
-# plane_splice ««2
+# plane_slice ««2
 """
     plane_slice(m::TriangleMesh)
 
