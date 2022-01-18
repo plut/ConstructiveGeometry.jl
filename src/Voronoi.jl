@@ -4,6 +4,10 @@
 #
 # Offset algorithm: [Kim 1998]
 # https://www.sciencedirect.com/science/article/abs/pii/S0010448598000633
+"""    Voronoi
+
+Computation of Voronoi diagrams for planar polygons and polygonal paths,
+and of offset paths using these diagrams."""
 module Voronoi
 using StaticArrays
 using FastClosures
@@ -19,20 +23,19 @@ import .CornerTables: showall, showcell, shownode
 # as a triangulation: next is (head->left), prev is (left->tail)
 #         left
 # ╲         ╱╲        ╱      e: an edge in the graph
-#  ╲      ↗╱╱↖╲      ╱       p: prev(e)
+#  ╲      ↗╱╱↖╲      ╱       n: next(e); p: prev(e)
 #   ╲    a╱p  n╲    ╱        a: after(e) = opposite(p)
-#    ╲  ╱╱↙ *  ╲╲  ╱         b: before(e) = next(o)
+#    ╲  ╱╱↙ ●  ╲╲  ╱         b: before(e) = next(o)
 #     ╲ ╱  —e→   ╲╱          o: opposite(e)
-#    tail ——————head         *: node(e)
+#    tail ——————head         ●: node(e)
 #       ╲  ←o—  ╱
 #        ╲b    ╱
 #
 #  as a Voronoi diagram:
 #       ╲n  head    ╱ 
 #  left  ╲____o____╱  right
-#        ╱*   e    ╲
+#        ╱●   e    ╲
 #      p╱a  tail   b╲
-#
 
 # Geometry ««1
 # Elementary geometry ««2
@@ -333,6 +336,9 @@ The `+` branch sees `a` on its right and `b` on its left.
 		return b.origin + u*b.normal + s*sqrt(u)*b.tangent
 	end
 end
+"""    atan(separator)
+Returns the angle of the initial normal of this separator."""
+@inline Base.atan(s::Separator) = atan(s.normal[2], s.normal[1])
 """
     reverse(separator)
 
@@ -1082,7 +1088,7 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 	return v
 end#»»
 
-# OffsetDiagram type ««2
+# OffsetDiagram type and constructor ««2
 struct OffsetDiagram{J,P,T} <: AbstractVoronoi{J}
 	voronoi::VoronoiDiagram{J,P,T}
 	# parametrizations of edges by distance to sites:
@@ -1112,9 +1118,9 @@ function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
 # 	println("\e[1;7m in OffsetDiagram, got the following Voronoi diagram:\e[m")
 # 	showall(stdout, v)
 	splitsegments!(v)
-	println("\e[1;7m after split segments!:\e[m")
-	showall(stdout, v)
-	gnuplot(v)
+println("\e[1;7m after split segments!:\e[m")
+showall(stdout, v)
+gnuplot(v)
 	# replace all node radii (squared distance) by their square roots:
 	map!(√, v.noderadius, v.noderadius)
 	# compute number of neighbours of each point:
@@ -1178,7 +1184,7 @@ function OffsetDiagram{J}(points::AbstractVector{P}, segments) where{J,P}
 	return OffsetDiagram{J,P,eltype(P)}(v, sep, branch, neighbours)
 end
 
-# Single cell offset ««2
+# Single edge offset ««2
 """
     edgecross(v, e::Edge, r)
 
@@ -1219,54 +1225,33 @@ intersect the + and - branches of the separator (in this order).
 	end
 	return (false, false)
 end#»»
-"""
-    celloffset(v, c::Cell, radius; start=anyedge(c))
-
-Computes the offset segments in a single cell;
-returns a vector of all (edge, branch) corresponding to intersections.
-"""
-function celloffset(v::OffsetDiagram{J,P,T}, c::Cell, radius;
-	start=Edge(zero(J))) where{J,P,T}#««
-	# compute the boundary of the offset for a single cell (right side)
-	# i.e. all intersection points of the edges of the cell and the offset line
-# 	println(" walking the boundary of cell $c:")
-# 	showcell(stdout, v, c)
-	off = Tuple{Edge{J},Int8}[]
-	iszero(start) && (start = anyedge(v, c))
-	for e  in star(v,start)
-		(bl, br) = edgecross(v,e,abs(radius))
-		bl && push!(off, (e, 1))
-		br && push!(off, (e, -1))
-	end
-	(radius < 0) && reverse!(off)
-	return off
-end#»»
 """    prevedge(v, e, r)
 Given an edge bounding a cell c, return the previous edge where
 the offset segment at distance r enters the cell."""
-function prevedge(v::OffsetDiagram, e0::Edge, r)
+function prevedge(v::OffsetDiagram, e0::Edge, r)#««
 	@assert r > 0
 	for e in star(v, e0)
 		(bl, _) = edgecross(v, e, r)
 		bl && return e
 	end
 	return zero(e0)
-end
+end#»»
 """    nextedge(v, e, r)
 Given an edge bounding a cell c, return the next edge where
 the offset segment at distance r exits the cell."""
-function nextedge(v::OffsetDiagram, e0::Edge, r)
+function nextedge(v::OffsetDiagram, e0::Edge, r)#««
 	@assert r > 0
 	for e in reverse(star(v, e0))
 		(_, br) = edgecross(v, e, r)
 		br && return e
 	end
 	return zero(e0)
-end
+end#»»
 """    firstedge(v, c, r)
 Returns the first edge for an offset segment in cell `c`."""
 @inline firstedge(v::OffsetDiagram, c::Cell, r) = prevedge(v, anyedge(v, c), r)
 
+# Offset chain ««2
 """    offsetchains(v::OffsetDiagram, radius)
 
 Returns the set of chains encoding the offset curves for this radius.
@@ -1307,9 +1292,68 @@ function offsetchains(v::OffsetDiagram{J}, radius) where{J}#««
 			pushfirst!(l, e); done[int(e)] = true
 		end
 	end
+# 	if radius < 0 # correct the orientation of all chains
+# 		for l in chains
+# 			reverse!(l)
+# 			for (i, e) in pairs(l); l[i] = opposite(v, e); end
+# 		end
+# 	end
 	return chains
 end#»»
 
+# Offset methods ««2
+function interpolate(v::OffsetDiagram{J,P,T}, chain, radius, precision
+		) where{J,P,T}
+	e0 = first(chain); sep0 = separator(v, e0)
+	r = abs(radius)
+	δ = √(r/(8*precision)) # used for discretizing circle arcs
+	plist = [evaluate(sep0, r, +1)]
+	for e1 in chain[2:end]
+		sep1 = separator(v, e1)
+		c = tail(v, e0)
+		if !issegment(v, c) # circular arc
+			@assert issegment(v, tail(v, e1))
+			a0, a1 = atan(sep0), atan(sep1)
+			a1 < a0 && (a1+= 2π)
+			n = ceil(Int, (a1-a0)*δ)
+			p = point(v, c); θ = (a1-a0)/n
+			for i in 1:n-1
+				a = a0+i*θ
+				push!(plist, SA[p[1] + cos(a)*r, p[2]+sin(a)*r])
+			end
+		end
+		# this is either the single point (for a straight segment), or the
+		# closure of a circular arc
+		push!(plist, evaluate(sep1, r, +1))
+		e0, sep0 = e1, sep1
+	end
+	(radius < 0) && reverse!(plist)
+	return plist
+end
+"""    offset(points, segments, radius; precision)
+
+Returns the offset polygon(s) at distance `radius` from the polygons
+defined by `points` and `segments`. Positive distance is right side.
+
+Optional parameter `precision` is the maximal distance of consecutive
+interpolated points on a circular arc.
+"""
+function offset(points, segments, radius::Real; precision=1e-1)
+	v = OffsetDiagram(points, segments)
+	chains = offsetchains(v, radius)
+	return [ interpolate(v, l, radius, precision) for l in chains ]
+end
+"""    offset(points, segments, radii; precision)
+
+Equivalent to `[offset(points, segments, r) for r in radii]`,
+but all offset paths are computed simultaneously.
+"""
+function offset(points, segments, radii::AbstractVector{<:Real};
+		precision=1e-1)
+	v = OffsetDiagram(points, segments)
+	chains = [ offsetchains(v, r) for r in radii ]
+	return [ [ interpolate(v, l, r, precision) for l in chains ] for r in radii ]
+end
 #»»1
 # Displaying and debugging ««1
 function gnuplot(io::IO, v::AbstractVoronoi; scale=10.)
@@ -1451,12 +1495,10 @@ V=Voronoi
 # println(V.point(v,V.Cell(3)))
 # println(V.point(v,V.Cell(4)))
 # println(V.point(v,V.Cell(5)))
-# o = V.celloffset(v, V.Cell(1), +, .5)
-# o = V.celloffset(v, V.Cell(2), +, .5)
 
 v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)])
-# o = V.celloffset(v, V.Cell(11), 1.)
-o = V.offset(v, 1.)
+l=V.offsetchains(v, 1.)
+o=V.offset([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)], 1.)
 
 # m = V.edgeexit_pp([5,9],[5,1],[1.6,5],[8.4,5],[0,10],[10,10])
 # V.equidistant_pss([0,0],[5,9],[5,1],[0,10],[10,10]) # [5,5]
