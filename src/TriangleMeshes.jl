@@ -328,8 +328,8 @@ Base.show(io::IO, t::CTMesh) = CornerTables.showall(io, t)
 
 @inline CornerTables.triangulation(t::CTMesh) = t.triangulation
 @inline point(t::CTMesh, c::Cell) = t.points[int(c)]
-@inline edgelength(t::CTMesh, a::Arrow; distance2 = distance2) =
-	distance2(point(t, CornerTables.head(t,a)), point(t, CornerTables.tail(t,a)))
+@inline edgelength(t::CTMesh, e::Edge; distance2 = distance2) =
+	distance2(point(t, CornerTables.head(t,e)), point(t, CornerTables.tail(t,e)))
 
 # conversion to and from `TriangleMesh`
 
@@ -378,7 +378,7 @@ function splitedges!(t::CTMesh{J,T,A}, maxlen; distance2=distance2) where{J,T,A}
 	elist = VecSortedSet{J}(T[ a > opposite(t, a) ? zero(T) :
 		edgelength(t, a; distance2) for a in eacharrow(t) ])
 	while true
-	e = Arrow(last(elist)); o = opposite(t, e)
+	e = Edge(last(elist)); o = opposite(t, e)
 	elist.size[e] ≤ maxlen && break
 	ne, po = next(e), prev(o)
 	o_ne, o_po = opposite(t, ne), opposite(t, po)

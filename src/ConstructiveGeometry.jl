@@ -32,6 +32,7 @@ include("TriangleMeshes.jl")
 using .TriangleMeshes
 include("Bezier.jl")
 using .Bezier
+include("Voronoi.jl")
 
 # General tools««1
 struct Consecutives{T,V} <: AbstractVector{T}
@@ -1314,6 +1315,18 @@ defining an affine transform.
 @inline _sweep(transform, s::AbstractGeometry{3};
 	nsteps=32, maxgrid=32, isolevel=0) =
 	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
+
+
+struct PathExtrude <: AbstractGeometry{3}
+	trajectory::Vector{Vector{SVector{2,Float64}}}
+	profile::AbstractGeometry{2}
+end
+@inline children(s::PathExtrude) = (s.profile,)
+function mesh(g::MeshOptions, s::PathExtrude, (m,))
+	vlist = Voronoi.extrude(s.trajectory, paths(m), get(g, :atol))
+	v = [ surface(points, triangles) for (points, triangles) in vlist ]
+	return reduce(symdiff, v)
+end
 
 # Generic coordinate transform ««1
 struct Deformation{D} <: AbstractTransform{D}
