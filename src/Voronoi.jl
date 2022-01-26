@@ -89,6 +89,7 @@ function segdistance²(a,b,c)
 	return det2(ab,ac)^2/norm²(ab)
 end
 
+"    iscloser(a,b,c): is d(a,b) ≤ d(a,c) ?"
 @inline iscloser(a,b,c) = dot(2a-b-c, b-c) ≥ 0
 @inline isleft(a,b,c) = det2(a,b,c) > 0
 @inline isleft(u,v) = det2(u,v) > 0
@@ -314,12 +315,12 @@ function intersection(l1::Line, l2::Line)
 	return SA[b1*c2-c1*b2,c1*a2-a1*c2]/d
 end
 
-# Parametrized bisectors ««2
+# Separators: parametrized bisectors ««2
 # This is either:
 #  - a parabola: origin + tangent*(t-t0) ± normal*sqrt(t-t0);
 #  - a line: origin ± tangent*|t-t0|  (this is indicated by normal == 0)
-# This could be rewritten as a union, but we can use one of the fields to
-# store the type.
+# Instead of a union (or an abstract type) we can build a structure which
+# works in all cases.
 """
     Separator
 
@@ -412,6 +413,11 @@ function Separator(l1::Line, l2::Line)
 	w*= sign(det2(l2.normal, l1.normal))
 	return Separator(c, w, zero(w), zero(w[1]))
 end
+function degenerate_separator(l::Line, a::AbstractVector)
+	# in this case we know that a ∈ l
+	return Separator(SA[a[1], a[2]],
+		zero(l.normal), l.normal, zero(eltype(l.normal)))
+end
 
 # Approximation of parabolic arc««2
 H(x)=x*_₂F₁(1/4,1/2,3/2,-x^2)
@@ -449,14 +455,14 @@ end
 # Triangulation««2
 function triangulate_loop(points, idx)
 	n = length(idx)
-# 	for i in idx
-# 		println("$(points[i][1])\t$(points[i][2])\t$i")
-# 	end
+	for i in idx
+		println("$(points[i][1])\t$(points[i][2])\t$i")
+	end
 	vmat = [ points[i][j] for i in idx, j in 1:2 ]
 	elist = [ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
-# 	println("vmat=",vmat)
-# 	println("idx=",idx)
-# 	println("elist=",elist)
+	println("vmat=",vmat)
+	println("idx=",idx)
+	println("elist=",elist)
 	return LibTriangle.constrained_triangulation(vmat, idx, elist)
 end
 # Delaunay triangulation ««1
@@ -511,6 +517,27 @@ function meetscircle(t::AbstractTriangulation, q::Node, points::AbstractVector, 
 	c1, c2, c3 = Int.(triangle(t, q))
 	return isincircle(points[SA[c1,c2,c3, i]]...)
 end#»»
+function addnode!(t::AbstractTriangulation, points, i)
+	q0 = findnode(t, points, i)
+	c = Cell(i)
+	stack = [insert!(t, q0, c)...]
+	println("\e[31;7m after insert!($q0, $c) = $stack:\e[m")
+	showall(stdout, t)
+	println("stack = $stack")
+	while !isempty(stack)
+		e = pop!(stack)
+		@assert tail(t, e) == c
+		println("examining outgoing edge $e: $c -> $(head(t,e))")
+		println((next(e), opposite(t, next(e)), node(opposite(t, next(e)))))
+		q = node(opposite(t, next(e)))
+		isone(int(q)) && continue
+		shownode(stdout, t, q)
+		println("   next node is $q")
+		meetscircle(t, q, points, i) || continue
+		println("   \e[1m must flip node $q (edge $(next(e)))\e[m")
+		@assert false
+	end
+end
 function badnodes(t::AbstractTriangulation, points, i)#««
 	stack = [findnode(t, points, i)]
 	tree = empty(stack)
@@ -524,9 +551,13 @@ function badnodes(t::AbstractTriangulation, points, i)#««
 	end
 	return tree # the tree is usually small, no need to sort it
 end#»»
+"""    tree_boundary(t, tree, doubleedges)
+
+Returns the list of half-edges pointing *inside* this tree
+(i.e. having tail outside and head inside),
+cyclically ordered around the tree (with an arbitrary start).
+"""
 function tree_boundary(t::AbstractTriangulation{J}, tree, doubleedges=()) where{J}#««
-	# returns the list of half-edges running *outside* the tree,
-	# cyclically ordered around the tree (random start).
 	boundary = sizehint!(Edge{J}[], length(tree)+2)
 	@assert !isempty(tree)
 	c = 0
@@ -550,12 +581,14 @@ end#»»
 function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#««
 	# replaces all nodes in `tree` by a star shape around `cell`,
 	# adding two new nodes in the process.
-# 	println("\e[1mstar!(", s, ", ", tree, ", double=", doubleedges, ")\e[m")
+	println("\e[1mstar!(", s, ", ", tree, ", double=", doubleedges, ")\e[m")
 	boundary = tree_boundary(t, tree, doubleedges)
-	push!(tree, newnodes!(t, 2)...)
+	println("   boundary=$boundary")
+	push!(tree, newnodes!(t, 2)...) # fixme: append! throws an error here
 	# rewrite boundary edges for double-edges, by substituting the
 	# appropriate edge of the renamed triangle
 	c2list = [ tail(t, e) for e in boundary ]
+	println("  c2list = $c2list")
 	j = 0
 	for (i, o) in pairs(boundary)
 		o ∈ doubleedges || continue
@@ -568,6 +601,7 @@ function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#«
 			j = 0
 		end
 	end
+	println("  now boundary rewritten as $boundary")
 	c1 = last(c2list)
 	n = side(last(tree), 2)
 	for (q, o, c2) in zip(tree, boundary, c2list)
@@ -602,18 +636,21 @@ function CornerTable{J}(points; trim=true, extra=0) where{J}#««
 	np = J(length(points))
 # 	np < 3 && return CornerTable{J}(undef, 0)
 	t = CornerTable{J}(J[4,6,5,1,3,2],J(np).+J[2,1,3,1,2,3],
-		Vector{J}(undef, np+3))
-	anyedge!(t, Cell(np+1), Edge(J(1)))
-	anyedge!(t, Cell(np+2), Edge(J(2)))
-	anyedge!(t, Cell(np+3), Edge(J(3)))
+		zeros(J, np+3)) # 		Vector{J}(undef, np+3))
+	anyedge!(t, Cell(np+1), Edge(J(4)))
+	anyedge!(t, Cell(np+2), Edge(J(5)))
+	anyedge!(t, Cell(np+3), Edge(J(6)))
 
 	m = maximum(abs(x) for p in points for x in p) + extra
 	push!(points, [0,-3m], [3m,2m], [-3m,2m])
   #»»
 	# incrementally add all points ««
 	for i in 1:np # Random.randperm(np)
-		tree = badnodes(t, points, i)
-		star!(t, Cell(i), tree)
+		println("adding point $i:")
+		showall(stdout, t)
+		addnode!(t, points, i)
+# 		tree = badnodes(t, points, i)
+# 		star!(t, Cell(i), tree)
 	end
 	#»»
 	if trim
@@ -777,11 +814,36 @@ function equidistant_pxs(v::AbstractVoronoi, i1, j1, i2, j2, ε)#««
 end#»»
 
 function separator(v::AbstractVoronoi, c1, c2)
-	a1 = issegment(v, c1) ? let (i1, j1) = cellsegment(v, c1)
-		Line(point(v, i1), point(v, j1)) end : point(v, c1)
-	a2 = issegment(v, c2) ? let (i2, j2) = cellsegment(v, c2)
-		Line(point(v, i2), point(v, j2)) end : point(v, c2)
-	return Separator(a1, a2)
+	if issegment(v, c1)
+		i1, j1 = cellsegment(v, c1)
+		a1, b1 = point(v, i1), point(v, j1)
+		if issegment(v, c2)
+			i2, j2 = cellsegment(v, c2)
+			a2, b2 = point(v, i2), point(v, j2)
+			return Separator(Line(a1, b1), Line(a2, b2))
+		elseif (c2 == i1 || c2 == j1) # degenerate parabola (exact)
+			return degenerate_separator(Line(a1, b1), point(v, c2))
+		else # generic parabola separator
+			return Separator(Line(a1,b1), point(v,c2))
+		end
+	elseif issegment(v, c2)
+		i2, j2 = cellsegment(v, c2)
+		a2, b2 = point(v, i2), point(v, j2)
+		if c1 == i2 || c1 == j2
+			return reverse(degenerate_separator(Line(a2,b2), point(v, c1)))
+		else # generic parabola
+			return Separator(point(v, c1), Line(a2,b2))
+		end
+	else # point-point separator
+		return Separator(point(v, c1), point(v, c2))
+	end
+# 		
+# 			
+# 	a1 = issegment(v, c1) ? let (i1, j1) = cellsegment(v, c1)
+# 		Line(point(v, i1), point(v, j1)) end : point(v, c1)
+# 	a2 = issegment(v, c2) ? let (i2, j2) = cellsegment(v, c2)
+# 		Line(point(v, i2), point(v, j2)) end : point(v, c2)
+# 	return Separator(a1, a2)
 end
 
 # Cell location functions ««2
@@ -823,32 +885,32 @@ end
 """
 edgeexit(v, e, i, j)
 given the edge e and a new segment (i,j),
-returns the minimum for z∈e of d²(z,s1)-d²(z,(ij))
-(s1 being one of the two sites defining e)
+returns the minimum for z∈e of d²(z,c1)-d²(z,(ij))
+(c1 being one of the two cells defining e)
 """
 function edgeexit(v::AbstractVoronoi, e, i, j)
-	c1, c2 = left(v,e), right(v,e)
-	c2 = right(v, e)
-	g1 = geometricnode(v, node(e))
-	g2 = geometricnode(v, node(opposite(v,e)))
-	g1 == g2 && return 0 # catch non-ternary nodes
+	o = opposite(v, e)
+	q0, q1 = node(e), node(o)
+	g0, g1 = geometricnode(v, q0), geometricnode(v, q1)
+	c1, c2 = tail(v,e), tail(v, o)
+	g0 == g1 && return 0 # catch non-ternary nodes
 	p,q = point(v,i), point(v,j)
 	if issegment(v, c1)
 		if issegment(v, c2)
 			(i1, j1) = cellsegment(v, c1)
 			(i2, j2) = cellsegment(v, c2)
 			a1, b1, a2, b2 = point(v,i1), point(v,j1), point(v,i2), point(v,j2)
-			return edgeexit_ss(a1,b1,a2,b2,g1,g2, p,q)
+			return edgeexit_ss(a1,b1,a2,b2,g0,g1, p,q)
 		end
 		c1,c2 = c2,c1 # this replaces _sp case by equivalent _ps case just below:
 	end
 	if issegment(v, c2) # _ps case
 		(i2, j2) = cellsegment(v, c2)
 		a, a2, b2 = point(v,c1), point(v,i2), point(v,j2)
-		return edgeexit_ps(a, a2,b2,g1,g2,p,q)
+		return edgeexit_ps(a, a2,b2,g0,g1,p,q)
 	else
 		a, b = point(v,c1), point(v,c2)
-		return edgeexit_pp(a,b,g1,g2, p,q)
+		return edgeexit_pp(a,b,g0,g1, p,q)
 	end
 end
 
@@ -983,12 +1045,13 @@ function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 		push!(tree, q)
 		push!(stack, (prev(o), head(v,e)), (next(o), tail(v,e)))
 	end
-# 	@assert int(i) ≠ 5
 	# break loops in tree by identifying double edges
 # 	@assert isempty(loops)
 	doubleedges = Edge{J}[]
+# 	showall(stdout, v.triangulation)
+	println("badnodes($i,$j): tree=$tree")
 	for s in loops
-# 		println("  breaking loop at $s")
+		println("  breaking loop around $s")
 		if s ∈ (i,j) # is this one of the ends of the segment we are inserting?
 			u = point(v,j) - point(v,i); (s == j) && (u = -u)
 			p = point(v,s)
@@ -1009,17 +1072,21 @@ function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
 			# look for an edge from s which (despite having its two end nodes
 			# covered by the new segments) exits the cell of the new segment
 			elist = collect(star(v, s))
+			println("  around cell $s: elist=$elist")
 # 			println("\e[32;1m elist=$elist\e[m")
 			# groumpf
 # 			e = argmin(edgeexit(v,e,i,j) for e in elist)
 			e = first(elist); eemin = edgeexit(v,e,i,j)
+			println("  for edge $e: exit value is $eemin")
 			for e1 in elist[2:end]
 				eemin1 = edgeexit(v, e1, i, j)
+				println("  for edge $e1: exit value is $eemin1")
 				(eemin1 < eemin) && ((e, eemin) = (e1, eemin1))
 			end
 			push!(doubleedges, e, opposite(v,e))
 		end
 	end
+	println("found double edges = $doubleedges")
 	@assert length(doubleedges) == 2*length(loops)
 	return (tree, doubleedges) # the tree is usually small, no need to sort it
 end
@@ -1035,13 +1102,7 @@ end#»»
 # Compute Voronoi diagram ««2
 @inline VoronoiDiagram(points, segments=[]) =
 	VoronoiDiagram{Int32}(points, segments)
-# @inline function VoronoiDiagram(t::CornerTable{J},
-# 		points::AbstractVector{P}, segments::AbstractVector) where{J,P}
-# 	v = VoronoiDiagram{J,P,eltype(P)}(t, points, NTuple{2,J}.(segments),
-# 		Vector{P}(undef, nnodes(t)), vector{eltype(P)}(undef, nnodes(t))
-# 	for q in allnodes(t); geometricnode!(v, q); end
-# 	return v
-# end
+
 function VoronoiDiagram{J}(points::AbstractVector{P}, segments;
 		extra=0) where{J,P}#««
 	Random.seed!(0)
@@ -1050,7 +1111,7 @@ function VoronoiDiagram{J}(points::AbstractVector{P}, segments;
 	ntotal = np+ ns
 	points = SVector{2,Float64}.(points)
 	t = CornerTable{J}(points; trim=false, extra)
-# 	showall(stdout, t)
+	showall(stdout, t)
 	ncells!(t, ncells(t) + ns)
 	v = VoronoiDiagram{J,P,eltype(P)}(t, points, NTuple{2,J}.(segments),
 		similar(points, nnodes(t)), Vector{eltype(P)}(undef, nnodes(t)))
@@ -1060,28 +1121,12 @@ function VoronoiDiagram{J}(points::AbstractVector{P}, segments;
 	ns = length(segments)
 	for i in 1:ns # Random.randperm(ns)
 		s = Cell(np+3+i); (a,b) = cellsegment(v, s)
-# 		println("\e[31;1;7minserting segment $s = ($a,$b)\e[m")
+		println("\e[31;1;7minserting segment $s = ($a,$b)\e[m")
 		tree, doubleedges = badnodes(v, a, b)
 		star!(v, s, tree, doubleedges)
-# 		showcell(stdout, v, s)
+		showall(stdout, v)
 	end
 	#»»
-# 	# for each segment, identify the delimitation between both sides of the
-# 	# cell (this will be useful for offsetting) #««
-# 	# i.e. the first node 
-# 	for i in 1:ns
-# 		s = Cell(np+3+i); (a,b) = cellsegment(v,s)
-# 		# 
-# 		println("looking for first node for $s = ($a,$b)...")
-# 		for e in star(v, s)
-# 			s1 = left(v, e)
-# 			println("  e = $e ($(tail(v,e)), $(right(v,e)), $(left(v,e)))")
-# 			if (s1 == a) || (issegment(v, s1) && a ∈ cellsegment(v, s1))
-# 				println("  cell $s1 is attached to $a")
-# 			end
-# 		end
-# 	end
-# 	#»»
 	# remove all superfluous nodes & cells ««
 	# the nodes are sorted this way:
 	# - inner nodes
@@ -1200,6 +1245,7 @@ function OffsetDiagram{J}(points::AbstractVector{P}, segments;
 # 	showall(stdout, v)
 	splitsegments!(v)
 println("\e[1;7m after split segments!:\e[m")
+print(stdout, v.points)
 showall(stdout, v)
 gnuplot(v)
 	# replace all node radii (squared distance) by their square roots:
@@ -1210,7 +1256,7 @@ gnuplot(v)
 		neighbours[a]+= one(J)
 	end
 
-	sep = Vector{Separator{eltype(P)}}(undef, nedges(v))
+	seplist = Vector{Separator{eltype(P)}}(undef, nedges(v))
 	branch = Vector{Int8}(undef, nedges(v))
 	for e in eachedge(v)
 		o = opposite(v, e)
@@ -1224,11 +1270,11 @@ gnuplot(v)
 		#
 		# branch[e] = +1 iff node(e) lies on the + branch of the separator
 		# branch[e] = 0 iff this separator is a parallel bisector
-		s = separator(v, tail(v,o), tail(v,e))
-		sep[int(e)] = s
-		sep[int(o)] = reverse(s)
+		sep = separator(v, tail(v,o), tail(v,e))
+		seplist[int(e)] = sep
+		seplist[int(o)] = reverse(sep)
 
-		if any(isnan, s.normal)
+		if any(isnan, sep.normal)
 			branch[int(e)] = branch[int(o)] = Int8(0)
 			continue
 		end
@@ -1237,21 +1283,34 @@ gnuplot(v)
 		g0, g1 = geometricnode(v, q0), geometricnode(v, q1)
 		r0, r1 = noderadius(v, q0), noderadius(v, q1)
 
-		g0p, g0m = evaluate(s, r0, +1), evaluate(s, r0, -1)
-		g1p, g1m = evaluate(s, r1, +1), evaluate(s, r1, -1)
+		g0p, g0m = evaluate(sep, r0, +1), evaluate(sep, r0, -1)
+		g1p, g1m = evaluate(sep, r1, +1), evaluate(sep, r1, -1)
+		@debug """
+edge $e (opposite $o): identifying node branches
+  $q0 = $g0 at $r0
+     (branch + $(g0≈g0p) $g0p
+             - $(g0≈g0m) $g0m)
+  $q1 = $g1 at $r1
+     (branch + $(g1≈g1p) $g1p
+             - $(g1≈g1m) $g1m)
+  sep = $sep
+"""
+
 # 		println(" g0=$g0 $r0\n g1=$g1 $r1\n")
 # 		println("  g0+=$g0p\n  g0-=$g0m\n  g1+=$g1p\n  g1-=$g1m\n")
-		if r0 == s.t0
-			if r1 == s.t0
+		if r0 == sep.t0
+			if r1 == sep.t0
 				branch[int(e)] = branch[int(o)] = Int8(0)
 			else
 				@assert g1 ≈ g1m
 				branch[int(e)] = Int8(-1); branch[int(o)] = Int8(+1)
 			end
-		elseif r1 == s.t0
+		elseif r1 == sep.t0
 			@assert g0 ≈ g0p
 			branch[int(e)] = Int8(+1); branch[int(o)] = Int8(-1)
 		else
+# 			branch[int(e)] = iscloser(g0, g0p, g0m) ? one(Int8) : -one(Int8)
+# 			branch[int(o)] = iscloser(g1, g1p, g1m) ? one(Int8) : -one(Int8)
 			    if g0 ≈ g0p; branch[int(e)] = Int8(+1)
 			elseif g0 ≈ g0m; branch[int(e)] = Int8(-1)
 			else; error("no branch found for g0"); end
@@ -1259,10 +1318,11 @@ gnuplot(v)
 			elseif g1 ≈ g1m; branch[int(o)] = Int8(+1)
 			else; error("no branch found for g1"); end
 		end
+		@debug " branches = $(branch[int(e)]), $(branch[int(o)]) "
 # 		println("branch[$e, $o] = $(branch[int(e)]), $(branch[int(o)])")
 	end
 
-	return OffsetDiagram{J,P,eltype(P)}(v, sep, branch, neighbours)
+	return OffsetDiagram{J,P,eltype(P)}(v, seplist, branch, neighbours)
 end
 
 # Single edge offset ««2
@@ -1342,6 +1402,76 @@ Returns the status of
 """
 
 # Offset chain ««2
+"    finds a segment starting at a and *not* going to b"
+function nextsegment(v::OffsetDiagram, a::Cell, b::Cell)
+	v.neighbours[int(a)] ≠ 2 && return zero(a)
+# 	showcell(stdout, v, a)
+	for e in star(v, a)
+		c = head(v, e)
+# 		println("  $e => $c: $(issegment(v,c))")
+		issegment(v, c) || continue
+# 		println("     $(cellsegment(v,c))")
+		cellsegment(v, c)[2] ≠ b && return c
+	end
+	return zero(a)
+end
+function zerochains_plus(v::OffsetDiagram{J,P}) where{J,P}#««
+	chains = Vector{Edge{J}}[]
+	points = Vector{P}[]
+	done = falses(ncells(v))
+	for startcell in J(npoints(v)+1):J(2):ncells(v)
+		done[startcell] && continue; c = Cell(startcell)
+		l = Edge{J}[]; push!(chains, l)
+		p = P[]; push!(points, p)
+		while !iszero(c) && !done[int(c)]
+			e0 = anyedge(v, c) # guaranteed to be the segment-split edge
+			e1, e2 = after(v, e0), opposite(v, before(v, e0))
+			a, b = cellsegment(v, c)
+			done[int(c)] = done[int(b)] = true
+			push!(l, e1, e2)
+			push!(p, point(v, b))
+			c = nextsegment(v, b, a)
+		end
+		# now complete the chain to the left (if open)
+		(a, b) = cellsegment(v, Cell(startcell))
+		while !done[int(a)]
+			done[int(a)] = true
+			pushfirst!(p, point(v, a))
+			c = nextsegment(v, a, b)
+			iszero(c) && break
+			done[int(c)] && break; done[int(c)] = true
+			e0 = anyedge(v, c)
+			e1, e2 = after(v, e0), opposite(v, before(v, e0))
+			a, b = cellsegment(v, c)
+			pushfirst!(l, e1, e2)
+		end
+	end
+	return (chains, points)
+end#»»
+function zerochains_reverse(v::OffsetDiagram{J}, zplus) where{J}#««
+	chains = Vector{Edge{J}}[]
+	(cplus, pplus) = zplus
+	for c in cplus
+		l = Edge{J}[]; push!(chains, l)
+		for i in length(c):-2:1
+			e1, e2 = c[i], c[i-1]
+			push!(l, opposite(v, next(opposite(v, e1))),
+				opposite(v, prev(opposite(v, e2))))
+		end
+	end
+	return (chains, reverse.(pplus))
+end#»»
+"""    zerochains(v::OffsetDiagram, reversed)
+Returns the canonical chain corresponding to zero offset
+on either side of the trajectory.
+"""
+function zerochains(v::OffsetDiagram)
+	zplus = zerochains_plus(v)
+	zminus = zerochains_reverse(v, zplus)
+	(zplus, zminus)
+end
+
+
 """    offsetchains(v::OffsetDiagram, radius, reversed)
 
 Returns the set of chains encoding the offset curves for this radius.
@@ -1358,9 +1488,7 @@ function offsetchains(v::OffsetDiagram{J}, radius, reversed) where{J}#««
 	#
 	# At any point during this algorithm, the active chain is the last one.
 	chains = Vector{Edge{J}}[]
-
-	# build the list of segments
-	done = [ false for _ in eachedge(v) ]
+	done = falses(nedges(v))
 	@assert radius ≥ 0
 	for startcell in J(npoints(v)+1+reversed):J(2):ncells(v)
 		c = Cell(startcell); e = firstedge(v, c, radius)
@@ -1368,7 +1496,7 @@ function offsetchains(v::OffsetDiagram{J}, radius, reversed) where{J}#««
 		done[int(e)] && continue # we already visited this curve segment
 
 		# if this edge is not already done, then it lies on a new chain:
-		push!(chains, [e]); l = last(chains)
+		l = [e]; push!(chains, l)
 		while true
 			e = opposite(v, nextedge(v, last(l), radius)); c = tail(v, e)
 			push!(l, e); done[int(e)] = true
@@ -1530,7 +1658,9 @@ function Base.reverse(a::AxialExtrude{J}, chains = reverse.(a.chains)) where{J}
 	# c'1 => reverse(indices[cn])
 	# c'2 => reverse(indices[c(n-1)])
 	indices = empty(a.indices)
+	println("\e[35;1m", (reverse, a.chains, chains), "\e[m")
 	for (c1, c2) in zip(a.chains, chains)
+		println("reverse $c1 => $c2")
 		n = length(c1)
 		@assert length(c2) == n
 		for i in 1:n-1
@@ -1544,7 +1674,7 @@ function Base.show(io::IO, a::AxialExtrude)
 	println(io, "axial offset of ", join(length.(a.chains),"+"),
 		" crossings, $(npoints(a)) points:")
 	for c in a.chains
-		println("  chain of $(length(c)) points: ")
+		println(io, "  chain of $(length(c)) points: ")
 		for e in c[1:end-1]
 			println(io, "   edge $e -> points $(indices(a, e)) ->")
 		end
@@ -1552,10 +1682,21 @@ function Base.show(io::IO, a::AxialExtrude)
 			last(c) == first(c) ? "(closed)" : "(open)")
 	end
 end
-function AxialExtrude(v::OffsetDiagram{J}, points, p, atol) where{J}
+function AxialExtrude(v::OffsetDiagram{J}, points, p, atol, zchains) where{J}
 	rp = abs(p[1])
-	chains = offsetchains(v, rp, p[1] < 0)
 	indices = Dict{J,Vector{J}}()
+	if iszero(rp)
+		chains = zchains[1][1]
+		for (ch, pts) in zip(chains, zchains[1][2])
+			idx = append!(points, [ [q;p[2]] for q in pts ])
+			for i in 1:length(ch)
+				indices[int(ch[i])] =
+					isodd(i) ? [idx[(i+1)>>1], idx[(i+3)>>1]] : [idx[(i+2)>>1]]
+			end
+		end
+		return AxialExtrude{J}(chains, indices)
+	end
+	chains = offsetchains(v, rp, p[1] < 0)
 	for ch in chains
 		np = J(length(points))
 		(newpoints, idx) = interpolate(v, ch, rp, atol)
@@ -1569,30 +1710,31 @@ function AxialExtrude(v::OffsetDiagram{J}, points, p, atol) where{J}
 end
 
 @inline reverse2(x) = [reverse.(y) for y in x]
-"""    standard_orientation(p, axp, q, axq, chains0)
+"""    standard_orientation(p, axp, q, axq, zchains)
 
 Sort points (p,q) into (p1=closest to trajectory, p2=farthest),
 and return corresponding axial extrusions, together with
 the affine map (z = a*r+b).
 """
-@inline function standard_orientation(p, axp, q, axq, chains0)
+@inline function standard_orientation(p, axp, q, axq, zchains)
 	rp, rq = p[1], q[1]
 	@assert rp ≠ rq # we should already know that the face is not vertical
-	aff = Affine3(p[1] => q[1], p[2] => q[2])
-	println("\e[35;3m standard orientation: rp=$rp, rq=$rq\e[m")
+	aff = Affine3(p[1] => p[2], q[1] => q[2])
+	println("\e[35;3m standard orientation ← rp=$rp, rq=$rq, aff=$aff\e[m")
+	println("-aff = $(-aff)")
 	if rp < rq
 		if 0 ≤ rp # 0 ≤ rp < rq
 			return (rp, axp, rq, axq, aff, false)
 		else      # rp < rq ≤ 0
-			iszero(rq) && (axq = reverse(axq, chains0))
-			return (-rq, axq, -rp, axp, -aff, true)
+			iszero(rq) && (axq = reverse(axq, zchains[2][1]))
+			return (-rq, axq, -rp, axp, -aff, false)
 		end
 	else
 		if 0 ≤ rq # 0 ≤ rq < rp
 			return (rq, axq, rp, axp, aff, true)
 		else      # rq < rp ≤ 0
-			iszero(rp) && (axp = reverse(axp, chains0))
-			return (-rp, axp, -rq, axq, -aff, false)
+			iszero(rp) && (axp = reverse(axp, zchains[2][1]))
+			return (-rp, axp, -rq, axq, -aff, true)
 		end
 	end
 end
@@ -1680,8 +1822,9 @@ function edge_transverse(v::OffsetDiagram{J,P,T}, e, r1, r2, aff, atol#««
 # 	println("edge_transverse($e, $r1:$r2)")
 
 	# eliminate degenerate & parallel separators:
-	g0 == g1 && return [SA[g0[1], g0[2], d0]]
-	d0 == d1 && return [SA[g0[1], g0[2], d0], SA[g1[1], g1[2], d0]]
+	g0 == g1 && return [SA[g0[1], g0[2], evaluate(aff, d0)]]
+	d0 == d1 && return [SA[g0[1], g0[2], evaluate(aff, d0)],
+		SA[g1[1], g1[2], evaluate(aff, d0)]]
 
 	t1, t2 = max(sep.t0, r1), min(d0, r2)
 	tlist = approximate(sep, t1, t2, atol)
@@ -1690,6 +1833,7 @@ function edge_transverse(v::OffsetDiagram{J,P,T}, e, r1, r2, aff, atol#««
 	# taken account of as points of ∂R1 or ∂R2:
 	first(tlist) == r1 && popfirst!(tlist)
 	last(tlist) == r2 && pop!(tlist)
+# 	println("  tlist=$tlist")
 	return [[evaluate(sep, t, +1); evaluate(aff, t)] for t in tlist]
 end#»»
 """    edgepoints(v, points, edge, edgetype, tlist, ax1, ax2)
@@ -1740,16 +1884,19 @@ function extrude_loop(v::OffsetDiagram{J,P,T}, loop, atol) where{J,P,T}
 	#»»
 	# axial paths: extrusions of individual points of the loop««
 	points = PointList{J,SVector{3,T}}()
-	axial = [ AxialExtrude(v, points, p, atol) for p in loop ]
-# 	println("\e[34m$points\e[m")
+	zchains = zerochains(v)
+	axial = [ AxialExtrude(v, points, p, atol, zchains) for p in loop ]
+	println("\e[34m$points\e[m")
+	for (p, ax) in zip(loop, axial)
+		println("\e[36;1m extrusion of $p is:\e[m\n$ax")
+	end
 	# zero offset on the negative side:
-	chains0 = offsetchains(v, 0, true)
 	triangles = NTuple{3,Int}[]
 # 	for (p, axp) in zip(loop, axial); println(p => axp); end
 	# triangulate between consecutive axial paths««
 	p, axp = last(loop), last(axial)
 	for (q, axq) in zip(loop, axial)
-# 		println("\e[1;7mtriangulate face: $p -> $q\e[m\n  axp=$axp\n  axq=$axq")
+		println("\e[1;7mtriangulate face: $p -> $q\e[m\n  axp=$axp\n  axq=$axq")
 		if p[1] == q[1] # vertical face: easy case««
 # 			println("\e[1mface is vertical\e[m")
 			@assert axp.chains == axq.chains
@@ -1771,33 +1918,38 @@ function extrude_loop(v::OffsetDiagram{J,P,T}, loop, atol) where{J,P,T}
 			end
 			#»»
 		else # oblique face ««
-# 			println("\e[1mface is oblique\e[m")
+			println("\e[1mface is oblique\e[m")
 			r1, ax1, r2, ax2, aff, reversed =
-				standard_orientation(p, axp, q, axq, chains0)
-# 			println("  $r1:$r2 (reversed $reversed); z=$(aff.a)*r + $(aff.b)\n$r1: $ax1\n$r2: $ax2")
+				standard_orientation(p, axp, q, axq, zchains)
+			println("  $r1:$r2 (reversed $reversed); z=$(aff.a)*r + $(aff.b)\n$r1: $ax1\n$r2: $ax2")
+			println(" with aff = $aff, aff.b=$(aff.b)")
 			# the surface between the axial paths for p1 and p2 is
 			# split along the cells traversed by axial(p1) (= the closest one)
 			# and each fragment is triangulated separately
 			ct = chain_contour(v, ax1.chains, ax2.chains)
-# 			println("contour:");for (c, el, et) in ct; println("   $c: $el, $et"); end
+			println("contour:");for (c, el, et) in ct; println("   $c: $el, $et"); end
 			for (c, elist, tlist) in ct
-# 				println("\e[1m in cell $c: $elist, $tlist\e[m")
+				println("\e[1m in cell $c: $elist, $tlist\e[m")
 				cellpoints = Int[]
 				for (edge, edgetype) in zip(elist, tlist)
 					epoints = edgepoints(v, points, edge, edgetype,
 						r1,ax1, r2,ax2, aff, atol)
-# 					println("  added points $(collect(epoints))/$(length(points))")
+					println("  ($edge, $edgetype) contributes $epoints = $(points[epoints])")
 					append!(cellpoints, epoints)
 				end
+				println("  before unique!: $cellpoints")
+				unique!(cellpoints)
 				# build a loop for this cell fragment
-# 				println("\e[36mcellpoints for $c = $cellpoints\e[m")
+				println("\e[36mcellpoints for $c = $cellpoints\e[m")
 				for c in cellpoints
-# 					println("  \e[36mpoint[$c] = $(points[c])\e[m")
+					println("  \e[36mpoint[$c] = $(points[c])\e[m")
 				end
-				tri = triangulate_loop(points, cellpoints)
-				for (a,b,c) in tri
-					reversed && ((b,c) = (c,b))
-					push!(triangles, (a,b,c))
+				if length(cellpoints) ≥ 3
+					tri = triangulate_loop(points, cellpoints)
+					for (a,b,c) in tri
+						reversed && ((b,c) = (c,b))
+						push!(triangles, (a,b,c))
+					end
 				end
 			end
 		end#»»
@@ -1827,6 +1979,7 @@ function extrude(trajectory, profile, atol)
 		closed && push!(slist, (n+length(path), n+1))
 	end#»»
 	extra = maximum(maximum(p[1] for p in loop) for loop in profile)
+	println("plist=$plist\nslist=$slist\nextra=$extra\n")
 	v = OffsetDiagram(plist, slist; extra)
 	return [ extrude_loop(v, loop, atol) for loop in profile ]
 end
@@ -1971,6 +2124,11 @@ using StaticArrays
 # # println(V.point(v,V.Cell(3)))
 # # println(V.point(v,V.Cell(4)))
 # # println(V.point(v,V.Cell(5)))
+
+v=V.OffsetDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+# v=V.OffsetDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
+# z = V.zerochains(v)
+# el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
 
 # v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)])
 # l=V.offsetchains(v, 1., false)

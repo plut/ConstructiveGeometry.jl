@@ -200,40 +200,56 @@ function split!(t::AbstractTriangulation, e::Edge)
 end
 # FIXME: check that flip! is still up-to-date
 """
-    flip!(triangulation, corner)
+    flip!(triangulation, edge)
 
-Flips the quadrilateral delimited by `corner` and its opposite.
-Returns the two edges (in order) replacing `corner`.
+Flips the quadrilateral delimited by `edge` and its opposite.
+Returns the two edges (in order) replacing `edge`.
 """
-function flip!(t::AbstractTriangulation, e::Edge)#««
+function flip!(x::AbstractTriangulation, e::Edge)#««
+	#    /l\           /l\
+	# op/p n\on     op/ |n\on
+	#  /  e  \       /o |  \
+	# t------h   ⇒  t po|p  h
+	#  \  o  /       \no| e/
+	#ono\   /opo   ono\ | /opo
+	#    \r/           \r/
 	n, p, o = next(e), prev(e), opposite(t, e)
-	s, sn, so, sp = tail(t, e), tail(t, n), tail(t, o), tail(t, p)
 	no, po = next(o), prev(o)
-	# we leave (n ↔ on) and (no ↔ ono) edges unchanged:
 	op, opo = opposite(t, p), opposite(t, po)
-	opposites!(t, p=>po, e=>opo, o=>op)
-	tail!(t, n=>so, no=>s, po=>sn)
-	anyedge!(t, so=>n, s=>no, sn=>po)
-	return (no, e)
+	t, h, l, r = tail(x, e), tail(x, n), tail(x, p), tail(x, po)
+	# we leave (n ↔ on) and (no ↔ ono) edges unchanged:
+	opposites!(x, p=>po, e=>opo, o=>op) # (n↔on), (no↔ono) unchanged
+	tail!(x, e=>r, o=>l, po=>r) # (n↔h), (p↔l), (no↔t) unchanged
+	anyedge!(x, t=>no, h=>n, l=>o, r=>e)
+	return (po, e)
 end#»»
 """
     insert!(triangulation, node, cell)
 
 Inserts a new cell by splitting the given node.
-Returns the three corners formed at the new cell.
+Returns the three corners forming the `star` of the new cell.
 """
-function insert!(t::AbstractTriangulation, q::Node, c::Cell)#««
-	e0, n0, p0 = edges(q)
-	c0, c1, c2 = tail(t, e0), tail(t, n0), tail(t, p0)
-	# e0 and its opposite corner are unchanged
+function Base.insert!(t::AbstractTriangulation, q::Node, c::Cell)#««
+	e0, n0, p0 = edges(q) # e0 and its opposite corner are unchanged
 	on, op = opposite(t, n0), opposite(t, p0)
+	c0, c1, c2 = tail(t, e0), tail(t, n0), tail(t, p0)
 	q1, q2 = newnodes!(t, 2)
 	e1, n1, p1 = edges(q1)
 	e2, n2, p2 = edges(q2)
+	# rearrange according to the corresponding triangulation:
+	#c1--------c0  ------------------
+	# \   e0   /   \`-.    e0     .-'/
+	#  \    p0/     \  `-.n0 p0.-'  /
+	#   \n0  /op     \  p1`-c-'n2  /
+	#  on\  /         \     |     /
+	#     c2    =>   on\e1  |p2  /op
+	#                   \ n1| e2/
+	#                    \  |  /
+	#                     \ | /
 	opposites!(t, e1=>on, e2=>op, n0=>p1, n1=>p2, n2=>p0)
-	tail!(t, e0=>c, e1=>c, e2=>c, n1=>c2, p1=>c0, n2=>c0, p2=>c1)
-	anyedge!(t, c=>e0, c1=>n0, c2=>p0, c0=>n1)
-	return (e0, e1, e2)
+	tail!(t, p0=>c, e1=>c1, n1=>c2, p1=>c, e2=>c2, n2=>c0, p2=>c)
+	anyedge!(t, c=>p0, c1=>e1, c2=>e2)
+	return (p0, p1, p2)
 end#»»
 "swap cell indices for those two cells."
 function swapcells!(t::AbstractTriangulation, c1::Cell, c2::Cell)#««
@@ -372,6 +388,10 @@ function shownode(io::IO, t::AbstractTriangulation, q::Node, s = "\n")
 end
 function showcell(io::IO, v::AbstractTriangulation, c::Cell, s = "\n")
 	print(io, "\e[31m star(", c, ")\e[m:");
+	if iszero(anyedge(v, c))
+		println(io, " <undefined>")
+		return
+	end
 	for e in star(v, c)
 		print(io, " ", e, "→", head(v,e))
 	end
