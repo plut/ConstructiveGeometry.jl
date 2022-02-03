@@ -221,7 +221,6 @@ function flip!(v::AbstractTriangulation, e::Edge)#««
 	tail!(v, e=>l, n=>r, p=>h, o=>r, no=>l, po=>t)
 	anyedge!(v, t=>po, h=>p, l=>e, r=>o)
 
-	# update edge data as needed by any concrete implementation
 	return (p, no)
 	# slightly more efficient, but more confusing, version:
 # 	# we leave (n ↔ on) and (no ↔ ono) edges unchanged:
@@ -245,15 +244,15 @@ function Base.insert!(v::AbstractTriangulation, q::Node, c::Cell)#««
 	e1, n1, p1 = edges(q1)
 	e2, n2, p2 = edges(q2)
 	# rearrange in the following way:
-	#                     / | \
-	#                    /  |  \
-	#                   / p2| e1\
-	#     l     =>   op/e2  |n1  \on
-	#  on/ \          /     |     \
-	#   /p  \op      /  n2.-c`-.p1 \
-	#  /    n\      /  .-'p   n `-. \
-	# /   e   \    /.-'    e       `-\ 
-	#t---------h   ------------------
+	#                     ╱ | ╲
+	#                    ╱  |  ╲
+	#                   ╱ p2| e1╲
+	#     l     =>   op╱e2  |n1  ╲on
+	#  on╱ ╲          ╱     |     ╲
+	#   ╱p  ╲op      ╱  n2.-c`-.p1 ╲
+	#  ╱    n╲      ╱  .-'p   n `-. ╲
+	# ╱   e   ╲    ╱.-'    e       `-╲ 
+	#t—————————h   ——————————————————
 	opposites!(v, e1=>on, e2=>op, n=>p1, n1=>p2, n2=>p)
 	tail!(v, p=>c, e1=>h, n1=>l, p1=>c, e2=>l, n2=>t, p2=>c)
 	anyedge!(v, c=>p, h=>e1, l=>e2)

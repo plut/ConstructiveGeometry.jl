@@ -842,7 +842,7 @@ function meetscircle(v::AbstractVoronoi, q::Node, i, j)
 	println("   seg($i,$j)-node($q=$(triangle(v,q))) distance:\n   a=$a\n   b=$b\n   g=$g\n   $(segdistance²(a,b,g))<? r^2=$r^2")
 	return segdistance²(a, b, g) < r^2
 end
-# Tree marking ««2
+# Segment insertion ««2
 """    edgecapture(v,e)
 
 Returns a positive value if this edge must be flipped, i.e. if all its points
@@ -915,88 +915,7 @@ function addsegment!(v::VoronoiDiagram, c::Cell)#««
 	end
 	@assert false
 end#»»
-# function badnodes(t::AbstractTriangulation, points, i)#««
-# 	stack = [findnode(t, points, i)]
-# 	tree = empty(stack)
-# 	while !isempty(stack)
-# 		q = pop!(stack)
-# 		isone(int(q)) && continue # this is the reversed triangle
-# 		q ∈ tree && continue
-# 		meetscircle(t, q, points, i) || continue
-# 		push!(tree, q)
-# 		push!(stack, adjnodes(t, q)...)
-# 	end
-# 	return tree # the tree is usually small, no need to sort it
-# end#»»
-# """    tree_boundary(t, tree, doubleedges)
-# 
-# Returns the list of half-edges pointing *inside* this tree
-# (i.e. having tail outside and head inside),
-# cyclically ordered around the tree (with an arbitrary start).
-# """
-# function tree_boundary(t::AbstractTriangulation{J}, tree, doubleedges=()) where{J}#««
-# 	boundary = sizehint!(Edge{J}[], length(tree)+2)
-# 	@assert !isempty(tree)
-# 	c = 0
-# 	for e in edges(first(tree))
-# 		stack = [e]
-# 		while !isempty(stack)
-# 			c+=1; @assert c ≤ 1e2
-# 			e = pop!(stack)
-# 			o = opposite(t, e)
-# 			if e ∈ doubleedges
-# 				push!(boundary, o)
-# 			elseif node(o) ∈ tree
-# 				push!(stack, prev(o), next(o))
-# 			else
-# 				push!(boundary, o)
-# 			end
-# 		end
-# 	end
-# 	return boundary
-# end#»»
-# function star!(t::AbstractTriangulation{J}, s, tree, doubleedges=()) where{J}#««
-# 	# replaces all nodes in `tree` by a star shape around `cell`,
-# 	# adding two new nodes in the process.
-# 	println("\e[1mstar!(", s, ", ", tree, ", double=", doubleedges, ")\e[m")
-# 	boundary = tree_boundary(t, tree, doubleedges)
-# 	println("   boundary=$boundary")
-# 	push!(tree, newnodes!(t, 2)...) # fixme: append! throws an error here
-# 	# rewrite boundary edges for double-edges, by substituting the
-# 	# appropriate edge of the renamed triangle
-# 	c2list = [ tail(t, e) for e in boundary ]
-# 	println("  c2list = $c2list")
-# 	j = 0
-# 	for (i, o) in pairs(boundary)
-# 		o ∈ doubleedges || continue
-# 		if iszero(j)
-# 			j = i
-# 		else
-# 			qi, qj = tree[i], tree[j]
-# 			ei, ej = side(qi,1), side(qj, 1)
-# 			boundary[i] = ej; boundary[j] = ei
-# 			j = 0
-# 		end
-# 	end
-# 	println("  now boundary rewritten as $boundary")
-# 	c1 = last(c2list)
-# 	n = side(last(tree), 2)
-# 	for (q, o, c2) in zip(tree, boundary, c2list)
-# 		# set node `q` to triangle
-# 		#      s
-# 		#    ╱p n╲
-# 		#   ╱  e  ╲
-# 		#  c₁——————c₂
-# 		#      o
-# # 		println("($q, $o, edge is $c1--$c2):")
-# 		e = side(q, 1)
-# 		p = side(q, 3)
-# 		opposites!(t, e=>o, p=>n)
-# 		n = side(q, 2)
-# 		edgesfrom!(t, s=>p, c1=>e, c2=>n)
-# 		c1 = c2
-# 	end
-# end#»»
+# Constructor ««2
 function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	np, ns = length(points), length(segments)
 	v = VoronoiDiagram{J,T}(CornerTable{J}(points), points, segments)
@@ -1004,32 +923,14 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	println("\e[1;7m after triangulating all points:\e[m")
 	showall(v)
 	gnuplot(v)
-	# compute all point-point separators ««
+	# update geometric information ««
 	for e in eachedge(v)
-		o = opposite(v, e)
-		o < e && continue
-		# the separator is oriented with tail(o) = head(e) on its right,
-		# i.e. pointing to the *left* of a:
-		#       ╲n  head    ╱ 
-		#  left  ╲____o____╱  right
-		# +<⋯⋯   ╱    e    ╲  ⋯⋯>-
-		#      p╱   tail    ╲
-		#
-		# branch[e] = +1 iff node(e) lies on the + branch of the separator
-		# branch[e] = 0 iff this separator is a parallel bisector
-		t, h, l, r = tail(v,e), tail(v,o), left(v,e), left(v,o)
-		sep = separator(v, h, t)
-		v.separator[int(e)], v.separator[int(o)] = sep, reverse(sep)
-		# compute branches for e and o
-		pt, ph, pl, pr = point(v,t), point(v,h), point(v,l), point(v,r)
-		v.branch[int(e)] = circumcenter_orientation(pt, ph, pl)
-		v.branch[int(o)] = circumcenter_orientation(ph, pt, pr)
+		edgedata!(v, e)
 	end
-	# compute geometric node info
 	for q in eachnode(v)
 		nodedata!(v, q)
-	end
-	# »»
+	end # »»
+
 	ncells!(v, ncells(v) + ns)
 	triangulation(v).anyedge[np+4:end] .= 0
 	# incrementally add all segments ««
@@ -1110,6 +1011,24 @@ function branches(v::VoronoiDiagram, c1,c2,c3)#««
 end#»»
 # Edge updating ««2
 function edgedata!(v::VoronoiDiagram, e::Edge)
+	o = opposite(v, e)
+	o < e && continue
+	# the separator is oriented with tail(o) = head(e) on its right,
+	# i.e. pointing to the *left* of a:
+	#       ╲n  head    ╱ 
+	#  left  ╲____o____╱  right
+	# +<⋯⋯   ╱    e    ╲  ⋯⋯>-
+	#      p╱   tail    ╲
+	#
+	# branch[e] = +1 iff node(e) lies on the + branch of the separator
+	# branch[e] = 0 iff this separator is a parallel bisector
+	t, h, l, r = tail(v,e), tail(v,o), left(v,e), left(v,o)
+	sep = separator(v, h, t)
+	v.separator[int(e)], v.separator[int(o)] = sep, reverse(sep)
+	# compute branches for e and o
+	pt, ph, pl, pr = point(v,t), point(v,h), point(v,l), point(v,r)
+	v.branch[int(e)] = circumcenter_orientation(pt, ph, pl)
+	v.branch[int(o)] = circumcenter_orientation(ph, pt, pr)
 end
 
 # Node updating ««2
@@ -1414,100 +1333,9 @@ polcoeff(H,0,x)==ya^4*pq^2-4*ya^2*(ya*dx-dpq)^2
 end
 
 
-# Tree traversal ««2
-"""
-    badnodes(v,i,j)
-
-Returns a list of those nodes which are closer to segment (i,j)
-than to their defining sites.
-
-TODO: return a closed loop of edges which are fully closer to (i,j)
-than to their defining sites, i.e. the boundary of the new cell for (i,j).
-"""
-function badnodes(v::AbstractVoronoi{J}, i, j) where{J} # segment case
-	rootnode = findrootnode(v,i,j)
-	# each entry in the stack is a pair (edge opposite which we are
-	# exploring, cell around which we are turning):
-	stack = [(e, Cell{J}(0)) for e in edges(rootnode)]
-	tree = [rootnode]
-	loops = Cell{J}[]
-	n = 0
-	while !isempty(stack)
-		n+=1
-		@assert n ≤ 50
-		(e, s) = pop!(stack)
-		o = opposite(v, e)
-		q = node(o)
-		isone(int(q)) && continue # this is the reversed triangle
-		if q ∈ tree # one loop
-			!iszero(int(s)) && push!(loops, s)
-			continue
-		end
-		(influences(v,i,j,q) && meetscircle(v, q, i, j)) || continue
-		push!(tree, q)
-		push!(stack, (prev(o), head(v,e)), (next(o), tail(v,e)))
-	end
-	# break loops in tree by identifying double edges
-# 	@assert isempty(loops)
-	doubleedges = Edge{J}[]
-# 	showall(v.triangulation)
-	println("badnodes($i,$j): tree=$tree")
-	for s in loops
-		println("  breaking loop around $s")
-		if s ∈ (i,j) # is this one of the ends of the segment we are inserting?
-			u = point(v,j) - point(v,i); (s == j) && (u = -u)
-			p = point(v,s)
-			elist = collect(star(v,s))
-			qlist = [ node(e) for e in elist ]
-			k = det2(u, geometricnode(v, last(qlist))-p)
-			for (e, q) in zip(elist, qlist)
-				# q == right(e)
-				k1 = k
-				k = det2(u, geometricnode(v, q)-p)
-				if (k1 > 0) && (k < 0)
-					push!(doubleedges, prev(e), opposite(v, prev(e)))
-					break
-				end
-			end
-		else
-			# s is a cell
-			# look for an edge from s which (despite having its two end nodes
-			# covered by the new segments) exits the cell of the new segment
-			elist = collect(star(v, s))
-			println("  around cell $s: elist=$elist")
-# 			println("\e[32;1m elist=$elist\e[m")
-			# groumpf
-# 			e = argmin(edgeexit(v,e,i,j) for e in elist)
-			e = first(elist); eemin = edgeexit(v,e,i,j)
-			println("  for edge $e: exit value is $eemin")
-			for e1 in elist[2:end]
-				eemin1 = edgeexit(v, e1, i, j)
-				println("  for edge $e1: exit value is $eemin1")
-				(eemin1 < eemin) && ((e, eemin) = (e1, eemin1))
-			end
-			push!(doubleedges, e, opposite(v,e))
-		end
-	end
-	println("found double edges = $doubleedges")
-	@assert length(doubleedges) == 2*length(loops)
-	return (tree, doubleedges) # the tree is usually small, no need to sort it
-end
-# end#»»
-function star!(v::AbstractVoronoi, s, tree, doubleedges)#««
-	star!(CornerTables.triangulation(v), s, tree, doubleedges)
-	resize!(v.geomnode, length(v.geomnode)+2)
-	resize!(v.noderadius, length(v.geomnode))
-	for q in tree
-		geometricnode!(v, q)
-	end
-end#»»
 # Compute Voronoi diagram ««2
 @inline VoronoiDiagram(points::AbstractVector{P}, segments=[];kw...) where{P} =
 	VoronoiDiagram{Int32,float(eltype(P))}(points, segments; kw...)
-
-function noderadius!(v::VoronoiDiagram, q::Node)
-end
-
 
 # Offset ««1
 # Split segments ««2
