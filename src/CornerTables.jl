@@ -377,14 +377,15 @@ function CornerTable{J}(triangles) where{J}
 end
 
 # Displaying & debugging ««1
-function showall(io::IO, t::AbstractTriangulation)
-	println("\e[33;1m", nnodes(t), " nodes:\e[m")
-	for q in eachnode(t); shownode(io, t, q, "\n"); end
-	println("\e[31;1m", ncells(t), " cells:\e[m")
-	for c in eachcell(t); showcell(io, t, c, "\n"); end
+function Base.show(io::IO, M::MIME"text/plain", t::AbstractTriangulation)
+	println(io, "\e[33;1m", nnodes(t), " nodes:\e[m")
+	for q in eachnode(t); show(io, M, (t, q)); end
+	println(io, "\e[31;1m", ncells(t), " cells:\e[m")
+	for c in eachcell(t); show(io, M, (t, c)); end
 end
 
-function shownode(io::IO, t::AbstractTriangulation, q::Node, s = "\n")
+function Base.show(io::IO, M::MIME"text/plain",
+	(t,q)::Tuple{AbstractTriangulation,Node})
 	print(io, "\e[33m", q, triangle(t,q), "\e[m ", s)
 	for i in (1,2,3)
 		e = side(q, i); o = opposite(t, e); oo = opposite(t,o)
@@ -393,25 +394,22 @@ function shownode(io::IO, t::AbstractTriangulation, q::Node, s = "\n")
 		t1 ≠ to && println(io, "  \e[31;7m tail($o) = $to, should be $t1\e[m")
 	end
 end
-function showcell(io::IO, v::AbstractTriangulation, c::Cell, s = "\n")
+function Base.show(io::IO, M::MIME"text/plain",
+	(t,c)::Tuple{AbstractTriangulation,Cell})
 	print(io, "\e[31m star(", c, ")\e[m:");
-	if iszero(anyedge(v, c))
+	if iszero(anyedge(t, c))
 		println(io, " <undefined>")
 		return
 	end
-	for e in star(v, c)
-		print(io, " ", e, "→", head(v,e))
+	for e in star(t, c)
+		print(io, " ", e, "→", head(t,e))
 	end
-	print(io, s)
-	for e in star(v,c)
-		c1 = tail(v, e)
+	println(io)
+	for e in star(t,c)
+		c1 = tail(t, e)
 		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")
 	end
 end
-@inline showall(v::AbstractTriangulation) = showall(stdout, v)
-@inline showcell(v::AbstractTriangulation, c::Cell) = showcell(stdout,v,c)
-@inline shownode(v::AbstractTriangulation, q::Node) = shownode(stdout,v,q)
-
 #»»1
 export AbstractTriangulation, CornerTable, Edge, Cell, Node, int
 export tail, tail!, head, opposite, opposite!, anyedge, anyedge!
