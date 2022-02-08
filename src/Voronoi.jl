@@ -58,8 +58,8 @@ const DEFAULT_ATOL=1e-1
 @inline distance²(a,b) = norm²(a-b)
 @inline quarterturn(v) = SA[-v[2], v[1]]
 
-@inline linethrough(a,b) =
-	SA[a[2]-b[2], b[1]-a[1], det2(a,b)]
+# @inline linethrough(a,b) =
+# 	SA[a[2]-b[2], b[1]-a[1], det2(a,b)]
 
 function lineinter(a,b,c,d)
 	t = det2(a-c, c-d)
@@ -88,6 +88,57 @@ end
 @inline isleft(a,b,c) = det2(a,b,c) > 0
 @inline isleft(u,v) = det2(u,v) > 0
 
+# Lines ««2
+Point{T} = SVector{2,T}
+"the equation for a (normalized, oriented) straight line in the plane."
+struct Line{T}
+	# orientation: the normal vector points to the *left* of the line
+	normal::SVector{2,T} # normalized to ‖u‖=1
+	offset::T # line equation is normal⋅z + offset == 0
+end
+@inline Base.:*(a::Real, l::Line) = Line(a*l.normal, a*l.offset)
+@inline normalize(l::Line) = (1/√(norm²(l.normal)))*l
+@inline Base.:-(l::Line) = (-1)*l
+
+@inline direction(l::Line) = quarterturn(l.normal)
+# one arbitrary point on the line (actually the projection of the origin)
+# FIXME: since this line is normalized, we should not need to divide by norm
+@inline point(l::Line) = -l.normal*l.offset/(l.normal[1]^2+l.normal[2]^2)
+
+@inline Line(a::AbstractVector, b::AbstractVector) = # oriented from a to b
+	normalize(Line(SA[a[2]-b[2], b[1]-a[1]], a[1]*b[2]-a[2]*b[1]))
+
+# signed distance from l to a; positive sign corresponds to left side of l.
+@inline evaluate(l::Line, a::AbstractVector) = dot(l.normal, a) + l.offset
+
+"returns either the intersection point, or `nothing`."
+function Base.intersect(l1::Line, l2::Line)
+	(a1, b1), c1 = l1.normal, l1.offset
+	(a2, b2), c2 = l2.normal, l2.offset
+	d = a1*b2-a2*b1
+	iszero(d) && return nothing
+	return SA[b1*c2-c1*b2,c1*a2-a1*c2]/d
+end
+
+"    det2(line1, line2): determinant of direction of these lines."
+@inline det2(l1::Line, l2::Line) = det2(l1.normal, l2.normal)
+"    dot(line1, line2): cosine of the angle formed by these lines."
+@inline LinearAlgebra.dot(l1::Line, l2::Line) = dot(l1.normal, l2.normal)
+"""    det2(line1, line2, line3):
+Returns (twice) the oriented area of the triangle bounded by these
+three lines (i.e. the intersection of the three half-planes).
+This independent of the order of the lines,
+but depends on the orientation of each line."""
+function det2(l1::Line, l2::Line, l3::Line)#««
+	D = det(SA[
+		l1.normal[1] l1.normal[2] l1.offset
+		l2.normal[1] l2.normal[2] l2.offset
+		l3.normal[1] l3.normal[2] l3.offset
+		])
+	d1, d2, d3 = det2(l2, l3), det2(l3,l1), det2(l1, l2)
+	return (l1.offset+l2.offset+l3.offset)*D/(d1*d2*d3)
+end#»»
+
 # Circumscribed circle ««2
 function circumcenter(a,b,c)
 	ab,ac = b-a,c-a
@@ -98,26 +149,26 @@ function circumcenter(a,b,c)
 	return a + SA[kx, ky]
 end
 
-"""    circumcenter_orientation(a,b,c)
-
-Returns +1 iff a views the circumcenter to the left of b."""
-function circumcenter_orientation(a,b,c)
-	ab,ac = b-a,c-a
-	d = det2(ab, ac)
-	@assert !iszero(d)
-	# the power of c relative to the circle with diameter (ab) is
-	# cx² + cy² -(ax+bx)cx -(ay+by)cy + (ax bx + ay by)
-	u = c[1]^2+c[2]^2 - (a[1]+b[1])*c[1] - (a[2]+b[2])*c[2] + (a[1]*b[1]+a[2]*b[2])
-	iszero(u) && return Int8(0)
-	u > 0 && return (d > 0 ? Int8(+1) : Int8(-1))
-	return (d > 0 ? Int8(-1) : Int8(+1))
-end
-	
-
-function circumradius(a,b,c)
-	ab,ac,bc = b-a, c-a, c-b
-	return sqrt(norm²(ab)*norm²(ac)*norm²(bc))/(2*abs(det2(ab,ac)))
-end
+# """    circumcenter_orientation(a,b,c)
+# 
+# Returns +1 iff a views the circumcenter to the left of b."""
+# function circumcenter_orientation(a,b,c)
+# 	ab,ac = b-a,c-a
+# 	d = det2(ab, ac)
+# 	@assert !iszero(d)
+# 	# the power of c relative to the circle with diameter (ab) is
+# 	# cx² + cy² -(ax+bx)cx -(ay+by)cy + (ax bx + ay by)
+# 	u = c[1]^2+c[2]^2 - (a[1]+b[1])*c[1] - (a[2]+b[2])*c[2] + (a[1]*b[1]+a[2]*b[2])
+# 	iszero(u) && return Int8(0)
+# 	u > 0 && return (d > 0 ? Int8(+1) : Int8(-1))
+# 	return (d > 0 ? Int8(-1) : Int8(+1))
+# end
+# 	
+# 
+# function circumradius(a,b,c)
+# 	ab,ac,bc = b-a, c-a, c-b
+# 	return sqrt(norm²(ab)*norm²(ac)*norm²(bc))/(2*abs(det2(ab,ac)))
+# end
 
 """
     isincircle(a,b,c,x)
@@ -293,77 +344,7 @@ function mediator(a,b)
 	return SA[2*(a[1]-b[1]), 2*(a[2]-b[2]), norm²(b)-norm²(a)]
 end
 
-# Lines ««2
-#
-Point{T} = SVector{2,T}
-"the equation for a (normalized, oriented) straight line in the plane."
-struct Line{T}
-	# orientation: the normal vector points to the *right* of the line
-	normal::SVector{2,T} # normalized to ‖u‖=1
-	offset::T # line equation is normal⋅z + offset == 0
-end
-@inline Base.:*(a::Real, l::Line) = Line(a*l.normal, a*l.offset)
-@inline normalize(l::Line) = (1/√(norm²(l.normal)))*l
-@inline Base.:-(l::Line) = (-1)*l
-
-@inline direction(l::Line) = quarterturn(l.normal)
-# one arbitrary point on the line (actually the projection of the origin)
-@inline point(l::Line) = -l.normal*l.offset/(l.normal[1]^2+l.normal[2]^2)
-
-@inline Line(a::AbstractVector, b::AbstractVector) = # oriented from a to b
-	normalize(Line(SA[b[2]-a[2], a[1]-b[1]], a[2]*b[1]-a[1]*b[2]))
-
-# signed distance from l to a; positive sign corresponds to right side of l.
-@inline evaluate(l::Line, a::AbstractVector) = dot(l.normal, a) + l.offset
-
-"returns either the intersection point, or `nothing`."
-function intersection(l1::Line, l2::Line)
-	(a1, b1), c1 = l1.normal, l1.offset
-	(a2, b2), c2 = l2.normal, l2.offset
-	d = a1*b2-a2*b1
-	iszero(d) && return nothing
-	return SA[b1*c2-c1*b2,c1*a2-a1*c2]/d
-end
-
-# Approximation of parabolic arc««2
-H(x)=x*_₂F₁(1/4,1/2,3/2,-x^2)
-H′(x)=_₂F₁(1/4,1/2,3/2,-x^2)-1/6*x^2*_₂F₁(5/4,3/2,5/2,-x^2)
-
-function Hinv(y)
-	iszero(y) && return y
-	# use a rough first approximation to initialize Newton's method
-	x = abs(y) < 3 ? y*(1.050302+.046546*y^2) : sign(y)*(y+1.1981402347355918)^2/4
-	for _ in 1:4
-		x = x - (H(x)-y)/H′(x)
-	end
-	return x
-end
-
-"""    approxparabola(a, x1, x2, δ)
-Approximates the parabola y = a/2 + x²/2a by a polygonal chain
-with maximal Hausdorff distance δ on the interval [x1, x2];
-returns a vector of abscissas."""
-function approxparabola(a::Real,x1::Real,x2::Real, δ)
-	s1, s2 = H(x1/a), H(x2/a)
-	n = ceil(Int,abs(s2-s1)*√(a/8δ))
-	v = sizehint!([float(x1)],n+1)
-	for i in 1:n-1
-		push!(v, a*Hinv(s1+(i/n)*(s2-s1)))
-	end
-	push!(v, x2)
-	return v
-end
-# x ↔ r reparametrization:
-# a ↔ rmin
-# x = norm(b.tangent) * √(r-rmin)
-# r = rmin + (x/norm(b.tangent))^2
-
 # Computation of tripoint for separator intersections ««2
-# This computes the branch position and radius for the tripoint
-# (equidistant point) of a given triple of cells, each of which is either
-# a point or a line. The cells are cyclically ordered (i.e. the tripoint
-# H of cells 012 is not the same as the tripoint H' of cells 021).
-#
 # Slight extension of `Base.sign`:
 @inline Base.sign(T::Type{<:Integer}, x) =
 	iszero(x) ? zero(T) : (x > 0) ? one(T) : -one(T)
@@ -371,21 +352,24 @@ end
 @inline _BAD_TRIPOINT(x) = (oftype(x, NaN), Int8(2), Int8(2), Int8(2))
 """    tripoint(a,b,c)
 
-This computes the radius and branch positions for the tripoint (equidistant
-point) of a triple of cells, each of which is either a point or a line.
+This computes the tripoint (equidistant point) of a triple of cells,
+each of which is either a point or an (oriented) line.
 The cells are cyclically ordered:
 tripoint(a,b,c) == tripoint(b,c,a) ≠ tripoint(c,b,a).
-The branch positions are returned as `Int8`.
+The data is returned as `(radius, branches...)`;
+the branch positions are returned as `Int8`.
 If no such tripoint exists, `nan, 2,2,2` is returned.
+
+Line orientation matters only when at least two lines are present;
+in this case, the tripoint must lie on the same side of all the lines.
 """
-function tripoint(a::AbstractVector, b::AbstractVector, c::AbstractVector)
+function tripoint(a::AbstractVector, b::AbstractVector, c::AbstractVector)#««
 	println("tripoint($a,$b,$c):")
 	ab, bc, ca = b-a, c-b, a-c
 	det2(ca, ab) > 0 || return _BAD_TRIPOINT(ab[1])
 	r = √(norm²(ab)*norm²(ca)*norm²(bc))/(2*abs(det2(ab,ca)))
 	return r, -sign(Int8, bc ⋅ ca), -sign(Int8, ca ⋅ ab), -sign(Int8, ab ⋅ bc)
-end
-
+end#»»
 function tripoint(l0::Line, p1::AbstractVector, p2::AbstractVector)#««
 # WLOG assume L0 has equation (y=0), P1=(0,a) and P2=(d,b).
 # * If b < 0 then S01 and S02 do not intersect.
@@ -436,7 +420,7 @@ function tripoint(l0::Line, p1::AbstractVector, p2::AbstractVector)#««
 	s2 = a^2+d^2-a*b
 	return r, sign(Int8, s0), sign(Int8, s1), sign(Int8, s2)
 end#»»
-function tripoint_llp(l0::Line, l1::Line, p2)
+function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
 	# This does *not* depend on the orientation of both lines, so we may
 	# orient both of them so that p2 is on the + side of both lines.
 	# (this adds π to the angle of both lines if one is reversed).
@@ -465,11 +449,13 @@ function tripoint_llp(l0::Line, l1::Line, p2)
 	# e^{iθ} = (-3+4i)/5; (a,b) = (9,5), c=-3/5, t=2
 	# (-5,5) has a=1, b=5, (1+t^2)a == b, 
 	a, b = evaluate(l0, p2), evaluate(l1, p2)
-	c = l0.normal ⋅ l1.normal
+	c = l0 ⋅ l1
 	@assert !iszero(a)
 	@assert !iszero(b)
-	s = sign(Int8, det2(l0.normal, l1.normal))
+	s = sign(Int8, det2(l0, l1))
 	(a < 0) && ((a, c, s) = (-a, -c, -s))
+	# the point must lie on the same side of both lines...
+# 	(b < 0) && return _BAD_TRIPOINT(b)
 	(b < 0) && ((b, c, s) = (-b, -c, -s))
 	D = 2*a*b*(1+c)
 	r = (a+b - s*√(D))/(1-c)
@@ -477,10 +463,72 @@ function tripoint_llp(l0::Line, l1::Line, p2)
 	return r, Int8(1),
 		(s > 0) ? sign(Int8, a-f*b) : Int8(-1),
 		(s > 0) ? sign(Int8, b-f*a) : Int8(1)
+end#»»
+function tripoint(l1::Line, l2::Line, l3::Line)#««
+	# let lᵢ: aᵢ x + bᵢ y + cᵢ = 0
+	# also define cᵢⱼ = aᵢ aⱼ + bᵢ bⱼ, sᵢⱼ = aᵢ bⱼ - bᵢ aⱼ
+	# coordinate change: [u v]=[b1 -a1;a1 b1][x y]+[0 c1], then
+	# [x y]=[b1 a1;-a1 b1][u v-c1] and the equation of l2 is now
+	# a2*(b1 u+a1 (v-c1)) + b2*(-a1 u+b1 (v-c1)) + c2 = 0
+	# (a2 b1 - a1 b2) u + (a1 a2 + b1 b2) (v-c1) + c2 = 0
+	# -s12 u + c12 (v-c1) + c2 = 0
+	# This has v=0 for u12= (c2-c12*c1)/s12.
+	# Likewise, one finds u13 = (c3-c13*c1)/s13 = (-c3+c13*c1)/s31
+	# and u12-u13 = (-(c12 s31 + s12 c31) c1 +s31c2 + s12 c3)/(s12 s31)
+	#  = (s31 c2 + s12 c3 + s23 c1)/(s12 s13).
+	#
+	# Law of sines: d1/s23 = (∑ c1 s23)/(s12 s13 s23) = 2R
+	# so the numerator is 2R*product of all sines
+	c1, c2, c3 = l1.offset, l2.offset, l3.offset
+# 	c12, c23, c31 = l1⋅l2, l2⋅l3, l3⋅l1
+	s12, s23, s31 = det2(l1,l2), det2(l2,l3), det2(l3,l1)
+# 	h1 = c1 + (s12*c3+s31*c2)/s23
+# 	h2 = c2 + (s23*c2+s12*c3)/s31
+# 	h3 = c3 + (s31*c1+s23*c1)/s12
+	q = (c1*s23 + c2*s31 + c3*s12) / (s12*s23*s31)
+	d1, d2, d3 = s23*q, s31*q, s12*q
+	r = √(abs((d2+d3-d1)*(d3+d1-d2)*(d1+d2-d3)/(d1+d2+d3)))/2
+	println("  triangle has sides $((d1,d2,d3))")
+	z1, z2, z3 = sign(Int8, d1), sign(Int8, d2), sign(Int8, d3)
+	z = sign(Int8, z1+z2+z3)
+# 	println("  triangle has altitudes $((h1,h2,h3))")
+	# if any altitude is zero, the three lines intersect in a single point:
+# 	any(iszero, (h1, h2, h3)) && return _BAD_TRIPOINT(l1.offset)
+	return r, z1*z, z2*z, z3*z
+end#»»
+
+# Approximation of parabolic arc««2
+H(x)=x*_₂F₁(1/4,1/2,3/2,-x^2)
+H′(x)=_₂F₁(1/4,1/2,3/2,-x^2)-1/6*x^2*_₂F₁(5/4,3/2,5/2,-x^2)
+
+function Hinv(y)
+	iszero(y) && return y
+	# use a rough first approximation to initialize Newton's method
+	x = abs(y) < 3 ? y*(1.050302+.046546*y^2) : sign(y)*(y+1.1981402347355918)^2/4
+	for _ in 1:4
+		x = x - (H(x)-y)/H′(x)
+	end
+	return x
 end
-function tripoint_lll(l0::Line, l1::Line, l2::Line)
-	error("tripoint_lll: not implemented")
+
+"""    approxparabola(a, x1, x2, δ)
+Approximates the parabola y = a/2 + x²/2a by a polygonal chain
+with maximal Hausdorff distance δ on the interval [x1, x2];
+returns a vector of abscissas."""
+function approxparabola(a::Real,x1::Real,x2::Real, δ)
+	s1, s2 = H(x1/a), H(x2/a)
+	n = ceil(Int,abs(s2-s1)*√(a/8δ))
+	v = sizehint!([float(x1)],n+1)
+	for i in 1:n-1
+		push!(v, a*Hinv(s1+(i/n)*(s2-s1)))
+	end
+	push!(v, x2)
+	return v
 end
+# x ↔ r reparametrization:
+# a ↔ rmin
+# x = norm(b.tangent) * √(r-rmin)
+# r = rmin + (x/norm(b.tangent))^2
 
 # Triangulation via libtriangle««2
 function triangulate_loop(points, idx)
@@ -527,7 +575,14 @@ end
 #  - a line: origin ± tangent*|t-rmin|  (this is indicated by normal == 0)
 # Instead of a union (or an abstract type) we can build a structure which
 # works in all cases.
-# Structure ««2
+#
+# For line/line bisectors: since the lines are the borders of polygons,
+# they are oriented (as a loop around the polygon), and we only need
+# consider the bisector lying on the same side of both lines
+# (in/out of polygon).
+# Modifying this to allow a few more cases would require (among other
+# things)  potentially implementing 4 branches instead of 2 for some bisectors.
+# Data structure ««2
 """
     Separator
 
@@ -586,14 +641,15 @@ end
 
 function Separator(l1::Line, l2::Line)
 # 	println("computing separator of lines R=$l1 and L=$l2")
-	d = det2(l1.normal, l2.normal)
+	d = det2(l1, l2)
 	if iszero(d) # special case: two parallel lines
 		c = (point(l1) + point(l2))/2
 		return Separator(c, direction(l1), NaN16*l1.normal, abs(evaluate(l1, c)))
 	end
-	c = intersection(l1, l2)
+	c = intersect(l1, l2)
+	@assert c ≠ nothing
 	w = (l1.normal + l2.normal); w/= dot(w, l1.normal)
-	w*= sign(det2(l2.normal, l1.normal))
+	w*= -sign(d)
 	# this has no guarantee on the tangent (except ‖tangent‖ ≥ 1)
 	return Separator(c, w, zero(w), zero(w[1]))
 end
@@ -1117,6 +1173,8 @@ end
 	@assert issegment(v,c1)
 	@assert issegment(v,c2)
 	@assert ispoint(v,c3)
+	# TODO: check if point c3 lies on either line; in this case, call
+	# specialized code
 	return tripoint(line(v,c1), line(v,c2), point(v,c3))
 end
 
@@ -1319,32 +1377,21 @@ function separator(v::AbstractVoronoi, c1, c2)#««
 		i1, j1 = cellsegment(v, c1)
 		a1, b1 = point(v, i1), point(v, j1)
 		if issegment(v, c2)
-			i2, j2 = cellsegment(v, c2)
-			a2, b2 = point(v, i2), point(v, j2)
-			return Separator(Line(a1, b1), Line(a2, b2))
+			return Separator(line(v, c1), line(v, c2))
 		elseif (c2 == i1 || c2 == j1) # degenerate parabola (exact)
-			return degenerate_separator(Line(a1, b1), point(v, c2))
+			return degenerate_separator(line(v, c1), line(v, c2))
 		else # generic parabola separator
-			return Separator(Line(a1,b1), point(v,c2))
+			return Separator(line(v, c1), point(v,c2))
 		end
 	elseif issegment(v, c2)
-		i2, j2 = cellsegment(v, c2)
-		a2, b2 = point(v, i2), point(v, j2)
 		if c1 == i2 || c1 == j2
-			return reverse(degenerate_separator(Line(a2,b2), point(v, c1)))
+			return reverse(degenerate_separator(line(v, c2), point(v, c1)))
 		else # generic parabola
-			return Separator(point(v, c1), Line(a2,b2))
+			return Separator(point(v, c1), line(v, c2))
 		end
 	else # point-point separator
 		return Separator(point(v, c1), point(v, c2))
 	end
-# 		
-# 			
-# 	a1 = issegment(v, c1) ? let (i1, j1) = cellsegment(v, c1)
-# 		Line(point(v, i1), point(v, j1)) end : point(v, c1)
-# 	a2 = issegment(v, c2) ? let (i2, j2) = cellsegment(v, c2)
-# 		Line(point(v, i2), point(v, j2)) end : point(v, c2)
-# 	return Separator(a1, a2)
 end#»»
 
 # Computing Voronoi diagram ««1
@@ -2465,7 +2512,8 @@ using StaticArrays
 # # println(V.point(v,V.Cell(4)))
 # # println(V.point(v,V.Cell(5)))
 
-v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+#
 # v=V.OffsetDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
 # z = V.zerochains(v)
 # el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
