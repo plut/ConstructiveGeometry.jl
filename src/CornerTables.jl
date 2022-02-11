@@ -379,9 +379,9 @@ end
 # Displaying & debugging ««1
 function Base.show(io::IO, M::MIME"text/plain", t::AbstractTriangulation)
 	println(io, "\e[33;1m", nnodes(t), " nodes:\e[m")
-	for q in eachnode(t); show(io, M, (t, q)); end
+	for q in eachnode(t); show(io, M, (t, q)); println(io); end
 	println(io, "\e[31;1m", ncells(t), " cells:\e[m")
-	for c in eachcell(t); show(io, M, (t, c)); end
+	for c in eachcell(t); show(io, M, (t, c)); println(io); end
 end
 
 function Base.show(io::IO, M::MIME"text/plain",
@@ -398,13 +398,12 @@ function Base.show(io::IO, M::MIME"text/plain",
 	(t,c)::Tuple{AbstractTriangulation,Cell})
 	print(io, "\e[31m star(", c, ")\e[m:");
 	if iszero(anyedge(t, c))
-		println(io, " <undefined>")
+		print(io, " <undefined>")
 		return
 	end
 	for e in star(t, c)
 		print(io, " ", e, "→", head(t,e))
 	end
-	println(io)
 	for e in star(t,c)
 		c1 = tail(t, e)
 		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")

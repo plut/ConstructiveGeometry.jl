@@ -344,12 +344,13 @@ function mediator(a,b)
 	return SA[2*(a[1]-b[1]), 2*(a[2]-b[2]), norm²(b)-norm²(a)]
 end
 
-# Computation of tripoint for separator intersections ««2
+# Computation of point/oriented line tripoints««2
 # Slight extension of `Base.sign`:
 @inline Base.sign(T::Type{<:Integer}, x) =
 	iszero(x) ? zero(T) : (x > 0) ? one(T) : -one(T)
 
 @inline _BAD_TRIPOINT(x) = (oftype(x, NaN), Int8(2), Int8(2), Int8(2))
+const Segment{T} = NTuple{2,<:AbstractVector{T}}
 """    tripoint(a,b,c)
 
 This computes the tripoint (equidistant point) of a triple of cells,
@@ -364,7 +365,6 @@ Line orientation matters only when at least two lines are present;
 in this case, the tripoint must lie on the same side of all the lines.
 """
 function tripoint(a::AbstractVector, b::AbstractVector, c::AbstractVector)#««
-	println("tripoint($a,$b,$c):")
 	ab, bc, ca = b-a, c-b, a-c
 	det2(ca, ab) > 0 || return _BAD_TRIPOINT(ab[1])
 	r = √(norm²(ab)*norm²(ca)*norm²(bc))/(2*abs(det2(ab,ca)))
@@ -390,15 +390,18 @@ function tripoint(l0::Line, p1::AbstractVector, p2::AbstractVector)#««
 #              +++ otherwise
 	a = evaluate(l0, p1)
 	b = evaluate(l0, p2)
-	# FIXME: particular case where a = 0 (or b = 0)
 	d = det2(p2-p1, l0.normal)
-	z, u = zero(Int8), one(Int8)
 	badnode = _BAD_TRIPOINT(a)
-	# degenerate case
-	if iszero(a)
+	if iszero(a) # degenerate case
 		iszero(b) && return badnode
-		sign(b) == sign(d) && return badnode
-		return ((b^2+d^2)/(2*b), +u,-u,+u)
+# 		sign(b) == sign(d) && return badnode
+		s = sign(Int8, b)*sign(Int8, d)
+		return ((b^2+d^2)/abs(2*b), Int8(1), s, -s)
+	end
+	if iszero(b) # other degenerate case
+		@assert !iszero(a)
+		s = sign(Int8, a)*sign(Int8, d)
+		return ((a^2+d^2)/abs(2*a), -s, s, Int8(1))
 	end
 	# pick the orientation which makes the two points lie above the line
 	# (if the two points are on opposite sides of the line, the tripoint
@@ -418,6 +421,73 @@ function tripoint(l0::Line, p1::AbstractVector, p2::AbstractVector)#««
 	s0 = b^2+d^2-a*b
 	s1 = 4*a*b - d^2
 	s2 = a^2+d^2-a*b
+	return r, sign(Int8, s0), sign(Int8, s1), sign(Int8, s2)
+end#»»
+function tripoint((p1,q1)::Segment, p2::AbstractVector, p3::AbstractVector)#««
+	u1, u2, u3 = q1-p1, p2-p1, p3-p1
+	x1, x2, y2, x3, y3 = norm²(u1), u1⋅u2, det2(u1,u2), u1⋅u3, det2(u1,u3)
+	dx = x3-x2
+	f = √(x1) # scale factor
+	println("scale factor: $f")
+	println("coordinates: ", (x1, (x2,y2), (x3,y3)))
+	if iszero(y2)#««
+		iszero(y3) && return _BAD_TRIPOINT(x1)
+		if iszero(x2) # p2 is start of segment 1
+			# possible positions for p3; only the two lower ones make (123) tripoints:
+			#  X╱│\ X  /
+			#  ╱ │ `--'
+			#   2┝━━━━1━━
+			#  ╲ │ ,--.
+			#  3↘↓↙  3 \
+			#    ↓
+			y3 > 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x3)
+			return (x3^2+y3^2)/(-2*f*x1*y3), Int8(1), -s, s
+		elseif x2 == x1
+			# possible positions for p3: only the top ones are (123) tripoints
+			#        ↑ 
+			#  \ 3  ↗↑↖ 3
+			#   `--' │ ╲
+			# ━━━1━━━┥2
+			#   ,--. │ ╱
+			#  /  X \│╱ X
+			y3 < 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x3-x1)
+			return ((x3-x1)^2+y3^2)/(2*f*y3), Int8(1), s, -s
+		else
+			error("point 2 is in the interior of segment")
+		end
+	end#»»
+	if iszero(y3)#««
+		if iszero(x3) # p3 is start of segment 1
+			y2 < 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x2)
+			return (x2^2+y2^2)/(2*f*y2), s, -s, Int8(1)
+		elseif x3 == x1
+			y2 > 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x2-x1)
+			return ((x2-x1)^2+y2^2)/(-2*f*y2), -s, s, Int8(1)
+		else
+			error("point 3 is in the interior of segment")
+		end
+	end#»»
+	# both points lie outside the segment; ensure they are on the same side,
+	# and identify this side as the positive one:
+	(y2 < 0) && ((y2,y3,dx) = (-y2,-y3,-dx))
+	(y3 < 0) && return _BAD_TRIPOINT(x1)
+	r = (y3 == y2) ?
+		(4*y2^2+dx^2)/(8*f*y2) : # this limit formula is only valid when dx≤0
+	let t = dx^2+(y2-y3)^2
+		(2*dx*√(y2*y3*t) + (y2+y3)*t)/(2*f*(y2-y3)^2)
+	end
+	if dx ≥ 0
+		(y3 == y2) && return _BAD_TRIPOINT(x1)
+		return r, sign(Int8, y3-y2), Int8(1), sign(Int8, y2-y3)
+	end
+	
+	s0 = y3^2+dx^2-y2*y3
+	s1 = 4*y2*y3 - dx^2
+	s2 = y2^2+dx^2-y2*y3
 	return r, sign(Int8, s0), sign(Int8, s1), sign(Int8, s2)
 end#»»
 function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
@@ -450,12 +520,12 @@ function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
 	# (-5,5) has a=1, b=5, (1+t^2)a == b, 
 	a, b = evaluate(l0, p2), evaluate(l1, p2)
 	c = l0 ⋅ l1
-	@assert !iszero(a)
-	@assert !iszero(b)
 	s = sign(Int8, det2(l0, l1))
-	(a < 0) && ((a, c, s) = (-a, -c, -s))
+	iszero(a) && return (abs(b)/(1-c), -sign(Int8,b), -s, Int8(1))
+	iszero(b) && return (abs(a)/(1-c), s*sign(Int8,a), Int8(1), -s)
+	(a < 0) && ((a, b, s) = (-a, -b, -s))
 	# the point must lie on the same side of both lines...
-# 	(b < 0) && return _BAD_TRIPOINT(b)
+	(b < 0) && return _BAD_TRIPOINT(a)
 	(b < 0) && ((b, c, s) = (-b, -c, -s))
 	D = 2*a*b*(1+c)
 	r = (a+b - s*√(D))/(1-c)
@@ -488,7 +558,7 @@ function tripoint(l1::Line, l2::Line, l3::Line)#««
 	q = (c1*s23 + c2*s31 + c3*s12) / (s12*s23*s31)
 	d1, d2, d3 = s23*q, s31*q, s12*q
 	r = √(abs((d2+d3-d1)*(d3+d1-d2)*(d1+d2-d3)/(d1+d2+d3)))/2
-	println("  triangle has sides $((d1,d2,d3))")
+# 	println("  triangle has sides $((d1,d2,d3))")
 	z1, z2, z3 = sign(Int8, d1), sign(Int8, d2), sign(Int8, d3)
 	z = sign(Int8, z1+z2+z3)
 # 	println("  triangle has altitudes $((h1,h2,h3))")
@@ -496,7 +566,6 @@ function tripoint(l1::Line, l2::Line, l3::Line)#««
 # 	any(iszero, (h1, h2, h3)) && return _BAD_TRIPOINT(l1.offset)
 	return r, z1*z, z2*z, z3*z
 end#»»
-
 # Approximation of parabolic arc««2
 H(x)=x*_₂F₁(1/4,1/2,3/2,-x^2)
 H′(x)=_₂F₁(1/4,1/2,3/2,-x^2)-1/6*x^2*_₂F₁(5/4,3/2,5/2,-x^2)
@@ -570,18 +639,13 @@ function min_quartic(f, (x1,x2))
 	return f[5]+r0*(f[4]+r0*(f[3]+r0*(f[2]+r0*f[1])))
 end
 # Separators (parametrized bisectors) ««1
-# This is either:
-#  - a parabola: origin + tangent*(t-rmin) ± normal*√(t-rmin);
-#  - a line: origin ± tangent*|t-rmin|  (this is indicated by normal == 0)
-# Instead of a union (or an abstract type) we can build a structure which
-# works in all cases.
-#
-# For line/line bisectors: since the lines are the borders of polygons,
-# they are oriented (as a loop around the polygon), and we only need
-# consider the bisector lying on the same side of both lines
-# (in/out of polygon).
-# Modifying this to allow a few more cases would require (among other
-# things)  potentially implementing 4 branches instead of 2 for some bisectors.
+# Parametrizing a point on the A/B separator is done via (branch, radius),
+# where the branch is:
+# - for point/point and point/line separators, +1 for the branch which
+# sees A to its right, and -1 for the branch which sees A to its left;
+# - for line/line separators, +1 for the branch with positive scalar
+# product with line A, and -1 for the other branch;
+# - for parallel line/line separators, 0 for both branches.
 # Data structure ««2
 """
     Separator
@@ -590,6 +654,23 @@ A structure holding the parametrization for the bisector between two sites
 (both of them either a point or a vector),
 The separator between `a` and `b` is parametrized by the distance to the sites,
 and represented as two branches: the `+` branch sees the site `a` on its right.
+
+This is either:
+ - the bisector of two points: the line parametrized as
+   origin ± √(r²-rmin²)*tangent  (with normal == 0);
+ - the bisector of a line and a point: the parabola parametrized as
+   origin ± √(r-rmin)*tangent + (r-rmin)*normal;
+ - the bisector of a line and a point on this line: the double half-line
+   (degenerate parabola) parametrized as origin + normal*abs(r)
+ - the bisector of two non-crossing segments on secant lines:
+   the union of two half-lines parametrized as
+   origin + r*tangent, origin + r*normal (with rmin == 0);
+ - the bisector of two parallel segments: the central line,
+   described as origin + r*tangent, with normal = [NaN, NaN].
+
+The separator of two sites A,B is in all cases the union of two
+infinite branches: the + branch sees A on its right (along increasing r),
+while the - branch sees B on its right.
 """
 struct Separator{T}
 	origin::SVector{2,T}
@@ -598,32 +679,37 @@ struct Separator{T}
 	rmin::T
 end
 
+# predicates
 @inline isparallel(sep::Separator) = any(isnan, sep.normal)
 @inline isstraight(sep::Separator) = iszero(sep.normal)
 @inline isparabola(sep::Separator) = !iszero(sep.normal)
+@inline ishalflines(sep::Separator)= iszero(sep.rmin) && !iszero(sep.tangent)
 
-function Base.show(io::IO, s::Separator)
-	print(io, "Separator(origin=", s.origin, ", tg=", s.tangent, ", n=", s.normal, ", t₀=", s.rmin, ")")
-end
+@inline Base.show(io::IO, sep::Separator) =
+	@printf(io, "sep %s(o=[%.3g,%.3g], r₀=%.3g, t=[%.3g,%.3g], n=[%.3g,%.3g])",
+		isparallel(sep) ? "=" :
+		isstraight(sep) ? "─" :
+		isparabola(sep) ? "◡" :
+		ishalflines(sep) ? "V" : "X",
+		sep.origin..., sep.rmin, sep.tangent..., sep.normal...)
 
 """    reverse(separator)
 
 Given `separator(a,b)`, returns `separator(b,a)`, i.e. such that
-`evaluate(sep′,t,s) = evaluate(sep,t,-s)`.
-"""
-@inline Base.reverse(s::Separator)= Separator(s.origin,-s.tangent,s.normal,s.rmin)
-
+`evaluate(sep′,b,s) = evaluate(sep,-b,s)."""
+@inline Base.reverse(s::Separator)= ishalflines(s) ?
+	Separator(s.origin, s.normal, s.tangent, s.rmin) :
+	Separator(s.origin,-s.tangent, s.normal, s.rmin)
 
 # Constructors ««2
-function Separator(a::AbstractVector, b::AbstractVector)# bisector of two points
+function Separator(a::AbstractVector, b::AbstractVector)# two points««
 	c = SVector{2}(a+b)/2
 	d = √(distance²(a,b))
 	u = quarterturn(a-b)/(d)
 	# guarantee: ‖tangent‖ = 1
 	return Separator(c, u, zero(u), d/2)
-end
-
-function Separator(a::AbstractVector, l::Line; k=1)
+end#»»
+function Separator(a::AbstractVector, l::Line; k=1)#««
 	rmin = evaluate(l, a)/2
 	if iszero(rmin)
 	# the degenerate case (rmin==0) also makes sense (segment/endpoint boundary)
@@ -638,8 +724,8 @@ function Separator(a::AbstractVector, l::Line; k=1)
 		sign(rmin)*l.normal, abs(rmin))
 end
 @inline Separator(l::Line, a::AbstractVector) = Separator(a, l; k=-1)
-
-function Separator(l1::Line, l2::Line)
+#»»
+function Separator(l1::Line, l2::Line)#««
 # 	println("computing separator of lines R=$l1 and L=$l2")
 	d = det2(l1, l2)
 	if iszero(d) # special case: two parallel lines
@@ -652,13 +738,37 @@ function Separator(l1::Line, l2::Line)
 	w*= -sign(d)
 	# this has no guarantee on the tangent (except ‖tangent‖ ≥ 1)
 	return Separator(c, w, zero(w), zero(w[1]))
-end
-function degenerate_separator(l::Line, a::AbstractVector)
+end#»»
+function degenerate_separator(l::Line, a::AbstractVector)#««
 	# in this case we know *a priori* that a ∈ l
 	return Separator(SA[a[1], a[2]],
 		zero(l.normal), l.normal, zero(eltype(l.normal)))
-end
-
+end#»»
+@inline halflines_separator(origin, u, v) =
+	# line bisector between the line directed by u (on the right) and
+	# the line directed by v (left of u)
+	let c = 1/det2(u, v); Separator(origin, c*(u+v), c*(-u+v), zero(u[1])); end
+function Separator((a1,b1)::NTuple{2,<:AbstractVector},#««
+	(a2,b2)::NTuple{2,<:AbstractVector})
+	a1b1, a1a2, a1b2, a2b2 = b1-a1, a2-a1, b2-a1, b2-a2
+	d = det2(a1b1, a2b2)
+	if iszero(d)
+		error("parallel segment/segment bisector: not implemented")
+	end
+	d < 0 && return reverse(Separator((a2,b2), (a1,b1)))
+	c = intersect(Line(a1,b1), Line(a2,b2))
+	if det2(a1b1, a1a2) ≥ 0 # seg2 lies entirely to the left of line1
+		return halflines_separator(c, a1b1, a2b2)
+	elseif det2(a1b1, a1b2) ≤ 0 # seg2 lies entirely to the right of line1
+		return halflines_separator(c, -a1b1, -a2b2)
+	# otherwise seg2 crosses line1, so seg1 is on one side of line2
+	elseif det2(a1a2, a2b2) ≤ 0 # seg1 is entirely right of line2
+		return halflines_separator(c, -a2b2, -a1b1)
+	else
+		@assert det2(a2b2, b1-a2) ≥ 0 # seg1 entirely left of line2
+		return halflines_separator(c, a2b2, a1b1)
+	end
+end#»»
 # Evaluation, interpolation, intersection««2
 
 """    evaluate(separator, r, sign)
@@ -667,13 +777,14 @@ Returns the point on the separator situated at distance `r` from both
 sites and on the branch given by sign `s` (either + or -).
 The `+` branch sees `a` on its right and `b` on its left.
 """
-@inline function evaluate(sep::Separator, r, b) # b is a sign
-	if isstraight(sep)
+@inline function evaluate(sep::Separator, b, r) # b is a sign
+	ishalflines(sep) &&
+		return sep.origin + r * (b ≥ 0 ? sep.tangent : sep.normal)
+	isstraight(sep) &&
 		return sep.origin + b*sqrt(max(r^2-sep.rmin^2, 0))*sep.tangent
-	else # parabola arc
-		u = max(r-sep.rmin, 0)
-		return sep.origin + u*sep.normal + b*sqrt(u)*sep.tangent
-	end
+	# parabola arc
+	u = max(r-sep.rmin, 0)
+	return sep.origin + u*sep.normal + b*sqrt(u)*sep.tangent
 end
 
 """    approximate(separator, r1, r2, atol)
@@ -691,52 +802,53 @@ function approximate(sep::Separator, r1, r2, atol)
 	return y
 end
 
-"""    intersect(sep1, branch1, sep2, branch2)
-
-Returns the radius for the intersection of these two separators.
-"""
-function Base.intersect(sep1::Separator, b1, sep2::Separator, b2)
-	if isparallel(sep1)
-		println(sep1)
-		println(sep2)
-		error("parallel separator intersection: not implemented")
-	elseif isparallel(sep2)
-		return intersect(sep2, b2, sep1, b1)
-	elseif isstraight(sep1)
-		if isstraight(sep2) # line-line intersection
-			println("line-line intersection")
-			println(sep1)
-			println(sep2)
-			ab = sep2.origin - sep1.origin
-			u, v = sep1.tangent, sep2.tangent
-			r = √(sep1.rmin^2 + (det2(ab,v)/det2(u,v))^2)
-			return r
-		else
-		# let u₁ = b₁√(r²-r₁²), u₂=b₂√(r-r₂)
-		# (so that r² = u₁²+r₁² = (u₂²+r₂)²)       (1)
-		# We also know T₂·N₂=0, ‖T₂‖² = 4r₂, ‖N₂‖=1.
-		#
-		# The intersection point H is parametrized as
-		# H = O₁+u₁*T₁ = O₂+u₂²*N₂+u₂*T₂ so that
-		#   u₁*T₁ = u₂²*N₂ + u₂*T₂ + (O₂-O₁)
-		#   u₁*(T₁·T₂) = 4r₂*u₂ + (O₂-O₁)·T₂            (2)
-		#   u₁*(T₁·N₂) = u₂² + (O₂-O₁)·N₂              (3)
-		# Substituting (3) into (1) we obtain
-		# u₁² + r₁² = (u₁*(T₁·N₂) + (O₁-O₂)·N₂ + r₂)²
-		# u₁² (1-(T₁·N₂)²) - 2u₁(T₁·N₂)((O₁-O₂)·N₂+r₂)
-		#  + r₁² - (r₂+(O₁-O₂)·N₂)² = 0
-		t1n2 = dot(sep1.tangent, sep2.normal)
-		s = dot(sep1.origin - sep2.origin, sep2.normal) + sep2.rmin
-		a, b, c = 1-t1n2^2, t1n2*s, sep1.rmin^2 - s^2
-		u = (b + √(max(0,b^2-a*c)))/a
-		return sqrt(u^2 + sep1.rmin^2)
-		# FIXME: we need to check branches here
-		end
-	elseif isstraight(sep2)
-		return intersect(sep2, b2, sep1, b1)
-	end
-	error("parabola-parabola intersection: not implemented") # and not needed
-end
+# separator intersection (obsolete) #««
+# """    intersect(sep1, branch1, sep2, branch2)
+# 
+# Returns the radius for the intersection of these two separators.
+# """
+# function Base.intersect(sep1::Separator, b1, sep2::Separator, b2)
+# 	if isparallel(sep1)
+# 		println(sep1)
+# 		println(sep2)
+# 		error("parallel separator intersection: not implemented")
+# 	elseif isparallel(sep2)
+# 		return intersect(sep2, b2, sep1, b1)
+# 	elseif isstraight(sep1)
+# 		if isstraight(sep2) # line-line intersection
+# 			println("line-line intersection")
+# 			println(sep1)
+# 			println(sep2)
+# 			ab = sep2.origin - sep1.origin
+# 			u, v = sep1.tangent, sep2.tangent
+# 			r = √(sep1.rmin^2 + (det2(ab,v)/det2(u,v))^2)
+# 			return r
+# 		else
+# 		# let u₁ = b₁√(r²-r₁²), u₂=b₂√(r-r₂)
+# 		# (so that r² = u₁²+r₁² = (u₂²+r₂)²)       (1)
+# 		# We also know T₂·N₂=0, ‖T₂‖² = 4r₂, ‖N₂‖=1.
+# 		#
+# 		# The intersection point H is parametrized as
+# 		# H = O₁+u₁*T₁ = O₂+u₂²*N₂+u₂*T₂ so that
+# 		#   u₁*T₁ = u₂²*N₂ + u₂*T₂ + (O₂-O₁)
+# 		#   u₁*(T₁·T₂) = 4r₂*u₂ + (O₂-O₁)·T₂            (2)
+# 		#   u₁*(T₁·N₂) = u₂² + (O₂-O₁)·N₂              (3)
+# 		# Substituting (3) into (1) we obtain
+# 		# u₁² + r₁² = (u₁*(T₁·N₂) + (O₁-O₂)·N₂ + r₂)²
+# 		# u₁² (1-(T₁·N₂)²) - 2u₁(T₁·N₂)((O₁-O₂)·N₂+r₂)
+# 		#  + r₁² - (r₂+(O₁-O₂)·N₂)² = 0
+# 		t1n2 = dot(sep1.tangent, sep2.normal)
+# 		s = dot(sep1.origin - sep2.origin, sep2.normal) + sep2.rmin
+# 		a, b, c = 1-t1n2^2, t1n2*s, sep1.rmin^2 - s^2
+# 		u = (b + √(max(0,b^2-a*c)))/a
+# 		return sqrt(u^2 + sep1.rmin^2)
+# 		# FIXME: we need to check branches here
+# 		end
+# 	elseif isstraight(sep2)
+# 		return intersect(sep2, b2, sep1, b1)
+# 	end
+# 	error("parabola-parabola intersection: not implemented") # and not needed
+# end#»»
 """    atan(separator)
 Returns the angle of the initial normal of this separator."""
 @inline Base.atan(sep::Separator) = atan(sep.normal[2], sep.normal[1])
@@ -759,8 +871,6 @@ function capture(sep::Separator, b1, r1, b2, r2, l::Line)
 		error("not implemented")
 	end
 	if isstraight(sep)
-		println("straight line:$sep")
-		println("  capture from $((b1,r1)) to $((b2,r2))")
 		# in this case: p(r) = o+ht, where h=±√(r²-r₀²)
 		# so that f(r) = r₀²+h²-(N.o+A+ h N.t)²
 		#              = h²(1-(N.t)²) - 2(N.t)(N.o+A) h + r₀²-(N.o+A)²
@@ -771,7 +881,6 @@ function capture(sep::Separator, b1, r1, b2, r2, l::Line)
 		a = 1 - Nt^2
 		b = -Nt*Noa
 		c = r0^2 - Noa^2
-		println((a,b,c), (b1*sqrt(r1^2-r0^2), b2*sqrt(r1^2-r0^2)))
 		return min_quadratic((a, b, c), (b1*sqrt(r1^2-r0^2), b2*sqrt(r2^2-r0^2)))
 	end
 	# in this case, p(r) = o+ht + h²n, where h=±√(r-r₀)  (so that r=r₀+h²)
@@ -818,7 +927,7 @@ end#»»
 function addpoint!(v::AbstractTriangulation, points, c, point)#««
 	q0 = findnode(v, points, point)
 	stack = [insert!(v, q0, c)...]
-# 	println("\e[31;7m after insert!($q0, $c) = $stack:\e[m$v")
+# 	println("\e[31;7m after insert!($q0, $c) = $stack:\e[m")
 	while !isempty(stack)
 		e = pop!(stack)
 		@assert left(v, e) == c
@@ -870,6 +979,8 @@ function triangulate(points; kw...)
 end#»»
 
 function CornerTable{J}(points; extra = 0) where{J}
+	# Builds a Delaunay triangulation of these points using Bowyer-Watson's
+	# algorithm:
 	T = float(eltype(eltype(points)))
 	np = length(points)
 	# build initial dihedron between points np+1, np+2, np+3 ««
@@ -879,10 +990,11 @@ function CornerTable{J}(points; extra = 0) where{J}
 	anyedge!(v, Cell(np+1), Edge(J(4)))
 	anyedge!(v, Cell(np+2), Edge(J(5)))
 	anyedge!(v, Cell(np+3), Edge(J(6)))
-  #»»
-	# incrementally add all points ««
 	m = maximum(abs(x) for p in points for x in p) + extra + 1
 	append!(points, [SA[0,-3m], SA[3m,2m], SA[-3m,2m]])
+	println(points)
+  #»»
+	# incrementally add all points ««
 	Random.seed!(0)
 	for c in Cell(J(1)):Cell(J(np)) # Random.randperm(np)
 		addpoint!(v, points, c, points[int(c)])
@@ -931,13 +1043,26 @@ end
 @inline point(v::VoronoiDiagram, c::Cell) = v.points[int(c)]
 @inline cellsegment(v::VoronoiDiagram, c::Cell) =
 	Cell.(v.segments[int(c)-npoints(v)])
+@inline segment(v::VoronoiDiagram, c::Cell) =
+	tuple((point(v,i) for i in cellsegment(v,c))...)
 @inline line(v::VoronoiDiagram, c::Cell) =
 	let (a,b) = cellsegment(v, c); Line(point(v,a), point(v,b)) end
 @inline geometricnode(v::VoronoiDiagram, q::Node) = v.geomnode[int(q)]
+@inline geometricnode!(v::VoronoiDiagram, l::Pair{<:Node,<:AbstractVector}...)=
+	for (q, p) in l; v.geomnode[int(q)] = p; end
 @inline noderadius(v::VoronoiDiagram, q::Node) = v.noderadius[int(q)]
-@inline noderadius!(v::VoronoiDiagram, q::Node, r) = v.noderadius[int(q)] = r
-@inline separator(v::VoronoiDiagram, e::Edge) = v.separator[int(e)]
+@inline noderadius!(v::VoronoiDiagram, l::Pair{<:Node,<:Real}...) =
+	for (q, r) in l; v.noderadius[int(q)] = r; end
+# @inline noderadius!(v::VoronoiDiagram, q::Node, r) = v.noderadius[int(q)] = r
 @inline branch(v::VoronoiDiagram, e::Edge) = v.branch[int(e)]
+@inline branch!(v::VoronoiDiagram, l::Pair{<:Edge,<:Integer}...) =
+	for (e, b) in l; v.branch[int(e)] = b; end
+@inline separator(v::VoronoiDiagram, e::Edge) = v.separator[int(e)]
+@inline separator!(v::VoronoiDiagram, l::Pair{<:Edge,<:Separator}...) =
+	for (e, s) in l; v.separator[int(e)] = s; end
+@inline separators!(v::VoronoiDiagram, e::Edge, o::Edge, s::Separator) =
+	separator!(v, e=>s, o=>reverse(s))
+
 
 @inline edgedata(v::VoronoiDiagram, e::Edge) = separator(v,e), branch(v,e)
 @inline edgedata!(v::VoronoiDiagram, e::Edge, (s, b)) =
@@ -956,7 +1081,6 @@ function CornerTables.nnodes!(v::VoronoiDiagram, n)#««
 	resize!(v.branch, 3n)
 end#»»
 function CornerTables.flip!(v::VoronoiDiagram, e::Edge)#««
-	println("in flip!")
 	n, p, o = next(e), prev(e), opposite(v, e)
 	no, po = next(o), prev(o)
 	r = invoke(flip!, Tuple{AbstractTriangulation, Edge}, v, e)
@@ -1004,17 +1128,17 @@ Returns the node at which the segment [a,b] is inserted."""
 function findrootnode(v::AbstractVoronoi, a,b)
 	p, q = point(v,a), point(v,b)
 	emin, dmin = nothing, nothing
-	println("\e[35;7m finding root node for segment ($a,$b)\e[m")
-	display((v,a))
+# 	println("\e[35;7m finding root node for segment ($a,$b)\e[m")
+# 	display((v,a))
 	for e in star(v,a) # the ends of the segments are already cells...
-		display((v,node(e)))
+# 		display((v,node(e)))
 		influences(v,a,b,node(e)) || continue
-		println("  $e is influenced by ($a,$b)")
+# 		println("  $e is influenced by ($a,$b)")
 		d = segdistance²(p,q,geometricnode(v, node(e)))
 		(emin == nothing || d < dmin) && ((emin, dmin) = (e, d))
 	end
 	@assert emin ≠ nothing
-	println("\e[35m return $(node(emin))\e[m:"); display((v,node(emin)))
+# 	println("\e[35m return $(node(emin))\e[m:"); display((v,node(emin)))
 	return node(emin)
 end
 
@@ -1034,74 +1158,81 @@ are closer to right(e) than to tail(e)/head(e)."""
 function edgecapture(v::VoronoiDiagram, e::Edge)#««
 	# edge is captured if for all r, d(p(r), L) < r
 	# i.e. min(r² - d²(p(r), L)) > 0
-	println("\e[32;7medgecapture($e): right=$(right(v,e)) $(node(e))=$(triangle(v,node(e)))\e[m")
+# 	println("\e[32;7medgecapture($(right(v,e)) = $(cellsegment(v,right(v,e))) -> $e = $(tail(v,e))⋯$(head(v,e))\e[m")
+# 	println("\e[32;7medgecapture($e): right=$(right(v,e)) $(node(e))=$(triangle(v,node(e)))\e[m")
 	o = opposite(v,e)
 	be, bo = branch(v, e), branch(v, o)
 	if bo == Int8(2)
 		println("\e[32;1m right node $(node(o))=$(triangle(v,node(o))) is bad, must flip edge\e[m")
 		return true
 	end
-	q = node(o)
 	@assert issegment(v, right(v, e))
 	(a, b) = cellsegment(v, right(v,e))
+	q = node(e)
+	if !influences(v, a, b, node(o))
+		println("\e[32;3m segment ($a, $b) does not see new node $(node(o)), \e[1mmust flip\e[m")
+		display((v, node(o)))
+		return true
+	end
 	if !influences(v, a, b, q)
-		println("\e[32;1m segment ($a,$b) does not see node $q=$(geometricnode(v,q))\e[m")
+		println("\e[32m segment ($a,$b) does not see node $q=$(geometricnode(v,q))\e[m")
 		return false
 	end
 	l = line(v, right(v,e))
 	sep = separator(v, e)
 	be, bo = branch(v,e), branch(v,o)
 	re, ro = noderadius(v,node(e)), noderadius(v,node(o))
-	println("separator from $e is $sep")
-	println("  node($e) is at ($be, $re)")
-	println("  node($o) is at ($bo, $ro)")
-	display((v, node(e)))
-	display((v, node(o)))
 	z = capture(sep, be, re, -bo, ro, l)
-	println("  \e[1mcapture($e) = $z\e[m")
-	return z > 0
-# 	return meetscircle(v, q, a, b)
+# 	println("  \e[32mcapture($e) = $z\e[m")
+	f = (-bo > be) || (-bo == be && ro > re)
+	if f != (z > 0)
+		println("\e[35;7m  (trying to connect $(right(v,e))→$(left(v,e)), disconnect $(tail(v,e))/$(head(v,e))) found f=$f, z=$z\e[m\e[35m")
+	println("separator $e/$o = $(tail(v,e))/$(tail(v,o)) is $sep")
+	println("  node($e)=$(node(e)) (in $(tail(v,e))) has parameter ($be, $re)")
+	println("  node($o)=$(node(o)) (in $(tail(v,o))) has parameter ($bo, $ro)")
+	display((v,node(e)))
+	display((v,node(o)))
+
+	println("\e[35;1m view from $(tail(v,e)): $(-bo),$ro  increases to $be,$re\e[m")
+	end
+	return f
+# 	return z > 0
 end#»»
 function addsegment!(v::VoronoiDiagram, c::Cell)#««
 	a,b = cellsegment(v, c)
 	println("\e[31;1;7minserting segment $c = ($a,$b)\e[m")
-	display(v)
+# 	display(v)
 	q0 = findrootnode(v, a, b)
+	println("root node is $q0:"); display((v,q0))
 	stack = [opposite(v, e) for e in edges(q0)]
-	println("q0=$q0; edges(q0)=$(edges(q0)); stack=$stack")
 	insert!(v, q0, c)
-# 	start = insert!(v, q0, c)
-# 	stack = [start...]
-# 	eexit = [edgeexit(v, e, a, b) for e in stack]
-	# XXX for each edge in the stack, we also maintain the “goodness” value
-	# describing how much this edge is covered the new cell
-	println("\e[31;7m after insert!($q0, $c) =$stack:\e[m"); display(v)
-	gnuplot(v)
+# 	println("\e[31;7m after insert!($q0, $c) =$stack:\e[m") # ; display(v)
 	# now grow the cell by repeatedly flipping edges as needed
 	while !isempty(stack)
+# 		println("\e[36;1m stack: $([left(v,e) for e in stack])\e[m")
 		e = pop!(stack)
-		println("\e[36;7m current status of graph (e=$e, stack=$stack)\e[m\n")
-		display(v)
+# 		println("\e[36;7m current status of graph (e=$e, stack=$stack)\e[m\n")
+# 		display(v)
 		tail(v,e) == c && continue # closing loop around $(head(v,e))
 # 		tail(v,e) == c && error("error: closing loop around $(head(v,e))")
 		@assert right(v, e) == c
-		println("examining outgoing edge $e: l=$(left(v,e)) h=$(head(v,e)) t=$(tail(v,e))")
+# 		println("examining outgoing edge $e: l=$(left(v,e)) h=$(head(v,e)) t=$(tail(v,e))")
 		o = opposite(v, e)
-		println("  branches:  at e: $(branch(v,e)) at o=$o: $(branch(v,o))")
+# 		println("  branches:  at e: $(branch(v,e)) at o=$o: $(branch(v,o))")
 # 		int(o) ≤ 3 && continue # this is the phony outer node
 		q = node(e)
-		println("  left node of $e is $q:"); display((v,q))
 # 		influences(v, a, b, q) || println("   segment($a,$b) does not see node $q =$(geometricnode(v,q))")
 # 		influences(v, a, b, q) || continue
 		edgecapture(v, e) || continue
-		println("   node $q influenced, \e[1m must flip edge $e\e[m")
+		println("   \e[7m flipping edge $e: connect $(right(v,e))->$(left(v,e)), disconnect $(head(v,e)) - $(tail(v,e))\e[m")
 		if left(v,e) == c
 			error("  closing loop around cell $(tail(v,e))")
 		end
 		e1, e2 = opposite(v, next(e)), opposite(v, prev(e))
 		flip!(v, e)
-		println("  flip done")
-		println("  now right($e1) = $(right(v,e1)); right($e2) = $(right(v,e2))")
+# 		println("  flip done")
+# 		println("  now e has h=$(head(v,e)) t=$(tail(v,e)) l=$(left(v,e)) r=$(right(v,e))")
+# 		println("  now right($e1) = $(right(v,e1)); right($e2) = $(right(v,e2))")
 		# XXX fixme: move separators for all concerned edges
 		# & compute new separators
 		push!(stack, e1, e2)
@@ -1115,10 +1246,10 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	np, ns = length(points), length(segments)
 	v = VoronoiDiagram{J,T}(CornerTable{J}(points), points, segments)
 
-	println("\e[1;7m after triangulating all points:\e[m")
-	global V=v
-	display(v)
-	gnuplot(v)
+# 	println("\e[1;7m after triangulating all points:\e[m")
+# 	global V=v
+# 	display(v)
+# 	gnuplot(v)
 	# update geometric information ««
 	for e in eachedge(v)
 		e < opposite(v, e) && edgedata!(v, e)
@@ -1151,8 +1282,14 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 # 		k-= 1
 # 	end
 # # 	nnodes!(t, k)
-# 	# »»
 # 	resize!(points, np)
+# 	# »»
+
+# 	println("\e[1;7m before splitting segments:\e[m"); display(v)
+
+	# split segments in two
+# 	splitsegments!(v)
+
 	return v
 end#»»
 # Voronoi diagram: geometry««1
@@ -1167,7 +1304,7 @@ end
 	@assert issegment(v,c1)
 	@assert ispoint(v,c2)
 	@assert ispoint(v,c3)
-	return tripoint(line(v, c1), point(v,c2), point(v,c3))
+	return tripoint(segment(v, c1), point(v,c2), point(v,c3))
 end
 @inline function tripoint_llp(v::VoronoiDiagram, c1,c2,c3)
 	@assert issegment(v,c1)
@@ -1200,9 +1337,9 @@ function tripoint(v::VoronoiDiagram, c1,c2,c3)#««
 	end
 end#»»
 # Edge updating ««2
-function edgedata!(v::VoronoiDiagram, e::Edge)
+@inline function edgedata!(v::VoronoiDiagram, e::Edge)
 	o = opposite(v, e)
-	println("  \e[34m edgedata!($e, $o)\e[m")
+# 	println("  \e[34m edgedata!($e, $o)\e[m")
 	# the separator is oriented with tail(o) = head(e) on its right,
 	# i.e. pointing to the *left* of a:
 	#       ╲n  head    ╱ 
@@ -1213,24 +1350,18 @@ function edgedata!(v::VoronoiDiagram, e::Edge)
 	# branch[e] = +1 iff node(e) lies on the + branch of the separator
 	# branch[e] = 0 iff this separator is a parallel bisector
 	t, h, l, r = tail(v,e), tail(v,o), left(v,e), left(v,o)
-	sep = separator(v, h, t)
-	v.separator[int(e)], v.separator[int(o)] = sep, reverse(sep)
+	separators!(v, e, o, separator(v, h, t))
 	# compute branches for e and o
-# 	pt, ph, pl, pr = point(v,t), point(v,h), point(v,l), point(v,r)
-# 	v.branch[int(e)] = circumcenter_orientation(pt, ph, pl)
-# 	v.branch[int(o)] = circumcenter_orientation(ph, pt, pr)
 end
 
 # Node updating ««2
 function nodedata!(v::VoronoiDiagram, q::Node)#««
-	println("\e[34;7m nodedata!($q):\e[m");
 	e1, e2, e3 = edges(q)
 	c1, c2, c3 = tail(v,e1), tail(v,e2), tail(v,e3)
-	println("  tripoint($c1,$c2,$c3) = $(tripoint(v,c1,c2,c3))")
+	println("\e[34;7m nodedata!($q = $c1,$c2,$c3):\e[m")
 	r, b1, b2, b3 = tripoint(v, c1,c2,c3)
-	v.branch[int(e1)] = b1
-	v.branch[int(e2)] = b2
-	v.branch[int(e3)] = b3
+	@assert (r ≥ 0) || (isnan(r))
+	branch!(v, e1=>b1, e2=>b2, e3=>b3)
 # 	# special case: two consecutive segments ««
 # 	if issegment(v, c1) && issegment(v, c2) &&
 # 		c3 ∈ cellsegment(v, c1) && c3 ∈ cellsegment(v, c2)
@@ -1247,26 +1378,27 @@ function nodedata!(v::VoronoiDiagram, q::Node)#««
 # 	#»»
 
 	s1, s2, s3 = separator(v, e1), separator(v, e2), separator(v, e3)
-# 	println("  *** separator $e1, $c1/$c2: $s1 isparabola: $(isparabola(s1))")
-# 	println("  *** separator $e2, $c2/$c3: $s2")
-# 	println("  *** separator $e3, $c3/$c1: $s3")
-# 	r = isparabola(s1) ? intersect(s2, b2, s3, b3) : intersect(s1, b1, s2, b2)
-# 	println("  found r=$r")
-# 	println("  eval on s1: $(evaluate(s1,r,b1))")
-# 	println("  eval on s2: $(evaluate(s2,r,b2))")
-# 	println("  eval on s3: $(evaluate(s3,r,b3))")
-	v.noderadius[int(q)] = r
-	v.geomnode[int(q)] = isstraight(s1) ? evaluate(s1, r, b1) :
-		isstraight(s2) ? evaluate(s2, r, b2) : evaluate(s3, r, b3)
-	@assert v.geomnode[int(q)][1] != Inf
-# 	v.geomnode[int(q)] = isparallel(s1) ?
-# 		evaluate(s1, r, b1) : evaluate(s2, r, b2)
-# 	println("  isparallel(s1) ? $(isparallel(s1))")
-	display((v,q))
-# 		println("noderadius[$q] = $(v.noderadius[int(q)])")
-# 		for e in edges(q)
-# 			println("  distance² to tail($e)($(tail(v, e))) = $(distance²(g, point(v, tail(v,e))))")
-# 		end
+	noderadius!(v, q=>r)
+	p = evaluate(s1,b1,r)
+	println((r, b1,b2, b3))
+	println(s1, b1, evaluate(s1,b1,r))
+	println(s2, b2, evaluate(s2,b2,r))
+	println(s3, b3, evaluate(s3,b3,r))
+	any(isnan, p) && return
+	@assert evaluate(s1,b1,r) ≈ evaluate(s2,b2,r)
+	@assert evaluate(s2,b2,r) ≈ evaluate(s3,b3,r)
+	geometricnode!(v, q=>
+		isstraight(s1) ? evaluate(s1, b1, r) :
+		isstraight(s2) ? evaluate(s2, b2, r) :
+		evaluate(s3, b3, r))
+	@assert !isinf(geometricnode(v, q)[1])
+# 	if int(q) == 11
+# 	println("  tripoint($q = $c1,$c2,$c3) = $r, $b1, $b2, $b3")
+# 	println(isstraight.((s1,s2,s3)))
+# 	println("  e1 = $c1/$(head(v,e1))")
+# 	println(s1)
+# 	display((v,q))
+# 	end
 end#»»
 # function CornerTables.swapnodes!(v::VoronoiDiagram, q1::Node, q2::Node)
 # 	swapnodes!(CornerTables.triangulation(v), q1, q2)
@@ -1286,58 +1418,6 @@ end#»»
 # 	end
 # end
 
-# function equidistant(v::AbstractVoronoi, q::Node)#««
-# 	s = triangle(v, q)
-# 	# orientation is important! some curves have two intersection points...
-# 	if issegment(v, s[1])
-# 		if issegment(v, s[2])
-# 			issegment(v, s[3]) && return equidistant_sss(v, s[1], s[2], s[3])
-# 			return equidistant_pss(v, s[3], s[1], s[2]) # points before segments
-# 		else
-# 			issegment(v, s[3]) && return equidistant_pss(v, s[2], s[3], s[1])
-# 			return equidistant_pps(v, s[2], s[3], s[1])
-# 		end
-# 	else
-# 		if issegment(v, s[2])
-# 			issegment(v, s[3]) && return equidistant_pss(v, s[1], s[2], s[3])
-# 			return equidistant_pps(v, s[3], s[1], s[2])
-# 		else
-# 			issegment(v, s[3]) && return equidistant_pps(v, s[1], s[2], s[3])
-# 			return equidistant_ppp(v, s[1], s[2], s[3])
-# 		end
-# 	end
-# end#»»
-# function equidistant_sss(v::AbstractVoronoi, c1, c2, c3)#««
-# 	(i1,j1),(i2,j2),(i3,j3)=cellsegment(v,c1),cellsegment(v,c2),cellsegment(v,c3)
-# 	a1,b1,a2,b2,a3,b3 =
-# 		point(v,i1),point(v,j1),point(v,i2),point(v,j2),point(v,i3),point(v,j3)
-# 	u1,u2,u3 = b1-a1, b2-a2, b3-a3
-# 	d1,d2,d3 = det2(u2,u3), det2(u3,u1), det2(u1,u2)
-# 
-# 	iszero(d1) && return equidistant_sss_parallel(a2, u2, a3, a1, u1)
-# 	iszero(d2) && return equidistant_sss_parallel(a3, u3, a1, a2, u2)
-# 	iszero(d3) && return equidistant_sss_parallel(a1, u1, a2, a3, u3)
-# 
-# 	return equidistant_sss(a1,b1,a2,b2,a3,b3)
-# # 	p1 = lineinter(a2,b2, a3,b3)
-# # 	p2 = lineinter(a3,b3, a1,b1)
-# # 	p3 = lineinter(a1,b1, a2,b2)
-# # # 	a = lineinter(v,i2,j2,i3,j3)
-# # # 	b = lineinter(v,i3,j3,i1,j1)
-# # # 	c = lineinter(v,i1,j1,i2,j2)
-# # 	@assert p1 ≠ nothing
-# # 	@assert p2 ≠ nothing
-# # 	@assert p3 ≠ nothing
-# # # 	a == nothing && return incenter_parallel(v, b, c, i2, j2, i3, j3)
-# # # 	b == nothing && return incenter_parallel(v, c, a, i3, j3, i1, j1)
-# # # 	c == nothing && return incenter_parallel(v, a, b, i1, j1, i2, j2)
-# # 	return incenter(p1,p2,p3)
-# end#»»
-# function lineinter(v,i1,j1,i2,j2)#««
-# 	i1 ∈ (i2,j2) && return point(v,i1)
-# 	j1 ∈ (i2,j2) && return point(v,j1)
-# 	return lineinter(point(v,i1), point(v,j1), point(v,i2), point(v,j2))
-# end#»»
 # @inline equidistant_ppp(v::AbstractVoronoi, c1, c2, c3) =
 # 	# all three cells are single points
 # 	circumcenter(point(v,c1), point(v,c2), point(v,c3))
@@ -1373,17 +1453,19 @@ end#»»
 # 	return equidistant_pxs(point(v,i1), point(v,j1), point(v,i2), point(v,j2), ε)
 # end#»»
 function separator(v::AbstractVoronoi, c1, c2)#««
+# 	println("  computing separator(v, $c1, $c2)")
 	if issegment(v, c1)
 		i1, j1 = cellsegment(v, c1)
 		a1, b1 = point(v, i1), point(v, j1)
 		if issegment(v, c2)
 			return Separator(line(v, c1), line(v, c2))
 		elseif (c2 == i1 || c2 == j1) # degenerate parabola (exact)
-			return degenerate_separator(line(v, c1), line(v, c2))
+			return degenerate_separator(line(v, c1), point(v, c2))
 		else # generic parabola separator
 			return Separator(line(v, c1), point(v,c2))
 		end
 	elseif issegment(v, c2)
+		i2, j2 = cellsegment(v, c2)
 		if c1 == i2 || c1 == j2
 			return reverse(degenerate_separator(line(v, c2), point(v, c1)))
 		else # generic parabola
@@ -1530,7 +1612,6 @@ end#»»
 # end
 # 
 # 
-# Compute Voronoi diagram ««2
 # Offset ««1
 # Split segments ««2
 """
@@ -1562,35 +1643,47 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		s12, s21 = Cell(np+2i-1), Cell(np+2i)
 		(c1,c2) = cellsegment(v, s12)
 		(p1,p2) = point(v, c1), point(v, c2)
-# 		println("\e[7m splitting cell $s12 = ($c1,$c2)\e[m")
+		println("\e[7m splitting cell $s12 = ($c1,$c2)\e[m")
 # 		showcell(stdout, v, s12)
 		e2 = anyedge(v, s12)
 		while head(v, e2) ≠ c2; e2 = after(v, e2); end
 		e1 = e2
 		while head(v, e1) ≠ c1; tail!(v, e1, s21); e1 = after(v, e1); end
+		println("found e1=$e1, e2=$e2")
 		# split the cell by inserting two new nodes
 		# (= split vertex s12 of the dual triangulation)
+		#
+		#   c1  o1|e1  s12 e2|o2 c2 becomes:
+		#
+		#   o1│q12  s21 e2│
+		#     │    q21    │q23
+		#  c1 q1─────────q2 c2
+		#  q13│    q11    │
+		#     │e1      q22│o2
+		#
 		o1, o2 = opposite(v, e1), opposite(v, e2)
 		q1, q2 = newnodes!(v, 2)
 		q11, q12, q13 = side(q1,1), side(q1,2), side(q1,3)
 		q21, q22, q23 = side(q2,1), side(q2,2), side(q2,3)
 		tail!(v, q11=>s12, q12=>s21, q13=>c1, q21=>s21, q22=>s12, q23=>c2)
 		opposites!(v, q11=>q21, q12=>o1, q13=>e1, q22=>o2, q23=>e2)
-# 		pe1, pe2,  = prev(e1), prev(e2)
-# 		ope1, ope2 = opposite(v, prev(e1)), opposite(v, prev(e2))
-# 		tail!(v,
-# 			side(q1,1)=>c1, side(q1,2)=>s12, side(q1,3)=>s21,
-# 			side(q2,1)=>c2, side(q2,2)=>s21, side(q2,3)=>s12)
-# 		opposites!(v, side(q1,1) => side(q2,1),
-# 			pe1=>side(q1,3), ope1=>side(q1,2),
-# 			pe2=>side(q2,3), ope2=>side(q2,2))
-		geometricnode!(v, q1, p1)
-		geometricnode!(v, q2, p2)
-# 		shownode(stdout, v, q1)
-# 		shownode(stdout, v, q2)
 		anyedge!(v, s12, q11); anyedge!(v, s21, q21)
-# 		showcell(stdout, v, s12)
-# 		showcell(stdout, v, s21)
+		display((v, q1)); display((v,q2)); display((v, s12)); display((v, s21))
+		# fix geometric information:
+		l12, l21 = line(v, s12), line(v, s21)
+		separators!(v, q11, q21, Separator(l12, l21))
+		separator!(v, q12 => separator(v, e1), q22 => separator(v, e2),
+			q13 => separator(v, o1))
+		edgedata!(v, o1) # this also fixes q12
+		edgedata!(v, e2) # this also fixes q23
+		for e in star(v, q21); edgedata!(v, e); end
+		for e in star(v, q21); nodedata!(v, node(e)); end
+		@assert iszero(noderadius(v,q1))
+		@assert iszero(noderadius(v,q2))
+# 		branch!(v, q11=>0, q21=>0,
+# 		)
+# 		geometricnode!(v, q1, p1)
+# 		geometricnode!(v, q2, p2)
 	end
 	return v
 end#»»
@@ -1665,8 +1758,8 @@ gnuplot(v)
 		g0, g1 = geometricnode(v, q0), geometricnode(v, q1)
 		r0, r1 = noderadius(v, q0), noderadius(v, q1)
 
-		g0p, g0m = evaluate(sep, r0, +1), evaluate(sep, r0, -1)
-		g1p, g1m = evaluate(sep, r1, +1), evaluate(sep, r1, -1)
+		g0p, g0m = evaluate(sep, +1, r0), evaluate(sep, -1, r0)
+		g1p, g1m = evaluate(sep, +1, r1), evaluate(sep, -1, r1)
 		@debug """
 edge $e (opposite $o): identifying node branches
   $q0 = $g0 at $r0
@@ -1913,7 +2006,7 @@ function interpolate(v::OffsetDiagram{J,P,T}, chain, radius, atol) where{J,P,T}
 	e0 = first(chain); sep0 = separator(v, e0)
 	r = abs(radius)
 	δ = √(r/(8*atol)) # used for discretizing circle arcs
-	plist = [evaluate(sep0, r, +1)]
+	plist = [evaluate(sep0, +1, r)]
 	llist = [1]
 	for e1 in chain[2:end]
 		sep1 = separator(v, e1)
@@ -1931,7 +2024,7 @@ function interpolate(v::OffsetDiagram{J,P,T}, chain, radius, atol) where{J,P,T}
 		end
 		# this is either the single point (for a straight segment), or the
 		# closure of a circular arc
-		push!(plist, evaluate(sep1, r, +1))
+		push!(plist, evaluate(sep1, +1, r))
 		push!(llist, length(plist))
 		e0, sep0 = e1, sep1
 	end
@@ -2462,7 +2555,7 @@ end
 function Base.show(io::IO, ::MIME"text/plain",
 	(v,q)::Tuple{AbstractVoronoi,Node})
 	bc = @closure i->"X-0+!X"[clamp(3+branch(v,side(q,i)), 1:6)]
-	println(io, "\e[33m", q, triangle(v,q), "\e[m: ",
+	print(io, "\e[33m", q, triangle(v,q), "\e[m: ",
 		@sprintf("(%.3g,%.3g) r=%.3g", geometricnode(v, q)..., noderadius(v, q)),
 		" ", bc(1), bc(2), bc(3),
 	)
@@ -2512,7 +2605,7 @@ using StaticArrays
 # # println(V.point(v,V.Cell(4)))
 # # println(V.point(v,V.Cell(5)))
 
-# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 #
 # v=V.OffsetDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
 # z = V.zerochains(v)
