@@ -45,7 +45,7 @@ end end
 
 @inline node(e::Edge{J}) where{J} = Node{J}(fld1(int(e), 3))
 @inline side(q::Node{J}, i) where{J} = Edge{J}(3*int(q)-3+i)
-@inline edges(q::Node{J}) where{J} = let a=J(3)*int(q)
+@inline sides(q::Node{J}) where{J} = let a=J(3)*int(q)
 	Edge(a-J(2)):Edge(a); end
 # Data type««2
 abstract type AbstractTriangulation{J} end
@@ -237,12 +237,12 @@ Returns the three edges forming the `ring` of the new cell
 (i.e. having this cell to their left).
 """
 function Base.insert!(v::AbstractTriangulation, q::Node, c::Cell)#««
-	e, n, p = edges(q) # e and its opposite edge are unchanged
+	e, n, p = sides(q) # e and its opposite edge are unchanged
 	on, op = opposite(v, n), opposite(v, p)
 	t, h, l = tail(v, e), tail(v, n), tail(v, p)
 	q1, q2 = newnodes!(v, 2)
-	e1, n1, p1 = edges(q1)
-	e2, n2, p2 = edges(q2)
+	e1, n1, p1 = sides(q1)
+	e2, n2, p2 = sides(q2)
 	# rearrange in the following way:
 	#                     ╱ | ╲
 	#                    ╱  |  ╲
@@ -276,8 +276,8 @@ end#»»
 "swaps two nodes in the triangulation"
 function swapnodes!(t::AbstractTriangulation, q1::Node, q2::Node)#««
 	q1 == q2 && return
-	e1,n1,p1 = edges(q1)
-	e2,n2,p2 = edges(q2)
+	e1,n1,p1 = sides(q1)
+	e2,n2,p2 = sides(q2)
 	oc1,on1,op1 = opposite(t,e1), opposite(t,n1), opposite(t,p1)
 	oc2,on2,op2 = opposite(t,e2), opposite(t,n2), opposite(t,p2)
 	sc1,sn1,sp1 = tail(t,e1), tail(t,n1), tail(t,p1)
@@ -412,9 +412,8 @@ end
 #»»1
 export AbstractTriangulation, CornerTable, Edge, Cell, Node, int
 export tail, tail!, head, opposite, opposite!, anyedge, anyedge!
-export nedges, nnodes, nnodes!, ncells, ncells!
-export next, prev, node, side, edges
-export opposites!, edgesfrom!
+export nedges, nnodes, nnodes!, ncells, ncells!, opposites!, edgesfrom!
+export next, prev, node, side, sides
 export right, left, after, before, cell, triangle
 export lastcell, eachcell, lastnode, eachnode, lastedge, eachedge
 export alltriangles, adjnode, adjnodes, newnodes!

@@ -55,6 +55,7 @@ const DEFAULT_ATOL=1e-1
 @inline det2(u,v) = u[1]*v[2]-u[2]*v[1]
 @inline det2(u,v,w) = det2(v-u, w-u)
 @inline norm²(v) = v[1]^2+v[2]^2
+@inline unit(v) = v/√(norm²(v))
 @inline distance²(a,b) = norm²(a-b)
 @inline quarterturn(v) = SA[-v[2], v[1]]
 
@@ -139,37 +140,37 @@ function det2(l1::Line, l2::Line, l3::Line)#««
 	return (l1.offset+l2.offset+l3.offset)*D/(d1*d2*d3)
 end#»»
 
-# Circumscribed circle ««2
-function circumcenter(a,b,c)
-	ab,ac = b-a,c-a
-	m = SA[norm²(ab) ab[1] ab[2];norm²(ac) ac[1] ac[2]]
-	kn = det(m[:,SA[2,3]])
-	kx = det(m[:,SA[1,3]])/(2kn)
-	ky = det(m[:,SA[2,1]])/(2kn)
-	return a + SA[kx, ky]
-end
-
-# """    circumcenter_orientation(a,b,c)
-# 
-# Returns +1 iff a views the circumcenter to the left of b."""
-# function circumcenter_orientation(a,b,c)
+# # Circumscribed circle ««2
+# function circumcenter(a,b,c)
 # 	ab,ac = b-a,c-a
-# 	d = det2(ab, ac)
-# 	@assert !iszero(d)
-# 	# the power of c relative to the circle with diameter (ab) is
-# 	# cx² + cy² -(ax+bx)cx -(ay+by)cy + (ax bx + ay by)
-# 	u = c[1]^2+c[2]^2 - (a[1]+b[1])*c[1] - (a[2]+b[2])*c[2] + (a[1]*b[1]+a[2]*b[2])
-# 	iszero(u) && return Int8(0)
-# 	u > 0 && return (d > 0 ? Int8(+1) : Int8(-1))
-# 	return (d > 0 ? Int8(-1) : Int8(+1))
+# 	m = SA[norm²(ab) ab[1] ab[2];norm²(ac) ac[1] ac[2]]
+# 	kn = det(m[:,SA[2,3]])
+# 	kx = det(m[:,SA[1,3]])/(2kn)
+# 	ky = det(m[:,SA[2,1]])/(2kn)
+# 	return a + SA[kx, ky]
 # end
-# 	
 # 
-# function circumradius(a,b,c)
-# 	ab,ac,bc = b-a, c-a, c-b
-# 	return sqrt(norm²(ab)*norm²(ac)*norm²(bc))/(2*abs(det2(ab,ac)))
-# end
-
+# # """    circumcenter_orientation(a,b,c)
+# # 
+# # Returns +1 iff a views the circumcenter to the left of b."""
+# # function circumcenter_orientation(a,b,c)
+# # 	ab,ac = b-a,c-a
+# # 	d = det2(ab, ac)
+# # 	@assert !iszero(d)
+# # 	# the power of c relative to the circle with diameter (ab) is
+# # 	# cx² + cy² -(ax+bx)cx -(ay+by)cy + (ax bx + ay by)
+# # 	u = c[1]^2+c[2]^2 - (a[1]+b[1])*c[1] - (a[2]+b[2])*c[2] + (a[1]*b[1]+a[2]*b[2])
+# # 	iszero(u) && return Int8(0)
+# # 	u > 0 && return (d > 0 ? Int8(+1) : Int8(-1))
+# # 	return (d > 0 ? Int8(-1) : Int8(+1))
+# # end
+# # 	
+# # 
+# # function circumradius(a,b,c)
+# # 	ab,ac,bc = b-a, c-a, c-b
+# # 	return sqrt(norm²(ab)*norm²(ac)*norm²(bc))/(2*abs(det2(ab,ac)))
+# # end
+# 
 """
     isincircle(a,b,c,x)
 
@@ -181,169 +182,169 @@ function isincircle(a,b,c,x)
 	m = SA[a[1] a[2] norm²(a); b[1] b[2] norm²(b); c[1] c[2] norm²(c)]
 	return det(m) > 0
 end
-
-"""
-    isincircle(a,b,c,p,q)
-
-Returns true iff open segment ]p,q[ intersects circumcircle of triangle (a,b,c).
-"""
-function isincircle(a,b,c,p,q)
-	a,b,c,q = a-p,b-p,c-p,q-p
-	na, nb, nc = norm²(a), norm²(b), norm²(c)
-	# equation of circumcircle is kn(x²+y²) - kx x - y y + k0 = 0
-	m = SA[na a[1] a[2] 1;nb b[1] b[2] 1;nc c[1] c[2] 1]
-	kn = det(m[:,SA[2,3,4]])
-	kx = det(m[:,SA[1,3,4]])/kn
-	ky = det(m[:,SA[1,4,2]])/kn
-	C = det(m[:,SA[3,2,1]])/kn # equation for (t*q) is At² - Bt + C = 0
-	A = norm²(q)
-	B = kx*q[1] + ky*q[2]
-	return (B ≥ 0) && (B ≤ 2A) && (B*B ≥ 4*A*C)
-end
-
-function incenter(a,b,c)
-	la, lb, lc = distance²(b,c), distance²(c,a), distance²(a,b)
-	p = la+lb+lc
-	ra, rb, rc = la/p, lb/p, lc/p
-	return ra*a + rb*b + rc*c
-end
-
-# Equidistant points ««2
-# p = point, s = segment, x = segment starting on previous point
-
-@inline function equidistant_pps(a, b, p, q)#««
-	# returns the point equidistant from a, b, (pq)
-	# chosen so that the cells are oriented (a, b, pq)
-	# imagine our segment as an x-axis; both points are on the same side,
-	# we reorient the segment so they both have y > 0
-	pqa = det2(p,q,a)
-	@assert !iszero(pqa)
-	(pqa < 0) && ((p,q) = (q,p); pqa = -pqa)
-	pqb = det2(p,q,b)
-	@assert pqb > 0
-	ab2 = distance²(a,b)
-	pq2 = distance²(p,q)
-	pqab = dot(q-p, b-a)
-	if pqa == pqb
-		# special case if (a,b) and (p,q) are collinear:
-		@assert false
-	end
-	# let z = (a+b)/2 + t*I*(b-a); then
-	# d²(z,a) = d²(z,b) = ab2(t^2 + 1/4)
-	# d²(z,pq) = <pqz>²/pq2 = (pqa/2+pqb/2+t*pqab)^2/pq2, so the eq. is:
-	# (using the identity (pq2*ab2 = pqab^2 + (pqa-pqb)^2):
-	# (pqa-pqb)^2 * t^2 - (pqa+pqb) pqab t + (pqab^2/4 - pqa*pqb) = 0
-	#
-	# We find Δ = 4*pqa*pqb*ab2*pq2
-	# and geometry implies that the +√ is the correct sign
-	Δ = 4*pqa*pqb*ab2*pq2
-	t = ((pqa+pqb)*pqab + √(Δ)) / (2*(pqa-pqb)^2)
-	return (a+b)/2 + t*quarterturn(b-a)
-end#»»
-
-@inline function equidistant_pxs(a,b,p,q, ε)
-	# return point equidistant from: a, (ab), (pq)
-	# (in this order if ε=+1, opposite order if ε=-1)
-	# z = a + tI(b-a) satisfies
-	# d²(z,a) = d²(z,ab) = ab² t²
-	# d²(z,pq) = <pqz>²/pq² = (<pqa> + t pq.ab)^2 / pq2
-	# or: (pqa-pqb)^2*t^2 - 2 pqa*pqab*x - pqa^2 = 0
-	# Δ = 4 pqa^2*pq2*ab2
-	pqa = det2(p,q,a)
-	pqb = det2(p,q,b)
-	ab2 = distance²(a,b)
-	if pqa == pqb # special case: both lines are parallel
-		abp = det2(a,b,p)
-		return a + abp/(2*ab2)*quarterturn(b-a)
-	end
-	pq2 = distance²(p,q)
-	pqab = dot(q-p, b-a)
-	Δ = 4*pqa^2*pq2*ab2
-	t = (2*pqa*pqab+ ε*√(Δ)) / (2*(pqa-pqb)^2)
-	z = a + t*quarterturn(b-a)
-	return z
-end
-
-"returns the point equidistant from point a and segments (pq), (rs)"
-function equidistant_pss(a, p, q, r, s)
-	pqrs = det2(q-p, s-r)
-	if iszero(pqrs) # special case: parallel lines
-		pqa = det2(p,q,a)
-		pqa < 0 && ((p,q, pqa) = (q,p, -pqa)) # ensure orientation
-		pq = q-p
-		pq2 = norm²(pq)
-	pqr, pqs = det2(p,q,r), det2(p,q,s)
-# 	# `a` is not allowed to be on any of the two lines pq, rs
-# 	if pqr == pqs # special case: parallel lines
-		# let v = quarterturn(q-p)
-		λ = (pqr - 2*pqa)/(2*pq2)
-		# c = a + λv is the projection of a on the middle line
-		# this line is parametrized as z = c + t pq, then
-		# az² = ac²+t² pq² = (λ²+t²) pq² must be pqr^2/(4 pq^2), hence
-		# t^2 = (pqr^2 - (pqr-2pqa)^2)/(4 pq^4)
-		#     = pqa(pqr-pqa)/pq^4
-		# Geometry imposes the positive square root
-		t = √(pqa*(pqr-pqa)) / pq2
-		z = a+λ*quarterturn(pq)+t*pq
-		return a + λ*quarterturn(pq) + t*pq
-	end
-	c = lineinter(p,q,r,s)
-	ca = a-c
-	pq = q-p; pq2 = norm²(pq); upq = pq/√(pq2)
-	rs = s-r; urs = rs/√(norm²(rs))
-	dot(upq, ca) < 0 && (upq = -upq)
-	dot(urs, ca) < 0 && (urs = -urs)
-	# parametrization of the inner angle bisector: z = c + t u
-	c = lineinter(p, q, r, s)
-	u = urs + upq
-	# for z = c+tu: d²(z,pq) = t² pqu²/pq², while
-	# d²(z,a) = ‖a-c-tu‖² = t² u²- 2t ca⋅u + ca²
-	# the equation is thus t²(u²-pqu²/pq²) -2t ca⋅u + ca² = 0, or
-	# t²(pq⋅u)²/pq² -2t ca⋅u + ca² = 0
-	A = dot(pq, u)^2 / pq2
-	B = dot(ca, u)
-	C = norm²(ca)
-	Δ = B^2-A*C
-	ε = sign(det2(upq, urs))
-	t = (B + ε*√(Δ))/A
-	z = c+t*u
-	return c + t*u
-end
-
-function equidistant_sss(a1,b1,a2,b2,a3,b3)
-	# returns the point equidistant from the *oriented* lines (ai, bi)
-	# (i.e. either the incenter, or an excenter, of the triangle, according
-	# to the orientations).
-	u1 = quarterturn(b1 - a1); u1 /= √(norm²(u1))
-	u2 = quarterturn(b2 - a2); u2 /= √(norm²(u2))
-	u3 = quarterturn(b3 - a3); u3 /= √(norm²(u3))
-	p1 = lineinter(a2, b2, a3, b3)
-	p2 = lineinter(a3, b3, a1, b1)
-	return lineinter(p1, p1+u2+u3, p2, p2+u1+u3)
-end
-
-function equidistant_sss_parallel(a, u, b, p, pq)
-	# returns the point equidistant from lines (a, a+u), (b,b+u), (p, pq)
-	# (in this order)
-	# parametrized as z = c+tu (with c = (a+b)/2)
-	c, ab = (a+b)/2, b-a
-	# d²(z, (a,a+u)) = l²/4 where l is the distance between the parallel lines
-	# so (<pqc> + t <pqu>)² = |ab|⋅|pq|/2, or t=-<pqc>±|ab|.|pq|/(2<pqu>)
-	# if <u,ab> > 0 then a lies to the right of the line (c, c+u)
-	# and we take the + sign:
-	pqc, pqu = det2(pq, c-p), det2(pq, u)
-	l2, pq2 = det2(u,ab)^2/norm²(u), norm²(pq)
-	t = (-pqc + sign(det2(u,ab))*sqrt(l2*pq2)/2)/pqu
-	z = c + t*u
-	return z
-end
-
-# Bisectors ««2
-"mediator line of segment (ab)"
-function mediator(a,b)
-	return SA[2*(a[1]-b[1]), 2*(a[2]-b[2]), norm²(b)-norm²(a)]
-end
-
+# 
+# """
+#     isincircle(a,b,c,p,q)
+# 
+# Returns true iff open segment ]p,q[ intersects circumcircle of triangle (a,b,c).
+# """
+# function isincircle(a,b,c,p,q)
+# 	a,b,c,q = a-p,b-p,c-p,q-p
+# 	na, nb, nc = norm²(a), norm²(b), norm²(c)
+# 	# equation of circumcircle is kn(x²+y²) - kx x - y y + k0 = 0
+# 	m = SA[na a[1] a[2] 1;nb b[1] b[2] 1;nc c[1] c[2] 1]
+# 	kn = det(m[:,SA[2,3,4]])
+# 	kx = det(m[:,SA[1,3,4]])/kn
+# 	ky = det(m[:,SA[1,4,2]])/kn
+# 	C = det(m[:,SA[3,2,1]])/kn # equation for (t*q) is At² - Bt + C = 0
+# 	A = norm²(q)
+# 	B = kx*q[1] + ky*q[2]
+# 	return (B ≥ 0) && (B ≤ 2A) && (B*B ≥ 4*A*C)
+# end
+# 
+# function incenter(a,b,c)
+# 	la, lb, lc = distance²(b,c), distance²(c,a), distance²(a,b)
+# 	p = la+lb+lc
+# 	ra, rb, rc = la/p, lb/p, lc/p
+# 	return ra*a + rb*b + rc*c
+# end
+# 
+# # Equidistant points ««2
+# # p = point, s = segment, x = segment starting on previous point
+# 
+# @inline function equidistant_pps(a, b, p, q)#««
+# 	# returns the point equidistant from a, b, (pq)
+# 	# chosen so that the cells are oriented (a, b, pq)
+# 	# imagine our segment as an x-axis; both points are on the same side,
+# 	# we reorient the segment so they both have y > 0
+# 	pqa = det2(p,q,a)
+# 	@assert !iszero(pqa)
+# 	(pqa < 0) && ((p,q) = (q,p); pqa = -pqa)
+# 	pqb = det2(p,q,b)
+# 	@assert pqb > 0
+# 	ab2 = distance²(a,b)
+# 	pq2 = distance²(p,q)
+# 	pqab = dot(q-p, b-a)
+# 	if pqa == pqb
+# 		# special case if (a,b) and (p,q) are collinear:
+# 		@assert false
+# 	end
+# 	# let z = (a+b)/2 + t*I*(b-a); then
+# 	# d²(z,a) = d²(z,b) = ab2(t^2 + 1/4)
+# 	# d²(z,pq) = <pqz>²/pq2 = (pqa/2+pqb/2+t*pqab)^2/pq2, so the eq. is:
+# 	# (using the identity (pq2*ab2 = pqab^2 + (pqa-pqb)^2):
+# 	# (pqa-pqb)^2 * t^2 - (pqa+pqb) pqab t + (pqab^2/4 - pqa*pqb) = 0
+# 	#
+# 	# We find Δ = 4*pqa*pqb*ab2*pq2
+# 	# and geometry implies that the +√ is the correct sign
+# 	Δ = 4*pqa*pqb*ab2*pq2
+# 	t = ((pqa+pqb)*pqab + √(Δ)) / (2*(pqa-pqb)^2)
+# 	return (a+b)/2 + t*quarterturn(b-a)
+# end#»»
+# 
+# @inline function equidistant_pxs(a,b,p,q, ε)
+# 	# return point equidistant from: a, (ab), (pq)
+# 	# (in this order if ε=+1, opposite order if ε=-1)
+# 	# z = a + tI(b-a) satisfies
+# 	# d²(z,a) = d²(z,ab) = ab² t²
+# 	# d²(z,pq) = <pqz>²/pq² = (<pqa> + t pq.ab)^2 / pq2
+# 	# or: (pqa-pqb)^2*t^2 - 2 pqa*pqab*x - pqa^2 = 0
+# 	# Δ = 4 pqa^2*pq2*ab2
+# 	pqa = det2(p,q,a)
+# 	pqb = det2(p,q,b)
+# 	ab2 = distance²(a,b)
+# 	if pqa == pqb # special case: both lines are parallel
+# 		abp = det2(a,b,p)
+# 		return a + abp/(2*ab2)*quarterturn(b-a)
+# 	end
+# 	pq2 = distance²(p,q)
+# 	pqab = dot(q-p, b-a)
+# 	Δ = 4*pqa^2*pq2*ab2
+# 	t = (2*pqa*pqab+ ε*√(Δ)) / (2*(pqa-pqb)^2)
+# 	z = a + t*quarterturn(b-a)
+# 	return z
+# end
+# 
+# "returns the point equidistant from point a and segments (pq), (rs)"
+# function equidistant_pss(a, p, q, r, s)
+# 	pqrs = det2(q-p, s-r)
+# 	if iszero(pqrs) # special case: parallel lines
+# 		pqa = det2(p,q,a)
+# 		pqa < 0 && ((p,q, pqa) = (q,p, -pqa)) # ensure orientation
+# 		pq = q-p
+# 		pq2 = norm²(pq)
+# 	pqr, pqs = det2(p,q,r), det2(p,q,s)
+# # 	# `a` is not allowed to be on any of the two lines pq, rs
+# # 	if pqr == pqs # special case: parallel lines
+# 		# let v = quarterturn(q-p)
+# 		λ = (pqr - 2*pqa)/(2*pq2)
+# 		# c = a + λv is the projection of a on the middle line
+# 		# this line is parametrized as z = c + t pq, then
+# 		# az² = ac²+t² pq² = (λ²+t²) pq² must be pqr^2/(4 pq^2), hence
+# 		# t^2 = (pqr^2 - (pqr-2pqa)^2)/(4 pq^4)
+# 		#     = pqa(pqr-pqa)/pq^4
+# 		# Geometry imposes the positive square root
+# 		t = √(pqa*(pqr-pqa)) / pq2
+# 		z = a+λ*quarterturn(pq)+t*pq
+# 		return a + λ*quarterturn(pq) + t*pq
+# 	end
+# 	c = lineinter(p,q,r,s)
+# 	ca = a-c
+# 	pq = q-p; pq2 = norm²(pq); upq = pq/√(pq2)
+# 	rs = s-r; urs = rs/√(norm²(rs))
+# 	dot(upq, ca) < 0 && (upq = -upq)
+# 	dot(urs, ca) < 0 && (urs = -urs)
+# 	# parametrization of the inner angle bisector: z = c + t u
+# 	c = lineinter(p, q, r, s)
+# 	u = urs + upq
+# 	# for z = c+tu: d²(z,pq) = t² pqu²/pq², while
+# 	# d²(z,a) = ‖a-c-tu‖² = t² u²- 2t ca⋅u + ca²
+# 	# the equation is thus t²(u²-pqu²/pq²) -2t ca⋅u + ca² = 0, or
+# 	# t²(pq⋅u)²/pq² -2t ca⋅u + ca² = 0
+# 	A = dot(pq, u)^2 / pq2
+# 	B = dot(ca, u)
+# 	C = norm²(ca)
+# 	Δ = B^2-A*C
+# 	ε = sign(det2(upq, urs))
+# 	t = (B + ε*√(Δ))/A
+# 	z = c+t*u
+# 	return c + t*u
+# end
+# 
+# function equidistant_sss(a1,b1,a2,b2,a3,b3)
+# 	# returns the point equidistant from the *oriented* lines (ai, bi)
+# 	# (i.e. either the incenter, or an excenter, of the triangle, according
+# 	# to the orientations).
+# 	u1 = quarterturn(b1 - a1); u1 /= √(norm²(u1))
+# 	u2 = quarterturn(b2 - a2); u2 /= √(norm²(u2))
+# 	u3 = quarterturn(b3 - a3); u3 /= √(norm²(u3))
+# 	p1 = lineinter(a2, b2, a3, b3)
+# 	p2 = lineinter(a3, b3, a1, b1)
+# 	return lineinter(p1, p1+u2+u3, p2, p2+u1+u3)
+# end
+# 
+# function equidistant_sss_parallel(a, u, b, p, pq)
+# 	# returns the point equidistant from lines (a, a+u), (b,b+u), (p, pq)
+# 	# (in this order)
+# 	# parametrized as z = c+tu (with c = (a+b)/2)
+# 	c, ab = (a+b)/2, b-a
+# 	# d²(z, (a,a+u)) = l²/4 where l is the distance between the parallel lines
+# 	# so (<pqc> + t <pqu>)² = |ab|⋅|pq|/2, or t=-<pqc>±|ab|.|pq|/(2<pqu>)
+# 	# if <u,ab> > 0 then a lies to the right of the line (c, c+u)
+# 	# and we take the + sign:
+# 	pqc, pqu = det2(pq, c-p), det2(pq, u)
+# 	l2, pq2 = det2(u,ab)^2/norm²(u), norm²(pq)
+# 	t = (-pqc + sign(det2(u,ab))*sqrt(l2*pq2)/2)/pqu
+# 	z = c + t*u
+# 	return z
+# end
+# 
+# # Bisectors ««2
+# "mediator line of segment (ab)"
+# function mediator(a,b)
+# 	return SA[2*(a[1]-b[1]), 2*(a[2]-b[2]), norm²(b)-norm²(a)]
+# end
+# 
 # Computation of point/oriented line tripoints««2
 # Slight extension of `Base.sign`:
 @inline Base.sign(T::Type{<:Integer}, x) =
@@ -357,12 +358,16 @@ This computes the tripoint (equidistant point) of a triple of cells,
 each of which is either a point or an (oriented) line.
 The cells are cyclically ordered:
 tripoint(a,b,c) == tripoint(b,c,a) ≠ tripoint(c,b,a).
-The data is returned as `(radius, branches...)`;
-the branch positions are returned as `Int8`.
+The data is returned as `(radius, branch1, branch2, branch3)`.
 If no such tripoint exists, `nan, 2,2,2` is returned.
 
-Line orientation matters only when at least two lines are present;
-in this case, the tripoint must lie on the same side of all the lines.
+The branch positions are returned as `Int8`, encoded as:
+branch1 = +1 iff the tripoint lies on branch seeing a1 on its **left**
+and a2 on its **right**, i.e. a1↑a2
+(the arrow marks the direction of increasing r on this branch).
+Likewise, branch2 is +1 for a2↑a3, and branch3 is +1 for a3↑a1.
+
+For example, the center of an equilateral triangle has branches +1,+1,+1.
 """
 function tripoint(a::AbstractVector, b::AbstractVector, c::AbstractVector)#««
 	ab, bc, ca = b-a, c-b, a-c
@@ -370,10 +375,10 @@ function tripoint(a::AbstractVector, b::AbstractVector, c::AbstractVector)#««
 	r = √(norm²(ab)*norm²(ca)*norm²(bc))/(2*abs(det2(ab,ca)))
 	return r, -sign(Int8, bc ⋅ ca), -sign(Int8, ca ⋅ ab), -sign(Int8, ab ⋅ bc)
 end#»»
-function tripoint(l0::Line, p1::AbstractVector, p2::AbstractVector)#««
-# WLOG assume L0 has equation (y=0), P1=(0,a) and P2=(d,b).
-# * If b < 0 then S01 and S02 do not intersect.
-# * If b = 0 then S02 is a half-line XXX.
+function tripoint((p1,q1)::Segment, p2::AbstractVector, p3::AbstractVector)#««
+# WLOG assume L1 has equation (y=0), P2=(0,a) and P3=(d,b).
+# * If b < 0 then S12 and S23 do not intersect.
+# * If b = 0 then S13 is a half-line XXX.
 # * If b = a then the three separators meet at a single point,
 # which is either H if d<0 or H' if d>0.
 # * If b > 0, b≠a then the three separators meet in two points.
@@ -388,48 +393,11 @@ function tripoint(l0::Line, p1::AbstractVector, p2::AbstractVector)#««
 #              -++ for (b>1) and (a>√(b(1-b)))
 #              +-+ for (a<0) and (b< a^2/4)
 #              +++ otherwise
-	a = evaluate(l0, p1)
-	b = evaluate(l0, p2)
-	d = det2(p2-p1, l0.normal)
-	badnode = _BAD_TRIPOINT(a)
-	if iszero(a) # degenerate case
-		iszero(b) && return badnode
-# 		sign(b) == sign(d) && return badnode
-		s = sign(Int8, b)*sign(Int8, d)
-		return ((b^2+d^2)/abs(2*b), Int8(1), s, -s)
-	end
-	if iszero(b) # other degenerate case
-		@assert !iszero(a)
-		s = sign(Int8, a)*sign(Int8, d)
-		return ((a^2+d^2)/abs(2*a), -s, s, Int8(1))
-	end
-	# pick the orientation which makes the two points lie above the line
-	# (if the two points are on opposite sides of the line, the tripoint
-	# does not exist)
-	(a < 0) && ((a,b,d) = (-a,-b,-d))
-	(b < 0) && return badnode
-	r = if b == a
-		(4*a^2+d^2)/(8*a) # this limit formula is only valid when d≤0
-	else let t = d^2+(a-b)^2
-		(2*d*√(a*b*t) + (a+b)*t)/(2*(a-b)^2)
-	end end
-	if d ≥ 0
-		(b == a) && return badnode
-		return r, sign(Int8, b-a), Int8(1), sign(Int8, a-b)
-	end
-	
-	s0 = b^2+d^2-a*b
-	s1 = 4*a*b - d^2
-	s2 = a^2+d^2-a*b
-	return r, sign(Int8, s0), sign(Int8, s1), sign(Int8, s2)
-end#»»
-function tripoint((p1,q1)::Segment, p2::AbstractVector, p3::AbstractVector)#««
 	u1, u2, u3 = q1-p1, p2-p1, p3-p1
 	x1, x2, y2, x3, y3 = norm²(u1), u1⋅u2, det2(u1,u2), u1⋅u3, det2(u1,u3)
 	dx = x3-x2
 	f = √(x1) # scale factor
-	println("scale factor: $f")
-	println("coordinates: ", (x1, (x2,y2), (x3,y3)))
+	println(f, (x1, (x2, y2), (x3, y3)))
 	if iszero(y2)#««
 		iszero(y3) && return _BAD_TRIPOINT(x1)
 		if iszero(x2) # p2 is start of segment 1
@@ -442,7 +410,8 @@ function tripoint((p1,q1)::Segment, p2::AbstractVector, p3::AbstractVector)#««
 			#    ↓
 			y3 > 0 && return _BAD_TRIPOINT(x1)
 			s = sign(Int8, x3)
-			return (x3^2+y3^2)/(-2*f*x1*y3), Int8(1), -s, s
+			println("XX here")
+			return (x3^2+y3^2)/(-2*f*y3), Int8(1), -s, s
 		elseif x2 == x1
 			# possible positions for p3: only the top ones are (123) tripoints
 			#        ↑ 
@@ -534,6 +503,98 @@ function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
 		(s > 0) ? sign(Int8, a-f*b) : Int8(-1),
 		(s > 0) ? sign(Int8, b-f*a) : Int8(1)
 end#»»
+function tripoint((p1,q1)::Segment, (p2,q2)::Segment, p3::AbstractVector,
+	sep = Separator((p2,q2), (p1,q1)))#««
+	println(sep)
+	println(Separator((p2,q2), (p1,q1)))
+	@assert sep == Separator((p2,q2), (p1,q1))
+	p1q1, p2q2 = q1-p1, q2-p2
+	d = det2(p1q1, p2q2)
+	if iszero(d)
+		error("parallel tripoint: not implemented")
+	end
+	(d < 0) && ((p2,q2,p2q2,d) = (q2,p2,-p2q2,-d))
+	u1, u2 = p1q1/√(norm²(p1q1)), p2q2/√(norm²(p2q2))
+	a, b, c = det2(u1, p3-p1), det2(u2, p3-p2), u1⋅u2
+
+	error("not implemented")
+end#»»
+function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
+	# This does *not* depend on the orientation of both lines, so we may
+	# orient both of them so that p2 is on the + side of both lines.
+	# (this adds π to the angle of both lines if one is reversed).
+	# Let a=l0.p2, b=l1.p2; both are ≥ 0. Let θ=(l0,l1) ∈ [0,π[ and t=tan(θ/2).
+	# We pick an origin at the intersection of both lines,
+	# so that l0 has equation (y=0) and l1 has (y=x tanθ).
+	# The coordinates of p2 are then (x2,y2) such that
+	# y2 = a, -sinθ x2 + cosθ y2 = b
+	# or p2=(x2,y2) = ((b-a)/(2t) - (a+b)t/2, b). ✓
+	# The (inner) bisector between l0 and l1 has angle (θ+π)/2; the point
+	# at distance r>0 is (-t r, r).
+	# The parabola between l0 and p2 has equation
+	# 2*y2*y = (x-x2)²+y2². ✓
+	# Both bisectors intersect at r such that 2*y2*r = (-t r-x2)²+y2², or
+	# -t^2 r² + 2(t x2-y2) r -(x2²+y2²) = 0
+	# With c=cos(θ):
+	# ((1-c)r)^2 - 2(a+b) ((1-c)r) + (a^2+b^2-2abc) = 0
+	# Δ' = 2ab(c+1)
+	# (1-c) r = (a+b) ± √Δ'
+	#
+	# If ab > 0 then we take the smallest root (-√Δ') and branches +++.
+	# If ab < 0 then we take +√Δ' and branches -++.
+	#
+	# Numeric example:
+	# (-10,5) is equidistant from L0(y=0), L1(4x+3y=0) and P2(-13,9)
+	# e^{iθ} = (-3+4i)/5; (a,b) = (9,5), c=-3/5, t=2
+	# (-5,5) has a=1, b=5, (1+t^2)a == b, 
+	a, b = evaluate(l0, p2), evaluate(l1, p2)
+	c = l0 ⋅ l1
+	s = sign(Int8, det2(l0, l1))
+	iszero(a) && return (abs(b)/(1-c), -sign(Int8,b), -s, Int8(1))
+	iszero(b) && return (abs(a)/(1-c), s*sign(Int8,a), Int8(1), -s)
+	(a < 0) && ((a, b, s) = (-a, -b, -s))
+	# the point must lie on the same side of both lines...
+	(b < 0) && return _BAD_TRIPOINT(a)
+	(b < 0) && ((b, c, s) = (-b, -c, -s))
+	D = 2*a*b*(1+c)
+	r = (a+b - s*√(D))/(1-c)
+	f = (1+c)/2 # == 1/(1+t^2)
+	return r, Int8(1),
+		(s > 0) ? sign(Int8, a-f*b) : Int8(-1),
+		(s > 0) ? sign(Int8, b-f*a) : Int8(1)
+end#»»
+function tripoint_seg((p1, q1)::Segment, (p2,q2)::Segment, k::Int8)
+	# returns either the tripoint of (p1,q1), (p2,q2), p1  (k=1)
+	# or (p2,q2), (p1,q1), p1 (k=-1).
+	println("\e[32mtripoint_seg(($p1,$q1), ($p2,$q2), $k)\e[m")
+	u1, u2 = unit(q1-p1), unit(q2-p2)
+	d = det2(u1, u2)
+	println((u1,u2,d))
+	if iszero(d)
+		error("tripoint for parallel segments: not implemented")
+	end
+	(d < 0) && ((u2, d) = (-u2, -d))
+	println("u1, u2, d = ", (u1, u2, d))
+	b, c = det2(u2, p1-p2), u1⋅u2
+	println("\e[31;1m sign(b, k)=$(sign(Int8,b)) $(sign(Int8,k))\e[m")
+	println("b, c = ", (b,c))
+	r, b1, b2, b3 = abs(b)/(1-k*sign(b)*c),
+	# (b,k) = (++): +-+
+	# (b,k) = (+-): ++-
+	# (b,k) = (-+): -++
+	# (b,k) = (--): -++
+		Int8(-1)^(b < 0), Int8(-1)^(b > 0 && k > 0), Int8(-1)^(b > 0 && k < 0)
+	x1, x2, x3 = k > 0 ? ((p1,q1), (p2,q2), p1) : ((p2,q2), (p1,q1), p1)
+	println("\e[1m r = $r; \e[m\e[34;1;7m", (b1,b2,b3), "\e[m")
+	println("cells are: ", (x1,x2,x3))
+	s1, s2, s3 = Separator(x2,x1), Separator(x3,x2), Separator(x1,x3)
+	println(s1, b1, "\e[33m", evaluate(s1,b1,r), "\e[m")
+	println(s2, b2, "\e[33m", evaluate(s2,b2,r), "\e[m")
+	println("separator $x1/$x3 is ", s3, b3, "\e[33m", evaluate(s3,b3,r), "\e[m")
+	evaluate(s1,b1,r) ≈ evaluate(s2,b2,r) ≈ evaluate(s3,b3,r) &&
+		println("\e[32;7;1m  the three points match!\e[m")
+	return r, b1, b2, b3
+end
 function tripoint(l1::Line, l2::Line, l3::Line)#««
 	# let lᵢ: aᵢ x + bᵢ y + cᵢ = 0
 	# also define cᵢⱼ = aᵢ aⱼ + bᵢ bⱼ, sᵢⱼ = aᵢ bⱼ - bᵢ aⱼ
@@ -639,13 +700,6 @@ function min_quartic(f, (x1,x2))
 	return f[5]+r0*(f[4]+r0*(f[3]+r0*(f[2]+r0*f[1])))
 end
 # Separators (parametrized bisectors) ««1
-# Parametrizing a point on the A/B separator is done via (branch, radius),
-# where the branch is:
-# - for point/point and point/line separators, +1 for the branch which
-# sees A to its right, and -1 for the branch which sees A to its left;
-# - for line/line separators, +1 for the branch with positive scalar
-# product with line A, and -1 for the other branch;
-# - for parallel line/line separators, 0 for both branches.
 # Data structure ««2
 """
     Separator
@@ -657,16 +711,18 @@ and represented as two branches: the `+` branch sees the site `a` on its right.
 
 This is either:
  - the bisector of two points: the line parametrized as
-   origin ± √(r²-rmin²)*tangent  (with normal == 0);
- - the bisector of a line and a point: the parabola parametrized as
-   origin ± √(r-rmin)*tangent + (r-rmin)*normal;
- - the bisector of a line and a point on this line: the double half-line
-   (degenerate parabola) parametrized as origin + normal*abs(r)
+   origin ± √(r²-rmin²)\\*tangent  (with normal == 0);
+ - the bisector of a line and a point outside the line:
+   the parabola parametrized as
+   origin ± √(r-rmin)\\*tangent + (r-rmin)\\*normal;
+ - the bisector of a segment and a point on the line supporting the segment:
+   this is a line, and an error if the point is in the interior of the segment;
  - the bisector of two non-crossing segments on secant lines:
    the union of two half-lines parametrized as
-   origin + r*tangent, origin + r*normal (with rmin == 0);
+   origin + r\\*tangent, origin + r\\*normal (with rmin == 0);
+ - the bisector of two touching, non-parallel segments is a straight line;
  - the bisector of two parallel segments: the central line,
-   described as origin + r*tangent, with normal = [NaN, NaN].
+   described as origin + r\\*tangent, with normal = [NaN, NaN].
 
 The separator of two sites A,B is in all cases the union of two
 infinite branches: the + branch sees A on its right (along increasing r),
@@ -682,15 +738,14 @@ end
 # predicates
 @inline isparallel(sep::Separator) = any(isnan, sep.normal)
 @inline isstraight(sep::Separator) = iszero(sep.normal)
-@inline isparabola(sep::Separator) = !iszero(sep.normal)
-@inline ishalflines(sep::Separator)= iszero(sep.rmin) && !iszero(sep.tangent)
+@inline ishalflines(sep::Separator)= iszero(sep.rmin) && !iszero(sep.normal)
+# @inline isparabola(sep::Separator) = !iszero(sep.normal) # default case
 
 @inline Base.show(io::IO, sep::Separator) =
 	@printf(io, "sep %s(o=[%.3g,%.3g], r₀=%.3g, t=[%.3g,%.3g], n=[%.3g,%.3g])",
-		isparallel(sep) ? "=" :
+		isparallel(sep) ? "═" :
 		isstraight(sep) ? "─" :
-		isparabola(sep) ? "◡" :
-		ishalflines(sep) ? "V" : "X",
+		ishalflines(sep) ? "⋁" : "◡",
 		sep.origin..., sep.rmin, sep.tangent..., sep.normal...)
 
 """    reverse(separator)
@@ -709,67 +764,63 @@ function Separator(a::AbstractVector, b::AbstractVector)# two points««
 	# guarantee: ‖tangent‖ = 1
 	return Separator(c, u, zero(u), d/2)
 end#»»
-function Separator(a::AbstractVector, l::Line; k=1)#««
-	rmin = evaluate(l, a)/2
-	if iszero(rmin)
-	# the degenerate case (rmin==0) also makes sense (segment/endpoint boundary)
-		return Separator(SVector{2}(a), zero(direction(l)), l.normal, zero(a[1]))
+function Separator((p1,q1)::Segment, p2::AbstractVector; k=1)#««
+	println("\e[36m separator: ($p1, $q1), $p2, $k\e[m")
+	p1q1, p1p2 = q1-p1, p2-p1
+	x1, x2, y2 = norm²(p1q1), p1q1⋅p1p2, det2(p1q1, p1p2)
+	f = √(x1) # scale factor
+	println((f, (x1, (x2,y2))))
+	v = quarterturn(p1q1)
+	if iszero(y2) # point is on the segment
+		x2 ≤ 0 && return Separator((p1+p2)/2, k/f*v, zero(p1q1), -x2/(2*f))
+		x2 ≥ x1 && return Separator((q1+p2)/2, -k/f*v, zero(p1q1), (x2-x1)/(2*f))
+		error("point is in the interior of the segment")
 	end
-	c = a-rmin*l.normal
-	# if rmin > 0: a is on the right side of l; parabola is oriented as l
-	# if rmin < 0: a is on left side, parabola is oriented opposite to l
-	#
-	# guarantee: ‖tangent‖² = 4rmin; ‖normal‖ = 1
-	return Separator(c, 2k*sign(rmin)*√(abs(rmin))*direction(l),
-		sign(rmin)*l.normal, abs(rmin))
+	rmin = y2/(2*f)
+	return Separator(p2 - y2/2*v/x1,
+		k*sign(y2)*√(2*abs(y2)/f)*p1q1/f,
+		sign(y2)*v/f, abs(rmin))
 end
-@inline Separator(l::Line, a::AbstractVector) = Separator(a, l; k=-1)
-#»»
-function Separator(l1::Line, l2::Line)#««
-# 	println("computing separator of lines R=$l1 and L=$l2")
-	d = det2(l1, l2)
-	if iszero(d) # special case: two parallel lines
-		c = (point(l1) + point(l2))/2
-		return Separator(c, direction(l1), NaN16*l1.normal, abs(evaluate(l1, c)))
+@inline Separator(a::AbstractVector, b::Segment) = Separator(b, a; k=-1) #»»
+function Separator((p1,q1)::Segment, (p2,q2)::Segment)#««
+	@inline straight_bisector(c, u1, u2, d = det2(u1,u2)) =
+		# straight angle bisector between these two vectors
+		Separator(c, (√(norm²(u2))*u1+√(norm²(u1))*u2)/d, zero(u1),zero(u1[1]))
+	@inline angled_bisector(c, u, v) = begin
+		# + in the quadrant (u,v), - in the quadrant (-u, v)
+		u1, v1 = unit(u), unit(v); f = 1/abs(det2(u1, v1))
+		Separator(c, f*(u1+v1), f*(-u1+v1), zero(u[1]))
 	end
-	c = intersect(l1, l2)
-	@assert c ≠ nothing
-	w = (l1.normal + l2.normal); w/= dot(w, l1.normal)
-	w*= -sign(d)
-	# this has no guarantee on the tangent (except ‖tangent‖ ≥ 1)
-	return Separator(c, w, zero(w), zero(w[1]))
-end#»»
-function degenerate_separator(l::Line, a::AbstractVector)#««
-	# in this case we know *a priori* that a ∈ l
-	return Separator(SA[a[1], a[2]],
-		zero(l.normal), l.normal, zero(eltype(l.normal)))
-end#»»
-@inline halflines_separator(origin, u, v) =
-	# line bisector between the line directed by u (on the right) and
-	# the line directed by v (left of u)
-	let c = 1/det2(u, v); Separator(origin, c*(u+v), c*(-u+v), zero(u[1])); end
-function Separator((a1,b1)::NTuple{2,<:AbstractVector},#««
-	(a2,b2)::NTuple{2,<:AbstractVector})
-	a1b1, a1a2, a1b2, a2b2 = b1-a1, a2-a1, b2-a1, b2-a2
-	d = det2(a1b1, a2b2)
+	p1q1, p1p2, p1q2, p2q2 = q1-p1, p2-p1, q2-p1, q2-p2
+	d = det2(p1q1, p2q2)
 	if iszero(d)
 		error("parallel segment/segment bisector: not implemented")
 	end
-	d < 0 && return reverse(Separator((a2,b2), (a1,b1)))
-	c = intersect(Line(a1,b1), Line(a2,b2))
-	if det2(a1b1, a1a2) ≥ 0 # seg2 lies entirely to the left of line1
-		return halflines_separator(c, a1b1, a2b2)
-	elseif det2(a1b1, a1b2) ≤ 0 # seg2 lies entirely to the right of line1
-		return halflines_separator(c, -a1b1, -a2b2)
-	# otherwise seg2 crosses line1, so seg1 is on one side of line2
-	elseif det2(a1a2, a2b2) ≤ 0 # seg1 is entirely right of line2
-		return halflines_separator(c, -a2b2, -a1b1)
-	else
-		@assert det2(a2b2, b1-a2) ≥ 0 # seg1 entirely left of line2
-		return halflines_separator(c, a2b2, a1b1)
+	# both segments are un-ordered, so we swap p2, q2 if needed:
+	d < 0 && ((p1p2, p1q2, p2q2, d) = (p1q2, p1p2, -p2q2, -d))
+	c = intersect(Line(p1,q1), Line(p2,q2))
+	Dp2, Dq2, Dp1, Dq1 =
+		det2(p1q1, p1p2), det2(p1q1, p1q2), det2(p1p2, p2q2), det2(p2q2, q1-p2)
+# 	@assert Dq2 ≈ Dp2+d
+# 	@assert Dq1 ≈ Dp1-d
+# 	@assert Dp2 < Dq2
+# 	@assert Dp1 > Dq1
+
+	if Dp2 ≥ 0 # seg2 is left of line1
+		Dp1 ≤ 0 && return straight_bisector(c, p1q1, p2q2)
+		Dq1 ≥ 0 && return straight_bisector(c, p1q1, -p2q2)
+		return angled_bisector(c, p1q1, p2q2)
+	elseif Dq2 ≤ 0 # seg2 is right of line1
+		Dp1 ≤ 0 && return straight_bisector(c, p2q2, -p1q1)
+		Dq1 ≥ 0 && return straight_bisector(c, p2q2, p1q1)
+		return angled_bisector(c, -p1q1, -p2q2)
+	else # seg2 is across line1
+		Dp1 ≤ 0 && return angled_bisector(c, p2q2, p1q1)
+		Dq1 ≥ 0 && return angled_bisector(c, -p2q2, -p1q1)
+		error("cannot compute separator of crossing segments")
 	end
 end#»»
-# Evaluation, interpolation, intersection««2
+# Evaluation, interpolation««2
 
 """    evaluate(separator, r, sign)
 
@@ -782,8 +833,8 @@ The `+` branch sees `a` on its right and `b` on its left.
 		return sep.origin + r * (b ≥ 0 ? sep.tangent : sep.normal)
 	isstraight(sep) &&
 		return sep.origin + b*sqrt(max(r^2-sep.rmin^2, 0))*sep.tangent
-	# parabola arc
 	u = max(r-sep.rmin, 0)
+	# parabola arc
 	return sep.origin + u*sep.normal + b*sqrt(u)*sep.tangent
 end
 
@@ -802,53 +853,6 @@ function approximate(sep::Separator, r1, r2, atol)
 	return y
 end
 
-# separator intersection (obsolete) #««
-# """    intersect(sep1, branch1, sep2, branch2)
-# 
-# Returns the radius for the intersection of these two separators.
-# """
-# function Base.intersect(sep1::Separator, b1, sep2::Separator, b2)
-# 	if isparallel(sep1)
-# 		println(sep1)
-# 		println(sep2)
-# 		error("parallel separator intersection: not implemented")
-# 	elseif isparallel(sep2)
-# 		return intersect(sep2, b2, sep1, b1)
-# 	elseif isstraight(sep1)
-# 		if isstraight(sep2) # line-line intersection
-# 			println("line-line intersection")
-# 			println(sep1)
-# 			println(sep2)
-# 			ab = sep2.origin - sep1.origin
-# 			u, v = sep1.tangent, sep2.tangent
-# 			r = √(sep1.rmin^2 + (det2(ab,v)/det2(u,v))^2)
-# 			return r
-# 		else
-# 		# let u₁ = b₁√(r²-r₁²), u₂=b₂√(r-r₂)
-# 		# (so that r² = u₁²+r₁² = (u₂²+r₂)²)       (1)
-# 		# We also know T₂·N₂=0, ‖T₂‖² = 4r₂, ‖N₂‖=1.
-# 		#
-# 		# The intersection point H is parametrized as
-# 		# H = O₁+u₁*T₁ = O₂+u₂²*N₂+u₂*T₂ so that
-# 		#   u₁*T₁ = u₂²*N₂ + u₂*T₂ + (O₂-O₁)
-# 		#   u₁*(T₁·T₂) = 4r₂*u₂ + (O₂-O₁)·T₂            (2)
-# 		#   u₁*(T₁·N₂) = u₂² + (O₂-O₁)·N₂              (3)
-# 		# Substituting (3) into (1) we obtain
-# 		# u₁² + r₁² = (u₁*(T₁·N₂) + (O₁-O₂)·N₂ + r₂)²
-# 		# u₁² (1-(T₁·N₂)²) - 2u₁(T₁·N₂)((O₁-O₂)·N₂+r₂)
-# 		#  + r₁² - (r₂+(O₁-O₂)·N₂)² = 0
-# 		t1n2 = dot(sep1.tangent, sep2.normal)
-# 		s = dot(sep1.origin - sep2.origin, sep2.normal) + sep2.rmin
-# 		a, b, c = 1-t1n2^2, t1n2*s, sep1.rmin^2 - s^2
-# 		u = (b + √(max(0,b^2-a*c)))/a
-# 		return sqrt(u^2 + sep1.rmin^2)
-# 		# FIXME: we need to check branches here
-# 		end
-# 	elseif isstraight(sep2)
-# 		return intersect(sep2, b2, sep1, b1)
-# 	end
-# 	error("parabola-parabola intersection: not implemented") # and not needed
-# end#»»
 """    atan(separator)
 Returns the angle of the initial normal of this separator."""
 @inline Base.atan(sep::Separator) = atan(sep.normal[2], sep.normal[1])
@@ -1098,7 +1102,7 @@ function CornerTables.flip!(v::VoronoiDiagram, e::Edge)#««
 end#»»
 function CornerTables.insert!(v::VoronoiDiagram, q::Node, c::Cell)#««
 	# call the “parent” method for basic edge manipulations
-	e, n, p = edges(q)
+	e, n, p = sides(q)
 	e0, e1, e2 = invoke(Base.insert!,
 		Tuple{AbstractTriangulation, Node, Cell}, v, q, c)
 	# then update all geometric information:
@@ -1158,7 +1162,7 @@ are closer to right(e) than to tail(e)/head(e)."""
 function edgecapture(v::VoronoiDiagram, e::Edge)#««
 	# edge is captured if for all r, d(p(r), L) < r
 	# i.e. min(r² - d²(p(r), L)) > 0
-# 	println("\e[32;7medgecapture($(right(v,e)) = $(cellsegment(v,right(v,e))) -> $e = $(tail(v,e))⋯$(head(v,e))\e[m")
+	println("\e[32;7medgecapture($(right(v,e)) = $(cellsegment(v,right(v,e))) -> $e = $(tail(v,e))⋯$(head(v,e))\e[m")
 # 	println("\e[32;7medgecapture($e): right=$(right(v,e)) $(node(e))=$(triangle(v,node(e)))\e[m")
 	o = opposite(v,e)
 	be, bo = branch(v, e), branch(v, o)
@@ -1169,11 +1173,11 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 	@assert issegment(v, right(v, e))
 	(a, b) = cellsegment(v, right(v,e))
 	q = node(e)
-	if !influences(v, a, b, node(o))
-		println("\e[32;3m segment ($a, $b) does not see new node $(node(o)), \e[1mmust flip\e[m")
-		display((v, node(o)))
-		return true
-	end
+# 	if !influences(v, a, b, node(o))
+# 		println("\e[32;3m segment ($a, $b) does not see new node $(node(o)), \e[1mmust flip\e[m")
+# 		display((v, node(o)))
+# 		return true
+# 	end
 	if !influences(v, a, b, q)
 		println("\e[32m segment ($a,$b) does not see node $q=$(geometricnode(v,q))\e[m")
 		return false
@@ -1204,7 +1208,7 @@ function addsegment!(v::VoronoiDiagram, c::Cell)#««
 # 	display(v)
 	q0 = findrootnode(v, a, b)
 	println("root node is $q0:"); display((v,q0))
-	stack = [opposite(v, e) for e in edges(q0)]
+	stack = [opposite(v, e) for e in sides(q0)]
 	insert!(v, q0, c)
 # 	println("\e[31;7m after insert!($q0, $c) =$stack:\e[m") # ; display(v)
 	# now grow the cell by repeatedly flipping edges as needed
@@ -1228,6 +1232,7 @@ function addsegment!(v::VoronoiDiagram, c::Cell)#««
 		if left(v,e) == c
 			error("  closing loop around cell $(tail(v,e))")
 		end
+		@assert int(e) ≠ 7
 		e1, e2 = opposite(v, next(e)), opposite(v, prev(e))
 		flip!(v, e)
 # 		println("  flip done")
@@ -1306,10 +1311,22 @@ end
 	@assert ispoint(v,c3)
 	return tripoint(segment(v, c1), point(v,c2), point(v,c3))
 end
-@inline function tripoint_llp(v::VoronoiDiagram, c1,c2,c3)
+@inline function tripoint_llp(v::VoronoiDiagram, c1,c2,c3, s1)
 	@assert issegment(v,c1)
 	@assert issegment(v,c2)
 	@assert ispoint(v,c3)
+	println((c1, c2, c3))
+	if c3 ∈ cellsegment(v, c1)
+		c3 ∈ cellsegment(v, c2) &&
+			return (zero(first(v.noderadius)), Int8(0), Int8(0), Int8(0))
+		b1 = sum(cellsegment(v,c1)) - c3
+		return tripoint_seg((point(v,c3), point(v,b1)), segment(v, c2), Int8(1))
+		error("p3 ∈ s1: not implemented; other end is $b1")
+	elseif c3 ∈ cellsegment(v, c2)
+		b2 = sum(cellsegment(v,c2)) - c3
+		return tripoint_seg((point(v,c3), point(v,b2)), segment(v,c1), Int8(-1))
+		error("p3=$c3 ∈ s2=$c2: not implemented; other end is $b2")
+	end
 	# TODO: check if point c3 lies on either line; in this case, call
 	# specialized code
 	return tripoint(line(v,c1), line(v,c2), point(v,c3))
@@ -1317,18 +1334,20 @@ end
 
 @inline rot3l((r, a,b,c)) = (r, b,c,a) # rotate left
 @inline rot3r((r, a,b,c)) = (r, c,a,b) # rotate right
-function tripoint(v::VoronoiDiagram, c1,c2,c3)#««
+function tripoint(v::VoronoiDiagram, q::Node)#««
+	c1, c2, c3 = triangle(v, q)
+	s1, s2, s3 = (separator(v, e) for e in sides(q))
 	if issegment(v, c1)
 		if issegment(v, c2)
 			issegment(v, c3) && return       tripoint_lll(v, c1, c2, c3)
-			                    return       tripoint_llp(v, c1, c2, c3)
+			                    return       tripoint_llp(v, c1, c2, c3, s1)
 		else
-			issegment(v, c3) && return rot3l(tripoint_llp(v, c3, c1, c2))
+			issegment(v, c3) && return rot3l(tripoint_llp(v, c3, c1, c2, s3))
 			                    return       tripoint_lpp(v, c1, c2, c3)
 		end
 	else
 		if issegment(v, c2)
-			issegment(v, c3) && return rot3r(tripoint_llp(v, c2, c3, c1))
+			issegment(v, c3) && return rot3r(tripoint_llp(v, c2, c3, c1, s2))
 			                    return rot3r(tripoint_lpp(v, c2, c3, c1))
 		else
 			issegment(v, c3) && return rot3l(tripoint_lpp(v, c3, c1, c2))
@@ -1351,15 +1370,20 @@ end#»»
 	# branch[e] = 0 iff this separator is a parallel bisector
 	t, h, l, r = tail(v,e), tail(v,o), left(v,e), left(v,o)
 	separators!(v, e, o, separator(v, h, t))
+	if Set([int(h), int(t)]) == Set([8,9])
+	println("\e[36;7m separators! for $h/$t:\e[m")
+	println(" left $t/right $h is ", separator(v,e))
+	println(" left $h/right $t is ", separator(v,o))
+	end
 	# compute branches for e and o
 end
 
 # Node updating ««2
 function nodedata!(v::VoronoiDiagram, q::Node)#««
-	e1, e2, e3 = edges(q)
+	e1, e2, e3 = sides(q)
 	c1, c2, c3 = tail(v,e1), tail(v,e2), tail(v,e3)
 	println("\e[34;7m nodedata!($q = $c1,$c2,$c3):\e[m")
-	r, b1, b2, b3 = tripoint(v, c1,c2,c3)
+	r, b1, b2, b3 = tripoint(v, q)
 	@assert (r ≥ 0) || (isnan(r))
 	branch!(v, e1=>b1, e2=>b2, e3=>b3)
 # 	# special case: two consecutive segments ««
@@ -1381,9 +1405,9 @@ function nodedata!(v::VoronoiDiagram, q::Node)#««
 	noderadius!(v, q=>r)
 	p = evaluate(s1,b1,r)
 	println((r, b1,b2, b3))
-	println(s1, b1, evaluate(s1,b1,r))
-	println(s2, b2, evaluate(s2,b2,r))
-	println(s3, b3, evaluate(s3,b3,r))
+	println("sep $c1/$c2: ", s1, b1, evaluate(s1,b1,r))
+	println("sep $c2/$c3: ", s2, b2, evaluate(s2,b2,r))
+	println("sep $c3/$c1: ", s3, (b3,r), evaluate(s3,b3,r))
 	any(isnan, p) && return
 	@assert evaluate(s1,b1,r) ≈ evaluate(s2,b2,r)
 	@assert evaluate(s2,b2,r) ≈ evaluate(s3,b3,r)
@@ -1418,59 +1442,26 @@ end#»»
 # 	end
 # end
 
-# @inline equidistant_ppp(v::AbstractVoronoi, c1, c2, c3) =
-# 	# all three cells are single points
-# 	circumcenter(point(v,c1), point(v,c2), point(v,c3))
-
-# function equidistant_pps(v::AbstractVoronoi, c1, c2, c3)#««
-# 	(i,j) = cellsegment(v, c3)
-# 	# treat cases where one of the points is one end of the segment
-# 	c1 == i && return equidistant_pxs(v, i, j, c2)
-# 	c2 == i && return equidistant_pxs(v, i, j, c1)
-# 	c1 == j && return equidistant_pxs(v, j, i, c2)
-# 	c2 == j && return equidistant_pxs(v, j, i, c1)
-# 	return equidistant_pps(point(v, c1), point(v, c2), point(v, i), point(v, j))
-# end#»»
-# function equidistant_pxs(v::AbstractVoronoi, c1, c2, c3)#««
-# 	# node equidistant from: segment (c1,c2), points c1 & c3
-# 	a, b, c = point(v,c1), point(v,c2), point(v,c3)
-# 	ab, ac = b-a, c-a
-# 	t = norm²(ac)/(2det2(ab,ac))
-# 	return a+t*quarterturn(ab)
-# end#»»
-# function equidistant_pss(v::AbstractVoronoi, s, c2,c3)#««
-# 	(i1,j1),(i2,j2) = cellsegment(v,c2), cellsegment(v, c3)
-# 	# equidistant from s, (i1,j1), (i2,j2)
-# 	s == i1 && return equidistant_pxs(v, i1, j1, i2, j2, 1)
-# 	s == j1 && return equidistant_pxs(v, j1, i1, i2, j2, 1)
-# 	s == i2 && return equidistant_pxs(v, i2, j2, i1, j1, -1)
-# 	s == j2 && return equidistant_pxs(v, j2, i2, i1, j1, -1)
-# 	return equidistant_pss(point(v, s), point(v,i1), point(v,j1),
-# 		point(v, i2), point(v, j2))
-# end#»»
-# function equidistant_pxs(v::AbstractVoronoi, i1, j1, i2, j2, ε)#««
-# 	i1 ∈ (i2,j2) && return point(v, i1)
-# 	return equidistant_pxs(point(v,i1), point(v,j1), point(v,i2), point(v,j2), ε)
-# end#»»
 function separator(v::AbstractVoronoi, c1, c2)#««
-# 	println("  computing separator(v, $c1, $c2)")
+	println("  computing separator(v, $c1, $c2)")
 	if issegment(v, c1)
 		i1, j1 = cellsegment(v, c1)
 		a1, b1 = point(v, i1), point(v, j1)
 		if issegment(v, c2)
-			return Separator(line(v, c1), line(v, c2))
-		elseif (c2 == i1 || c2 == j1) # degenerate parabola (exact)
-			return degenerate_separator(line(v, c1), point(v, c2))
+			println("  separator(v, $(segment(v,c1)), $(segment(v,c2)))")
+			return Separator(segment(v, c1), segment(v, c2))
+# 		elseif (c2 == i1 || c2 == j1) # degenerate parabola (exact)
+# 			return degenerate_separator(line(v, c1), point(v, c2))
 		else # generic parabola separator
-			return Separator(line(v, c1), point(v,c2))
+			return Separator(segment(v, c1), point(v,c2))
 		end
 	elseif issegment(v, c2)
 		i2, j2 = cellsegment(v, c2)
-		if c1 == i2 || c1 == j2
-			return reverse(degenerate_separator(line(v, c2), point(v, c1)))
-		else # generic parabola
-			return Separator(point(v, c1), line(v, c2))
-		end
+# 		if c1 == i2 || c1 == j2
+# 			return reverse(degenerate_separator(line(v, c2), point(v, c1)))
+# 		else # generic parabola
+			return Separator(point(v, c1), segment(v, c2))
+# 		end
 	else # point-point separator
 		return Separator(point(v, c1), point(v, c2))
 	end
@@ -2604,6 +2595,14 @@ using StaticArrays
 # # println(V.point(v,V.Cell(3)))
 # # println(V.point(v,V.Cell(4)))
 # # println(V.point(v,V.Cell(5)))
+
+# HERE:
+s1a = (SA[-5,0.],SA[-2,0.])
+s1b = (SA[-2,0.],SA[2,0.])
+s1c = (SA[2,0.],SA[5,0.])
+s2a = (SA[-3,-6.],SA[-1,-2.])
+s2b = (SA[-1,-2.],SA[1,2.])
+s2c = (SA[1,2.],SA[3,6.])
 
 v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 #
