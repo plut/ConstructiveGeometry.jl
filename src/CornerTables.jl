@@ -408,6 +408,7 @@ function Base.show(io::IO, M::MIME"text/plain",
 		c1 = tail(t, e)
 		c1 ≠ c && println(io, "  \e[31;7m tail($e) = $c1, should be $c\e[m")
 	end
+	flush(io)
 end
 #»»1
 export AbstractTriangulation, CornerTable, Edge, Cell, Node, int

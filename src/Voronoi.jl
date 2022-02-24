@@ -8,7 +8,11 @@
 # FIXME:
 #
 # TODO:
-# - Voronoi building: use a heap of best edges to flip
+# - remove Line:
+#   - tripoint(SSP)
+#   - tripoint(SSS)
+# - use separator orientation to determine edge capture (remove `capture`)
+#
 """    Voronoi
 
 Computation of Voronoi diagrams for planar polygons and polygonal paths,
@@ -59,14 +63,13 @@ const DEFAULT_ATOL=1e-1
 @inline distance²(a,b) = norm²(a-b)
 @inline quarterturn(v) = SA[-v[2], v[1]]
 
-# @inline linethrough(a,b) =
-# 	SA[a[2]-b[2], b[1]-a[1], det2(a,b)]
+const Segment{T} = NTuple{2,<:AbstractVector{T}}
 
 function lineinter(a,b,c,d)
-	t = det2(a-c, c-d)
 	D = det2(a-b, c-d)
+	t = det2(a-c, c-d)
 	z = a+(t/D)*(b-a)
-	return a+(t/D)*(b-a)
+	return z
 end
 function linedistance²(a,b,c)
 	# distance of c from segment (a,b)
@@ -345,288 +348,6 @@ end
 # 	return SA[2*(a[1]-b[1]), 2*(a[2]-b[2]), norm²(b)-norm²(a)]
 # end
 # 
-# Computation of point/oriented line tripoints««2
-# Slight extension of `Base.sign`:
-@inline Base.sign(T::Type{<:Integer}, x) =
-	iszero(x) ? zero(T) : (x > 0) ? one(T) : -one(T)
-
-@inline _BAD_TRIPOINT(x) = (oftype(x, NaN), Int8(2), Int8(2), Int8(2))
-const Segment{T} = NTuple{2,<:AbstractVector{T}}
-"""    tripoint(a,b,c)
-
-This computes the tripoint (equidistant point) of a triple of cells,
-each of which is either a point or an (oriented) line.
-The cells are cyclically ordered:
-tripoint(a,b,c) == tripoint(b,c,a) ≠ tripoint(c,b,a).
-The data is returned as `(radius, branch1, branch2, branch3)`.
-If no such tripoint exists, `nan, 2,2,2` is returned.
-
-The branch positions are returned as `Int8`, encoded as:
-branch1 = +1 iff the tripoint lies on branch seeing a1 on its **left**
-and a2 on its **right**, i.e. a1↑a2
-(the arrow marks the direction of increasing r on this branch).
-Likewise, branch2 is +1 for a2↑a3, and branch3 is +1 for a3↑a1.
-
-For example, the center of an equilateral triangle has branches +1,+1,+1.
-"""
-function tripoint(a::AbstractVector, b::AbstractVector, c::AbstractVector)#««
-	ab, bc, ca = b-a, c-b, a-c
-	det2(ca, ab) > 0 || return _BAD_TRIPOINT(ab[1])
-	r = √(norm²(ab)*norm²(ca)*norm²(bc))/(2*abs(det2(ab,ca)))
-	return r, -sign(Int8, bc ⋅ ca), -sign(Int8, ca ⋅ ab), -sign(Int8, ab ⋅ bc)
-end#»»
-function tripoint((p1,q1)::Segment, p2::AbstractVector, p3::AbstractVector)#««
-# WLOG assume L1 has equation (y=0), P2=(0,a) and P3=(d,b).
-# * If b < 0 then S12 and S23 do not intersect.
-# * If b = 0 then S13 is a half-line XXX.
-# * If b = a then the three separators meet at a single point,
-# which is either H if d<0 or H' if d>0.
-# * If b > 0, b≠a then the three separators meet in two points.
-# H is the left-most point iff b > a; the right-most point iff a < 1.
-#
-#	H=(x,y) satisfies (b-a)x²+2adx+b+a(ab-b²-d²) = 0 and y=(x²+a²)/(2a).
-# Let Δ=ab(d²+(b-a)²); then x=(ad+√Δ)/(a-b) whenever b≠1.
-# (When b=1 and a<0, x=a/2; when b=1 and a>0, H does not exist).
-#
-# summary:
-# branches are ++- for (b>1) and (a>-√(b-1))
-#              -++ for (b>1) and (a>√(b(1-b)))
-#              +-+ for (a<0) and (b< a^2/4)
-#              +++ otherwise
-	u1, u2, u3 = q1-p1, p2-p1, p3-p1
-	x1, x2, y2, x3, y3 = norm²(u1), u1⋅u2, det2(u1,u2), u1⋅u3, det2(u1,u3)
-	dx = x3-x2
-	f = √(x1) # scale factor
-	println(f, (x1, (x2, y2), (x3, y3)))
-	if iszero(y2)#««
-		iszero(y3) && return _BAD_TRIPOINT(x1)
-		if iszero(x2) # p2 is start of segment 1
-			# possible positions for p3; only the two lower ones make (123) tripoints:
-			#  X╱│\ X  /
-			#  ╱ │ `--'
-			#   2┝━━━━1━━
-			#  ╲ │ ,--.
-			#  3↘↓↙  3 \
-			#    ↓
-			y3 > 0 && return _BAD_TRIPOINT(x1)
-			s = sign(Int8, x3)
-			println("XX here")
-			return (x3^2+y3^2)/(-2*f*y3), Int8(1), -s, s
-		elseif x2 == x1
-			# possible positions for p3: only the top ones are (123) tripoints
-			#        ↑ 
-			#  \ 3  ↗↑↖ 3
-			#   `--' │ ╲
-			# ━━━1━━━┥2
-			#   ,--. │ ╱
-			#  /  X \│╱ X
-			y3 < 0 && return _BAD_TRIPOINT(x1)
-			s = sign(Int8, x3-x1)
-			return ((x3-x1)^2+y3^2)/(2*f*y3), Int8(1), s, -s
-		else
-			error("point 2 is in the interior of segment")
-		end
-	end#»»
-	if iszero(y3)#««
-		if iszero(x3) # p3 is start of segment 1
-			y2 < 0 && return _BAD_TRIPOINT(x1)
-			s = sign(Int8, x2)
-			return (x2^2+y2^2)/(2*f*y2), s, -s, Int8(1)
-		elseif x3 == x1
-			y2 > 0 && return _BAD_TRIPOINT(x1)
-			s = sign(Int8, x2-x1)
-			return ((x2-x1)^2+y2^2)/(-2*f*y2), -s, s, Int8(1)
-		else
-			error("point 3 is in the interior of segment")
-		end
-	end#»»
-	# both points lie outside the segment; ensure they are on the same side,
-	# and identify this side as the positive one:
-	(y2 < 0) && ((y2,y3,dx) = (-y2,-y3,-dx))
-	(y3 < 0) && return _BAD_TRIPOINT(x1)
-	r = (y3 == y2) ?
-		(4*y2^2+dx^2)/(8*f*y2) : # this limit formula is only valid when dx≤0
-	let t = dx^2+(y2-y3)^2
-		(2*dx*√(y2*y3*t) + (y2+y3)*t)/(2*f*(y2-y3)^2)
-	end
-	if dx ≥ 0
-		(y3 == y2) && return _BAD_TRIPOINT(x1)
-		return r, sign(Int8, y3-y2), Int8(1), sign(Int8, y2-y3)
-	end
-	
-	s0 = y3^2+dx^2-y2*y3
-	s1 = 4*y2*y3 - dx^2
-	s2 = y2^2+dx^2-y2*y3
-	return r, sign(Int8, s0), sign(Int8, s1), sign(Int8, s2)
-end#»»
-function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
-	# This does *not* depend on the orientation of both lines, so we may
-	# orient both of them so that p2 is on the + side of both lines.
-	# (this adds π to the angle of both lines if one is reversed).
-	# Let a=l0.p2, b=l1.p2; both are ≥ 0. Let θ=(l0,l1) ∈ [0,π[ and t=tan(θ/2).
-	# We pick an origin at the intersection of both lines,
-	# so that l0 has equation (y=0) and l1 has (y=x tanθ).
-	# The coordinates of p2 are then (x2,y2) such that
-	# y2 = a, -sinθ x2 + cosθ y2 = b
-	# or p2=(x2,y2) = ((b-a)/(2t) - (a+b)t/2, b). ✓
-	# The (inner) bisector between l0 and l1 has angle (θ+π)/2; the point
-	# at distance r>0 is (-t r, r).
-	# The parabola between l0 and p2 has equation
-	# 2*y2*y = (x-x2)²+y2². ✓
-	# Both bisectors intersect at r such that 2*y2*r = (-t r-x2)²+y2², or
-	# -t^2 r² + 2(t x2-y2) r -(x2²+y2²) = 0
-	# With c=cos(θ):
-	# ((1-c)r)^2 - 2(a+b) ((1-c)r) + (a^2+b^2-2abc) = 0
-	# Δ' = 2ab(c+1)
-	# (1-c) r = (a+b) ± √Δ'
-	#
-	# If ab > 0 then we take the smallest root (-√Δ') and branches +++.
-	# If ab < 0 then we take +√Δ' and branches -++.
-	#
-	# Numeric example:
-	# (-10,5) is equidistant from L0(y=0), L1(4x+3y=0) and P2(-13,9)
-	# e^{iθ} = (-3+4i)/5; (a,b) = (9,5), c=-3/5, t=2
-	# (-5,5) has a=1, b=5, (1+t^2)a == b, 
-	a, b = evaluate(l0, p2), evaluate(l1, p2)
-	c = l0 ⋅ l1
-	s = sign(Int8, det2(l0, l1))
-	iszero(a) && return (abs(b)/(1-c), -sign(Int8,b), -s, Int8(1))
-	iszero(b) && return (abs(a)/(1-c), s*sign(Int8,a), Int8(1), -s)
-	(a < 0) && ((a, b, s) = (-a, -b, -s))
-	# the point must lie on the same side of both lines...
-	(b < 0) && return _BAD_TRIPOINT(a)
-	(b < 0) && ((b, c, s) = (-b, -c, -s))
-	D = 2*a*b*(1+c)
-	r = (a+b - s*√(D))/(1-c)
-	f = (1+c)/2 # == 1/(1+t^2)
-	return r, Int8(1),
-		(s > 0) ? sign(Int8, a-f*b) : Int8(-1),
-		(s > 0) ? sign(Int8, b-f*a) : Int8(1)
-end#»»
-function tripoint((p1,q1)::Segment, (p2,q2)::Segment, p3::AbstractVector,
-	sep = Separator((p2,q2), (p1,q1)))#««
-	println(sep)
-	println(Separator((p2,q2), (p1,q1)))
-	@assert sep == Separator((p2,q2), (p1,q1))
-	p1q1, p2q2 = q1-p1, q2-p2
-	d = det2(p1q1, p2q2)
-	if iszero(d)
-		error("parallel tripoint: not implemented")
-	end
-	(d < 0) && ((p2,q2,p2q2,d) = (q2,p2,-p2q2,-d))
-	u1, u2 = p1q1/√(norm²(p1q1)), p2q2/√(norm²(p2q2))
-	a, b, c = det2(u1, p3-p1), det2(u2, p3-p2), u1⋅u2
-
-	error("not implemented")
-end#»»
-function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
-	# This does *not* depend on the orientation of both lines, so we may
-	# orient both of them so that p2 is on the + side of both lines.
-	# (this adds π to the angle of both lines if one is reversed).
-	# Let a=l0.p2, b=l1.p2; both are ≥ 0. Let θ=(l0,l1) ∈ [0,π[ and t=tan(θ/2).
-	# We pick an origin at the intersection of both lines,
-	# so that l0 has equation (y=0) and l1 has (y=x tanθ).
-	# The coordinates of p2 are then (x2,y2) such that
-	# y2 = a, -sinθ x2 + cosθ y2 = b
-	# or p2=(x2,y2) = ((b-a)/(2t) - (a+b)t/2, b). ✓
-	# The (inner) bisector between l0 and l1 has angle (θ+π)/2; the point
-	# at distance r>0 is (-t r, r).
-	# The parabola between l0 and p2 has equation
-	# 2*y2*y = (x-x2)²+y2². ✓
-	# Both bisectors intersect at r such that 2*y2*r = (-t r-x2)²+y2², or
-	# -t^2 r² + 2(t x2-y2) r -(x2²+y2²) = 0
-	# With c=cos(θ):
-	# ((1-c)r)^2 - 2(a+b) ((1-c)r) + (a^2+b^2-2abc) = 0
-	# Δ' = 2ab(c+1)
-	# (1-c) r = (a+b) ± √Δ'
-	#
-	# If ab > 0 then we take the smallest root (-√Δ') and branches +++.
-	# If ab < 0 then we take +√Δ' and branches -++.
-	#
-	# Numeric example:
-	# (-10,5) is equidistant from L0(y=0), L1(4x+3y=0) and P2(-13,9)
-	# e^{iθ} = (-3+4i)/5; (a,b) = (9,5), c=-3/5, t=2
-	# (-5,5) has a=1, b=5, (1+t^2)a == b, 
-	a, b = evaluate(l0, p2), evaluate(l1, p2)
-	c = l0 ⋅ l1
-	s = sign(Int8, det2(l0, l1))
-	iszero(a) && return (abs(b)/(1-c), -sign(Int8,b), -s, Int8(1))
-	iszero(b) && return (abs(a)/(1-c), s*sign(Int8,a), Int8(1), -s)
-	(a < 0) && ((a, b, s) = (-a, -b, -s))
-	# the point must lie on the same side of both lines...
-	(b < 0) && return _BAD_TRIPOINT(a)
-	(b < 0) && ((b, c, s) = (-b, -c, -s))
-	D = 2*a*b*(1+c)
-	r = (a+b - s*√(D))/(1-c)
-	f = (1+c)/2 # == 1/(1+t^2)
-	return r, Int8(1),
-		(s > 0) ? sign(Int8, a-f*b) : Int8(-1),
-		(s > 0) ? sign(Int8, b-f*a) : Int8(1)
-end#»»
-function tripoint_seg((p1, q1)::Segment, (p2,q2)::Segment, k::Int8)
-	# returns either the tripoint of (p1,q1), (p2,q2), p1  (k=1)
-	# or (p2,q2), (p1,q1), p1 (k=-1).
-	println("\e[32mtripoint_seg(($p1,$q1), ($p2,$q2), $k)\e[m")
-	u1, u2 = unit(q1-p1), unit(q2-p2)
-	d = det2(u1, u2)
-	println((u1,u2,d))
-	if iszero(d)
-		error("tripoint for parallel segments: not implemented")
-	end
-	(d < 0) && ((u2, d) = (-u2, -d))
-	println("u1, u2, d = ", (u1, u2, d))
-	b, c = det2(u2, p1-p2), u1⋅u2
-	println("\e[31;1m sign(b, k)=$(sign(Int8,b)) $(sign(Int8,k))\e[m")
-	println("b, c = ", (b,c))
-	r, b1, b2, b3 = abs(b)/(1-k*sign(b)*c),
-	# (b,k) = (++): +-+
-	# (b,k) = (+-): ++-
-	# (b,k) = (-+): -++
-	# (b,k) = (--): -++
-		Int8(-1)^(b < 0), Int8(-1)^(b > 0 && k > 0), Int8(-1)^(b > 0 && k < 0)
-	x1, x2, x3 = k > 0 ? ((p1,q1), (p2,q2), p1) : ((p2,q2), (p1,q1), p1)
-	println("\e[1m r = $r; \e[m\e[34;1;7m", (b1,b2,b3), "\e[m")
-	println("cells are: ", (x1,x2,x3))
-	s1, s2, s3 = Separator(x2,x1), Separator(x3,x2), Separator(x1,x3)
-	println(s1, b1, "\e[33m", evaluate(s1,b1,r), "\e[m")
-	println(s2, b2, "\e[33m", evaluate(s2,b2,r), "\e[m")
-	println("separator $x1/$x3 is ", s3, b3, "\e[33m", evaluate(s3,b3,r), "\e[m")
-	evaluate(s1,b1,r) ≈ evaluate(s2,b2,r) ≈ evaluate(s3,b3,r) &&
-		println("\e[32;7;1m  the three points match!\e[m")
-	return r, b1, b2, b3
-end
-function tripoint(l1::Line, l2::Line, l3::Line)#««
-	# let lᵢ: aᵢ x + bᵢ y + cᵢ = 0
-	# also define cᵢⱼ = aᵢ aⱼ + bᵢ bⱼ, sᵢⱼ = aᵢ bⱼ - bᵢ aⱼ
-	# coordinate change: [u v]=[b1 -a1;a1 b1][x y]+[0 c1], then
-	# [x y]=[b1 a1;-a1 b1][u v-c1] and the equation of l2 is now
-	# a2*(b1 u+a1 (v-c1)) + b2*(-a1 u+b1 (v-c1)) + c2 = 0
-	# (a2 b1 - a1 b2) u + (a1 a2 + b1 b2) (v-c1) + c2 = 0
-	# -s12 u + c12 (v-c1) + c2 = 0
-	# This has v=0 for u12= (c2-c12*c1)/s12.
-	# Likewise, one finds u13 = (c3-c13*c1)/s13 = (-c3+c13*c1)/s31
-	# and u12-u13 = (-(c12 s31 + s12 c31) c1 +s31c2 + s12 c3)/(s12 s31)
-	#  = (s31 c2 + s12 c3 + s23 c1)/(s12 s13).
-	#
-	# Law of sines: d1/s23 = (∑ c1 s23)/(s12 s13 s23) = 2R
-	# so the numerator is 2R*product of all sines
-	c1, c2, c3 = l1.offset, l2.offset, l3.offset
-# 	c12, c23, c31 = l1⋅l2, l2⋅l3, l3⋅l1
-	s12, s23, s31 = det2(l1,l2), det2(l2,l3), det2(l3,l1)
-# 	h1 = c1 + (s12*c3+s31*c2)/s23
-# 	h2 = c2 + (s23*c2+s12*c3)/s31
-# 	h3 = c3 + (s31*c1+s23*c1)/s12
-	q = (c1*s23 + c2*s31 + c3*s12) / (s12*s23*s31)
-	d1, d2, d3 = s23*q, s31*q, s12*q
-	r = √(abs((d2+d3-d1)*(d3+d1-d2)*(d1+d2-d3)/(d1+d2+d3)))/2
-# 	println("  triangle has sides $((d1,d2,d3))")
-	z1, z2, z3 = sign(Int8, d1), sign(Int8, d2), sign(Int8, d3)
-	z = sign(Int8, z1+z2+z3)
-# 	println("  triangle has altitudes $((h1,h2,h3))")
-	# if any altitude is zero, the three lines intersect in a single point:
-# 	any(iszero, (h1, h2, h3)) && return _BAD_TRIPOINT(l1.offset)
-	return r, z1*z, z2*z, z3*z
-end#»»
 # Approximation of parabolic arc««2
 H(x)=x*_₂F₁(1/4,1/2,3/2,-x^2)
 H′(x)=_₂F₁(1/4,1/2,3/2,-x^2)-1/6*x^2*_₂F₁(5/4,3/2,5/2,-x^2)
@@ -765,16 +486,20 @@ function Separator(a::AbstractVector, b::AbstractVector)# two points««
 	return Separator(c, u, zero(u), d/2)
 end#»»
 function Separator((p1,q1)::Segment, p2::AbstractVector; k=1)#««
-	println("\e[36m separator: ($p1, $q1), $p2, $k\e[m")
 	p1q1, p1p2 = q1-p1, p2-p1
 	x1, x2, y2 = norm²(p1q1), p1q1⋅p1p2, det2(p1q1, p1p2)
 	f = √(x1) # scale factor
-	println((f, (x1, (x2,y2))))
 	v = quarterturn(p1q1)
-	if iszero(y2) # point is on the segment
-		x2 ≤ 0 && return Separator((p1+p2)/2, k/f*v, zero(p1q1), -x2/(2*f))
-		x2 ≥ x1 && return Separator((q1+p2)/2, -k/f*v, zero(p1q1), (x2-x1)/(2*f))
-		error("point is in the interior of the segment")
+	if iszero(y2) # point is on the line supporting the segment
+		# By convention, the separator in this case passes through p2.
+		# In the only practical case (i.e. p2 is one of the segment ends),
+		# this gives the correct answer, and this is also the answer making
+		# tripoint computations consistant.
+		x2 ≤ 0  && return Separator(p2,  k/f*v, zero(p1q1), zero(f))
+		x2 ≥ x1 && return Separator(p2, -k/f*v, zero(p1q1), zero(f))
+# 		x2 ≤ 0 && return Separator((p1+p2)/2, k/f*v, zero(p1q1), -x2/(2*f))
+# 		x2 ≥ x1 && return Separator((q1+p2)/2, -k/f*v, zero(p1q1), (x2-x1)/(2*f))
+		error("cannot compute separator: point is in the interior of the segment")
 	end
 	rmin = y2/(2*f)
 	return Separator(p2 - y2/2*v/x1,
@@ -783,40 +508,49 @@ function Separator((p1,q1)::Segment, p2::AbstractVector; k=1)#««
 end
 @inline Separator(a::AbstractVector, b::Segment) = Separator(b, a; k=-1) #»»
 function Separator((p1,q1)::Segment, (p2,q2)::Segment)#««
-	@inline straight_bisector(c, u1, u2, d = det2(u1,u2)) =
-		# straight angle bisector between these two vectors
-		Separator(c, (√(norm²(u2))*u1+√(norm²(u1))*u2)/d, zero(u1),zero(u1[1]))
-	@inline angled_bisector(c, u, v) = begin
-		# + in the quadrant (u,v), - in the quadrant (-u, v)
-		u1, v1 = unit(u), unit(v); f = 1/abs(det2(u1, v1))
-		Separator(c, f*(u1+v1), f*(-u1+v1), zero(u[1]))
-	end
-	p1q1, p1p2, p1q2, p2q2 = q1-p1, p2-p1, q2-p1, q2-p2
+	p1q1, p2q2 = q1-p1, q2-p2
 	d = det2(p1q1, p2q2)
 	if iszero(d)
-		error("parallel segment/segment bisector: not implemented")
+		l = det2(p1q1, p2-p1)
+		(l < 0) && ((p1, q1, p1q1, l) = (q1, p1, -p1q1, -l))
+		u = unit(p1q1); l = det2(u, p2-p1)
+		return Separator((p1+p2)/2, u, SA[oftype(l, NaN), oftype(l, NaN)], l/2)
 	end
+# 	println("  input: u=$p1q1 v=$p2q2 d=$d")
 	# both segments are un-ordered, so we swap p2, q2 if needed:
-	d < 0 && ((p1p2, p1q2, p2q2, d) = (p1q2, p1p2, -p2q2, -d))
-	c = intersect(Line(p1,q1), Line(p2,q2))
+	d < 0 && ((p2q2, p2, q2, d) = (-p2q2, q2, p2, -d))
+	p1p2, p1q2 = p2-p1, q2-p1
+# 	println("p1p2, p1q2, p2q2, d = ", (p1p2,p1q2,p2q2,d))
+	c = lineinter(p1, q1, p2, q2)
+# 	c = intersect(Line(p1,q1), Line(p2,q2))
 	Dp2, Dq2, Dp1, Dq1 =
 		det2(p1q1, p1p2), det2(p1q1, p1q2), det2(p1p2, p2q2), det2(p2q2, q1-p2)
-# 	@assert Dq2 ≈ Dp2+d
-# 	@assert Dq1 ≈ Dp1-d
-# 	@assert Dp2 < Dq2
-# 	@assert Dp1 > Dq1
+# 	println("seg2 is ",
+# 		Dp2 ≥ 0 ? "left of" : Dq2 ≤ 0 ? "right of" : "across", " line1")
+# 	println("seg1 is ",
+# 		Dq1 ≥ 0 ? "left of" : Dp1 ≤ 0 ? "right of" : "across", " line2")
+	if Dp2 ≥ 0
+		if Dq1 ≥ 0
+			println("LL case: straight_bisector($p1q1, -$p2q2)")
+		end
+	end
+	@assert Dq2 ≈ Dp2+d
+	@assert Dq1 ≈ Dp1-d
+	@assert Dp2 < Dq2
+	@assert Dp1 > Dq1
+	u1, u2, z = √(norm²(p2q2))*p1q1/d, √(norm²(p1q1))*p2q2/d, zero(d)
 
 	if Dp2 ≥ 0 # seg2 is left of line1
-		Dp1 ≤ 0 && return straight_bisector(c, p1q1, p2q2)
-		Dq1 ≥ 0 && return straight_bisector(c, p1q1, -p2q2)
-		return angled_bisector(c, p1q1, p2q2)
+		Dq1 ≥ 0 && return Separator(c,  u1-u2, zero(u1), z)
+		Dp1 ≤ 0 && return Separator(c,  u1+u2, zero(u1), z)
+		return Separator(c, u1+u2, u1-u2, z)
 	elseif Dq2 ≤ 0 # seg2 is right of line1
-		Dp1 ≤ 0 && return straight_bisector(c, p2q2, -p1q1)
-		Dq1 ≥ 0 && return straight_bisector(c, p2q2, p1q1)
-		return angled_bisector(c, -p1q1, -p2q2)
+		Dq1 ≥ 0 && return Separator(c, -u1-u2, zero(u1), z)
+		Dp1 ≤ 0 && return Separator(c, -u1+u2, zero(u1), z)
+		return Separator(c, -u1+u2, -u1-u2, z)
 	else # seg2 is across line1
-		Dp1 ≤ 0 && return angled_bisector(c, p2q2, p1q1)
-		Dq1 ≥ 0 && return angled_bisector(c, -p2q2, -p1q1)
+		Dq1 ≥ 0 && return Separator(c, -u1-u2, -u1+u2, z)
+		Dp1 ≤ 0 && return Separator(c,  u1+u2,  u1-u2, z)
 		error("cannot compute separator of crossing segments")
 	end
 end#»»
@@ -902,6 +636,331 @@ function capture(sep::Separator, b1, r1, b2, r2, l::Line)
 	a0 = r0 - Noa^2
 	return min_quartic((a0,a1,a2,a3,a4), (b1*sqrt(r1-r0), b2*sqrt(r2-r0)))
 end
+# Tripoints ««1
+# Slight extension of `Base.sign`:
+@inline Base.sign(T::Type{<:Integer}, x) =
+	iszero(x) ? zero(T) : (x > 0) ? one(T) : -one(T)
+
+@inline _BAD_TRIPOINT(x) = (oftype(x, NaN), Int8(2), Int8(2), Int8(2))
+# docstring ««
+"""    tripoint(a,b,c)
+
+This computes the tripoint (equidistant point) of a triple of cells,
+each of which is either a point or an (oriented) line.
+The cells are cyclically ordered:
+tripoint(a,b,c) == tripoint(b,c,a) ≠ tripoint(c,b,a).
+The data is returned as `(radius, branch1, branch2, branch3)`.
+If no such tripoint exists, `nan, 2,2,2` is returned.
+
+The branch positions are returned as `Int8`, encoded as:
+branch1 = +1 iff the tripoint lies on branch seeing a1 on its **left**
+and a2 on its **right**, i.e. a1↑a2
+(the arrow marks the direction of increasing r on this branch).
+Likewise, branch2 is +1 for a2↑a3, and branch3 is +1 for a3↑a1.
+
+For example, the center of an equilateral triangle has branches +1,+1,+1.
+"""
+function tripoint end #»»
+function tripoint(a::AbstractVector, b::AbstractVector, c::AbstractVector)#««
+	ab, bc, ca = b-a, c-b, a-c
+	det2(ca, ab) > 0 || return _BAD_TRIPOINT(ab[1])
+	r = √(norm²(ab)*norm²(ca)*norm²(bc))/(2*abs(det2(ab,ca)))
+	return r, -sign(Int8, bc ⋅ ca), -sign(Int8, ca ⋅ ab), -sign(Int8, ab ⋅ bc)
+end#»»
+function tripoint((p1,q1)::Segment, p2::AbstractVector, p3::AbstractVector)#««
+# WLOG assume L1 has equation (y=0), P2=(0,a) and P3=(d,b).
+# * If b < 0 then S12 and S23 do not intersect.
+# * If b = 0 then S13 is a half-line XXX.
+# * If b = a then the three separators meet at a single point,
+# which is either H if d<0 or H' if d>0.
+# * If b > 0, b≠a then the three separators meet in two points.
+# H is the left-most point iff b > a; the right-most point iff a < 1.
+#
+#	H=(x,y) satisfies (b-a)x²+2adx+b+a(ab-b²-d²) = 0 and y=(x²+a²)/(2a).
+# Let Δ=ab(d²+(b-a)²); then x=(ad+√Δ)/(a-b) whenever b≠1.
+# (When b=1 and a<0, x=a/2; when b=1 and a>0, H does not exist).
+#
+# summary:
+# branches are ++- for (b>1) and (a>-√(b-1))
+#              -++ for (b>1) and (a>√(b(1-b)))
+#              +-+ for (a<0) and (b< a^2/4)
+#              +++ otherwise
+	u1, u2, u3 = q1-p1, p2-p1, p3-p1
+	x1, x2, y2, x3, y3 = norm²(u1), u1⋅u2, det2(u1,u2), u1⋅u3, det2(u1,u3)
+	dx = x3-x2
+	f = √(x1) # scale factor
+	if iszero(y2)#««
+		iszero(y3) && return _BAD_TRIPOINT(x1)
+		if iszero(x2) # p2 is start of segment 1
+			# possible positions for p3; only the lower ones make (123) tripoints:
+			#  X╱│\ X  /
+			#  ╱ │ `--'
+			#   2┝━━━━1━━
+			#  ╲ │ ,--.
+			#  3↘↓↙  3 \
+			#    ↓
+			y3 > 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x3)
+			return (x3^2+y3^2)/(-2*f*y3), Int8(1), -s, s
+		elseif x2 == x1
+			# possible positions for p3: only the top ones are (123) tripoints
+			#        ↑ 
+			#  \ 3  ↗↑↖ 3
+			#   `--' │ ╲
+			# ━━━1━━━┥2
+			#   ,--. │ ╱
+			#  /  X \│╱ X
+			y3 < 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x3-x1)
+			return ((x3-x1)^2+y3^2)/(2*f*y3), Int8(1), s, -s
+		else
+			error("point 2 is in the interior of segment")
+		end
+	end#»»
+	if iszero(y3)#««
+		if iszero(x3) # p3 is start of segment 1
+			y2 < 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x2)
+			return (x2^2+y2^2)/(2*f*y2), s, -s, Int8(1)
+		elseif x3 == x1
+			y2 > 0 && return _BAD_TRIPOINT(x1)
+			s = sign(Int8, x2-x1)
+			return ((x2-x1)^2+y2^2)/(-2*f*y2), -s, s, Int8(1)
+		else
+			error("point 3 is in the interior of segment")
+		end
+	end#»»
+	# both points lie outside the segment; ensure they are on the same side,
+	# and identify this side as the positive one:
+	(y2 < 0) && ((y2,y3,dx) = (-y2,-y3,-dx))
+	(y3 < 0) && return _BAD_TRIPOINT(x1)
+	r = (y3 == y2) ?
+		(4*y2^2+dx^2)/(8*f*y2) : # this limit formula is only valid when dx≤0
+	let t = dx^2+(y2-y3)^2
+		(2*dx*√(y2*y3*t) + (y2+y3)*t)/(2*f*(y2-y3)^2)
+	end
+	if dx ≥ 0
+		(y3 == y2) && return _BAD_TRIPOINT(x1)
+		return r, sign(Int8, y3-y2), Int8(1), sign(Int8, y2-y3)
+	end
+	
+	s0 = y3^2+dx^2-y2*y3
+	s1 = 4*y2*y3 - dx^2
+	s2 = y2^2+dx^2-y2*y3
+	return r, sign(Int8, s0), sign(Int8, s1), sign(Int8, s2)
+end#»»
+function tripoint((p1,q1)::Segment, (p2,q2)::Segment, p3::AbstractVector)#««
+	println("\e[36;7mtripoint(($p1,$q1), ($p2,$q2), $p3)\e[m")
+	u, v = unit(q1-p1), unit(q2-p2)
+	a, b = det2(u, p3-p1), det2(v, p3-p2)
+	# Since this does not depend on the orientation of both lines,
+	# we reorient them so that p3 lies on the positive side of both lines:
+	(a < 0) && ((a, u, p1, q1) = (-a, -u, q1, p1))
+	(b < 0) && ((b, v, p2, q2) = (-b, -v, q2, p2))
+	c, s = u⋅v, det2(u, v)
+	println((p1,q1), (p2,q2))
+	if iszero(s) # parallel segments case
+		h = det2(u, p2-p1)
+		(h < 0) && ((h, a) = (-h, -a)) # swap p1, q1
+		(a < 0) || (a > h) && return _BAD_TRIPOINT(h)
+		if iszero(a) # p3 ∈ line1; must be left of segment1
+			x3 = (p3-p1)⋅u
+			x3 ≤ 0 && return  h/2, Int8(0), Int8(-1), Int8(1)
+			return _BAD_TRIPOINT(h)
+		elseif a == h # p3 ∈ line2; must be left of segment2
+			xp3, xq3 = (p3-p2)⋅u, (p3-q2)⋅u
+			(xp3 ≤ 0) && (xq3 ≤ 0) && return Int8(0), Int8(1), Int8(-1)
+			return _BAD_TRIPOINT(h)
+		end
+		return h/2, Int8(0), Int8(1), Int8(1)
+	end
+	# Taking coordinates: u=(1,0), v=(c,s), p3=((ac-b)/s, a);
+	# bisector B₁₂ is parametrized as r ↦ r*((c-1)/s,1).
+	# This is equidistant from L1 and P3 whenever
+	# (1-c)²r² - 2(a+b)(1-c)r + (a²+b²-2abc) = 0;
+	# Δ'=2ab(1+c) hence (1-c)r = a+b±√Δ'.
+	# Geometry gives the smaller root (-√Δ') when s>0, +√Δ' when s<0.
+	#
+	# Orientation of the branches: the tripoint is the apex of the parabola P₁₃
+	# iff (c-1)r/s == (ac-b)/s i.e. a(1+c) = 2b; apex of P₂₃ iff b(1+c)=2a.
+	# The branch on the line/line bisector depends on the relative position
+	# of both segments...
+	p1q1, p2q2, p1p2, p1q2 = q1-p1, q2-p2, p2-p1, q2-p1
+	Dp2, Dq2, Dp1, Dq1 =
+		det2(u, p1p2), det2(u, p1q2), det2(p1p2, v), det2(v, q1-p2)
+	println("\e[34;1m(Dp1,Dq1,Dp2,Dq2) = ", ((Dp1,Dq1,Dp2,Dq2)), "\e[m")
+# 	println("Dp1, Dq1 = ", (Dp1, Dq1))
+# 	println("Dp2, Dq2 = ", (Dp2, Dq2))
+# 	@assert Dq2 ≈ Dp2+det2(p1q1, p2q2)
+# 	@assert Dq1 ≈ Dp1-det2(p1q1, p2q2)
+# 	@assert Dp2 < Dq2
+# 	@assert Dp1 > Dq1
+	D = 2*a*b*(1+c); f=(1+c)/2
+	tr, tb1, tb2, tb3 = tripoint(Line(p1, q1), Line(p2, q2), p3)
+	println(((a+b-√D)/(1-c), (a+b+√D)/(1-c)))
+	println("(a,b,c,s)", (a,b,c,s))
+	if iszero(a)
+		iszero(b) && return a, Int8(1), Int8(1), Int8(1)
+		# exchange p1↔q1 (a ← -a is a no-op)
+		(s < 0) && ((s, c, Dp1, Dq1, Dp2, Dq2) = (-s, -c, Dq1, Dp1, -Dp1, -Dq2))
+		println("  special case: point is on line 2; (Dp1,Dq1,a) = ", (Dp1,Dq1,b))
+		println("  both radii are: ", (b/(1+c), b/(1-c)))
+		if b ≥ Dp1
+			println("point is *left of* segment 1")
+			Dq2 ≤ 0 && return _BAD_TRIPOINT(c)
+			Dp1 ≤ 0 && return b/(1+c), Int8(-1), Int8(1), Int8(1)
+			return b/(1-c), Int8(+1), Int8(-1), Int8(1)
+		elseif b ≤ Dq1
+			println("point is *right of* segment 1")
+			Dp2 ≥ 0 && return _BAD_TRIPOINT(c)
+			Dq1 ≥ 0 && return b/(1-c), Int8(-1), Int8(1), Int8(1)
+			return b/(1+c), Int8(1), Int8(-1), Int8(1)
+		else
+			error("point is in interior of segment1")
+		end
+		error("not implemented")
+	elseif iszero(b)
+		# exchange p2, q2 (b ← -b is a no-op)
+		(s < 0) && ((s, c, Dp1, Dq1, Dp2, Dq2) = (-s, -c, -Dp1, -Dq1, Dq2, Dp2))
+		# FIXME: block some cases where the (12) branch is invalid
+		println("  special case: point is on line 2; (Dp2,Dq2,a) = ", (Dp2,Dq2,a))
+		println("two radii: ", (a/(1+c), a/(1-c)))
+		if a ≥ Dq2
+			println("point is *after* segment 2; returning ", (a/(1-c), 1,1,-1))
+			Dp1 < 0 && return _BAD_TRIPOINT(c)
+			Dq2 ≤ 0 && return a/(1+c), Int8(-1), Int8(1), Int8(1)
+			return a/(1-c), Int8(1), Int8(1), Int8(-1)
+		elseif a ≤ Dp2
+			println("point is *before* segment 2")
+			Dq1 > 0 && return _BAD_TRIPOINT(c)
+			Dp2 ≥ 0 && return a/(1+c), Int8(-1), Int8(1), Int8(1)
+			return a/(1-c), Int8(1), Int8(1), Int8(-1)
+# 			return a/(1+c), Int8(-1), Int8(1), Int8(1)
+		else
+			error("point is in interior of segment 2")
+		end
+	end
+	if s > 0
+		b1 = (Dp2 ≥ 0) ? (Dp1 < 0 ? Int8(2) : Int8(1)) : # seg2 left of line1
+		     (Dq2 ≤ 0) ? (Dp1 ≤ 0 ? Int8(-1) : Int8(2)) :
+				 Dq1 ≥ 0 ? Int8(1) : Dp1 ≤ 0 ? Int8(2) : error("intersecting segments")
+		b1 == Int8(2) && return _BAD_TRIPOINT(c)
+		b2, b3 = sign(Int8, 2*a-(1+c)*b), sign(Int8, 2*b-(1+c)*a)
+		r = (a+b-√D)/(1-c)
+		return r, b1, b2, b3
+	else
+		b1 = (Dq2 ≥ 0) ? (Dq1 < 0 ? Int8(2) : Int8(-1)) :
+		     (Dp2 ≤ 0) ? (Dq1 ≤ 0 ? Int8(1) : Int8(2)) :
+				 Dp1 ≥ 0 ? Int8(-1) : Dq1≤0 ? Int8(2) : error("intersecting segments")
+		b1 == Int8(2) && return _BAD_TRIPOINT(c)
+		b2, b3 = Int8(1), Int8(1)
+		r = (a+b+√D)/(1-c)
+		return r, b1, b2, b3
+	end
+end#»»
+function tripoint(l0::Line, l1::Line, p2::AbstractVector)#««
+	# This does *not* depend on the orientation of both lines, so we may
+	# orient both of them so that p2 is on the + side of both lines.
+	# (this adds π to the angle of both lines if one is reversed).
+	# Let a=l0.p2, b=l1.p2; both are ≥ 0. Let θ=(l0,l1) ∈ [0,π[ and t=tan(θ/2).
+	# We pick an origin at the intersection of both lines,
+	# so that l0 has equation (y=0) and l1 has (y=x tanθ).
+	# The coordinates of p2 are then (x2,y2) such that
+	# y2 = a, -sinθ x2 + cosθ y2 = b
+	# or p2=(x2,y2) = ((b-a)/(2t) - (a+b)t/2, b). ✓
+	# The (inner) bisector between l0 and l1 has angle (θ+π)/2; the point
+	# at distance r>0 is (-t r, r).
+	# The parabola between l0 and p2 has equation
+	# 2*y2*y = (x-x2)²+y2². ✓
+	# Both bisectors intersect at r such that 2*y2*r = (-t r-x2)²+y2², or
+	# -t^2 r² + 2(t x2-y2) r -(x2²+y2²) = 0
+	# With c=cos(θ):
+	# ((1-c)r)^2 - 2(a+b) ((1-c)r) + (a^2+b^2-2abc) = 0
+	# Δ' = 2ab(c+1)
+	# (1-c) r = (a+b) ± √Δ'
+	#
+	# If ab > 0 then we take the smallest root (-√Δ') and branches +++.
+	# If ab < 0 then we take +√Δ' and branches -++.
+	#
+	# Numeric example:
+	# (-10,5) is equidistant from L0(y=0), L1(4x+3y=0) and P2(-13,9)
+	# e^{iθ} = (-3+4i)/5; (a,b) = (9,5), c=-3/5, t=2
+	# (-5,5) has a=1, b=5, (1+t^2)a == b, 
+	a, b = evaluate(l0, p2), evaluate(l1, p2)
+	c = l0 ⋅ l1
+	s = sign(Int8, det2(l0, l1))
+	iszero(a) && return (abs(b)/(1-c), -sign(Int8,b), -s, Int8(1))
+	iszero(b) && return (abs(a)/(1-c), s*sign(Int8,a), Int8(1), -s)
+	(a < 0) && ((a, b, s) = (-a, -b, -s))
+	# the point must lie on the same side of both lines...
+	(b < 0) && return _BAD_TRIPOINT(a)
+	(b < 0) && ((b, c, s) = (-b, -c, -s))
+	D = 2*a*b*(1+c)
+	r = (a+b - s*√(D))/(1-c)
+	f = (1+c)/2 # == 1/(1+t^2)
+	return r, Int8(1),
+		(s > 0) ? sign(Int8, a-f*b) : Int8(-1),
+		(s > 0) ? sign(Int8, b-f*a) : Int8(1)
+end#»»
+function tripoint_seg((p1, q1)::Segment, (p2,q2)::Segment, k::Int8)#««
+	# returns either the tripoint of (p1,q1), (p2,q2), p1  (k=1)
+	# or (p2,q2), (p1,q1), p1 (k=-1).
+# 	println("\e[32mtripoint_seg(($p1,$q1), ($p2,$q2), $k)\e[m")
+	u1, u2 = unit(q1-p1), unit(q2-p2)
+	d = det2(u1, u2)
+	if iszero(d)
+		error("tripoint for parallel segments: not implemented")
+	end
+	(d < 0) && ((u2, d) = (-u2, -d))
+# 	println("u1, u2, d = ", (u1, u2, d))
+	b, c = det2(u2, p1-p2), u1⋅u2
+# 	println("\e[31;1m sign(b, k)=$(sign(Int8,b)) $(sign(Int8,k))\e[m")
+# 	println("b, c = ", (b,c))
+	r, b1, b2, b3 = abs(b)/(1-k*sign(b)*c),
+		Int8(-1)^(b < 0), Int8(-1)^(b > 0 && k > 0), Int8(-1)^(b > 0 && k < 0)
+	x1, x2, x3 = k > 0 ? ((p1,q1), (p2,q2), p1) : ((p2,q2), (p1,q1), p1)
+# 	println("\e[1m r = $r; \e[m\e[34;1;7m", (b1,b2,b3), "\e[m")
+# 	println("cells are: ", (x1,x2,x3))
+	s1, s2, s3 = Separator(x2,x1), Separator(x3,x2), Separator(x1,x3)
+# 	println(s1, b1, "\e[33m", evaluate(s1,b1,r), "\e[m")
+# 	println(s2, b2, "\e[33m", evaluate(s2,b2,r), "\e[m")
+# 	println("separator $x1/$x3 is ", s3, b3, "\e[33m", evaluate(s3,b3,r), "\e[m")
+	evaluate(s1,b1,r) ≈ evaluate(s2,b2,r) ≈ evaluate(s3,b3,r) &&
+# 		println("\e[32;7;1m  the three points match!\e[m")
+	return r, b1, b2, b3
+end#»»
+function tripoint(l1::Line, l2::Line, l3::Line)#««
+	# let lᵢ: aᵢ x + bᵢ y + cᵢ = 0
+	# also define cᵢⱼ = aᵢ aⱼ + bᵢ bⱼ, sᵢⱼ = aᵢ bⱼ - bᵢ aⱼ
+	# coordinate change: [u v]=[b1 -a1;a1 b1][x y]+[0 c1], then
+	# [x y]=[b1 a1;-a1 b1][u v-c1] and the equation of l2 is now
+	# a2*(b1 u+a1 (v-c1)) + b2*(-a1 u+b1 (v-c1)) + c2 = 0
+	# (a2 b1 - a1 b2) u + (a1 a2 + b1 b2) (v-c1) + c2 = 0
+	# -s12 u + c12 (v-c1) + c2 = 0
+	# This has v=0 for u12= (c2-c12*c1)/s12.
+	# Likewise, one finds u13 = (c3-c13*c1)/s13 = (-c3+c13*c1)/s31
+	# and u12-u13 = (-(c12 s31 + s12 c31) c1 +s31c2 + s12 c3)/(s12 s31)
+	#  = (s31 c2 + s12 c3 + s23 c1)/(s12 s13).
+	#
+	# Law of sines: d1/s23 = (∑ c1 s23)/(s12 s13 s23) = 2R
+	# so the numerator is 2R*product of all sines
+	c1, c2, c3 = l1.offset, l2.offset, l3.offset
+# 	c12, c23, c31 = l1⋅l2, l2⋅l3, l3⋅l1
+	s12, s23, s31 = det2(l1,l2), det2(l2,l3), det2(l3,l1)
+# 	h1 = c1 + (s12*c3+s31*c2)/s23
+# 	h2 = c2 + (s23*c2+s12*c3)/s31
+# 	h3 = c3 + (s31*c1+s23*c1)/s12
+	q = (c1*s23 + c2*s31 + c3*s12) / (s12*s23*s31)
+	d1, d2, d3 = s23*q, s31*q, s12*q
+	r = √(abs((d2+d3-d1)*(d3+d1-d2)*(d1+d2-d3)/(d1+d2+d3)))/2
+# 	println("  triangle has sides $((d1,d2,d3))")
+	z1, z2, z3 = sign(Int8, d1), sign(Int8, d2), sign(Int8, d3)
+	z = sign(Int8, z1+z2+z3)
+# 	println("  triangle has altitudes $((h1,h2,h3))")
+	# if any altitude is zero, the three lines intersect in a single point:
+# 	any(iszero, (h1, h2, h3)) && return _BAD_TRIPOINT(l1.offset)
+	return r, z1*z, z2*z, z3*z
+end#»»
 # Triangulation««1
 # Cell location««2
 @inline geometrictriangle(t::AbstractTriangulation, points, q::Node) =
@@ -996,7 +1055,7 @@ function CornerTable{J}(points; extra = 0) where{J}
 	anyedge!(v, Cell(np+3), Edge(J(6)))
 	m = maximum(abs(x) for p in points for x in p) + extra + 1
 	append!(points, [SA[0,-3m], SA[3m,2m], SA[-3m,2m]])
-	println(points)
+# 	println(points)
   #»»
 	# incrementally add all points ««
 	Random.seed!(0)
@@ -1146,14 +1205,14 @@ function findrootnode(v::AbstractVoronoi, a,b)
 	return node(emin)
 end
 
-function meetscircle(v::AbstractVoronoi, q::Node, i, j)
-	g, r = geometricnode(v, q), noderadius(v, q)
-	a, b = point(v, i), point(v, j)
-	ab2 = norm²(b-a)
-	d = dot(g-a,b-a)
-	println("   seg($i,$j)-node($q=$(triangle(v,q))) distance:\n   a=$a\n   b=$b\n   g=$g\n   $(segdistance²(a,b,g))<? r^2=$r^2")
-	return segdistance²(a, b, g) < r^2
-end
+# function meetscircle(v::AbstractVoronoi, q::Node, i, j)
+# 	g, r = geometricnode(v, q), noderadius(v, q)
+# 	a, b = point(v, i), point(v, j)
+# 	ab2 = norm²(b-a)
+# 	d = dot(g-a,b-a)
+# # 	println("   seg($i,$j)-node($q=$(triangle(v,q))) distance:\n   a=$a\n   b=$b\n   g=$g\n   $(segdistance²(a,b,g))<? r^2=$r^2")
+# 	return segdistance²(a, b, g) < r^2
+# end
 # Segment insertion ««2
 """    edgecapture(v,e)
 
@@ -1163,7 +1222,6 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 	# edge is captured if for all r, d(p(r), L) < r
 	# i.e. min(r² - d²(p(r), L)) > 0
 	println("\e[32;7medgecapture($(right(v,e)) = $(cellsegment(v,right(v,e))) -> $e = $(tail(v,e))⋯$(head(v,e))\e[m")
-# 	println("\e[32;7medgecapture($e): right=$(right(v,e)) $(node(e))=$(triangle(v,node(e)))\e[m")
 	o = opposite(v,e)
 	be, bo = branch(v, e), branch(v, o)
 	if bo == Int8(2)
@@ -1194,6 +1252,9 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 	println("separator $e/$o = $(tail(v,e))/$(tail(v,o)) is $sep")
 	println("  node($e)=$(node(e)) (in $(tail(v,e))) has parameter ($be, $re)")
 	println("  node($o)=$(node(o)) (in $(tail(v,o))) has parameter ($bo, $ro)")
+	println(evaluate(separator(v,e), be, re))
+	println(evaluate(separator(v,o), bo, ro))
+	println(evaluate(separator(v,e), -be, re))
 	display((v,node(e)))
 	display((v,node(o)))
 
@@ -1205,9 +1266,9 @@ end#»»
 function addsegment!(v::VoronoiDiagram, c::Cell)#««
 	a,b = cellsegment(v, c)
 	println("\e[31;1;7minserting segment $c = ($a,$b)\e[m")
-# 	display(v)
+	display(v)
 	q0 = findrootnode(v, a, b)
-	println("root node is $q0:"); display((v,q0))
+	print("\e[31mroot node is $q0:\e[m "); display((v,q0))
 	stack = [opposite(v, e) for e in sides(q0)]
 	insert!(v, q0, c)
 # 	println("\e[31;7m after insert!($q0, $c) =$stack:\e[m") # ; display(v)
@@ -1315,21 +1376,24 @@ end
 	@assert issegment(v,c1)
 	@assert issegment(v,c2)
 	@assert ispoint(v,c3)
-	println((c1, c2, c3))
-	if c3 ∈ cellsegment(v, c1)
-		c3 ∈ cellsegment(v, c2) &&
-			return (zero(first(v.noderadius)), Int8(0), Int8(0), Int8(0))
-		b1 = sum(cellsegment(v,c1)) - c3
-		return tripoint_seg((point(v,c3), point(v,b1)), segment(v, c2), Int8(1))
-		error("p3 ∈ s1: not implemented; other end is $b1")
-	elseif c3 ∈ cellsegment(v, c2)
-		b2 = sum(cellsegment(v,c2)) - c3
-		return tripoint_seg((point(v,c3), point(v,b2)), segment(v,c1), Int8(-1))
-		error("p3=$c3 ∈ s2=$c2: not implemented; other end is $b2")
-	end
-	# TODO: check if point c3 lies on either line; in this case, call
-	# specialized code
-	return tripoint(line(v,c1), line(v,c2), point(v,c3))
+# 	println("tripoint_llp($c1,$c2,$c3)")
+# 	if c3 ∈ cellsegment(v, c1)
+# 		c3 ∈ cellsegment(v, c2) &&
+# 			return (zero(first(v.noderadius)), Int8(0), Int8(0), Int8(0))
+# 		b1 = sum(cellsegment(v,c1)) - c3
+# 		return tripoint_seg((point(v,c3), point(v,b1)), segment(v, c2), Int8(1))
+# 		error("p3 ∈ s1: not implemented; other end is $b1")
+# 	elseif c3 ∈ cellsegment(v, c2)
+# 		b2 = sum(cellsegment(v,c2)) - c3
+# 		return tripoint_seg((point(v,c3), point(v,b2)), segment(v,c1), Int8(-1))
+# 		error("p3=$c3 ∈ s2=$c2: not implemented; other end is $b2")
+# 	end
+# 	# TODO: check if point c3 lies on either line; in this case, call
+# 	# specialized code
+	return tripoint(segment(v,c1), segment(v,c2), point(v,c3))
+end
+@inline function tripoint_lll(v::VoronoiDiagram, c1,c2,c3)
+	return tripoint(line(v,c1), line(v,c2), line(v,c3))
 end
 
 @inline rot3l((r, a,b,c)) = (r, b,c,a) # rotate left
@@ -1370,11 +1434,6 @@ end#»»
 	# branch[e] = 0 iff this separator is a parallel bisector
 	t, h, l, r = tail(v,e), tail(v,o), left(v,e), left(v,o)
 	separators!(v, e, o, separator(v, h, t))
-	if Set([int(h), int(t)]) == Set([8,9])
-	println("\e[36;7m separators! for $h/$t:\e[m")
-	println(" left $t/right $h is ", separator(v,e))
-	println(" left $h/right $t is ", separator(v,o))
-	end
 	# compute branches for e and o
 end
 
@@ -1405,9 +1464,9 @@ function nodedata!(v::VoronoiDiagram, q::Node)#««
 	noderadius!(v, q=>r)
 	p = evaluate(s1,b1,r)
 	println((r, b1,b2, b3))
-	println("sep $c1/$c2: ", s1, b1, evaluate(s1,b1,r))
-	println("sep $c2/$c3: ", s2, b2, evaluate(s2,b2,r))
-	println("sep $c3/$c1: ", s3, (b3,r), evaluate(s3,b3,r))
+# 	println("sep $c1/$c2: ", s1, b1, evaluate(s1,b1,r))
+# 	println("sep $c2/$c3: ", s2, b2, evaluate(s2,b2,r))
+# 	println("sep $c3/$c1: ", s3, (b3,r), evaluate(s3,b3,r))
 	any(isnan, p) && return
 	@assert evaluate(s1,b1,r) ≈ evaluate(s2,b2,r)
 	@assert evaluate(s2,b2,r) ≈ evaluate(s3,b3,r)
@@ -1443,12 +1502,10 @@ end#»»
 # end
 
 function separator(v::AbstractVoronoi, c1, c2)#««
-	println("  computing separator(v, $c1, $c2)")
 	if issegment(v, c1)
 		i1, j1 = cellsegment(v, c1)
 		a1, b1 = point(v, i1), point(v, j1)
 		if issegment(v, c2)
-			println("  separator(v, $(segment(v,c1)), $(segment(v,c2)))")
 			return Separator(segment(v, c1), segment(v, c2))
 # 		elseif (c2 == i1 || c2 == j1) # degenerate parabola (exact)
 # 			return degenerate_separator(line(v, c1), point(v, c2))
@@ -2603,8 +2660,42 @@ s1c = (SA[2,0.],SA[5,0.])
 s2a = (SA[-3,-6.],SA[-1,-2.])
 s2b = (SA[-1,-2.],SA[1,2.])
 s2c = (SA[1,2.],SA[3,6.])
+s3a = (SA[-5,2.],SA[-2,2.])
+s3b = (SA[-2,2.],SA[2,2.])
+s3c = (SA[2,2.],SA[5,2.])
 
-v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+c1 = SA[0,0.]
+c2 = SA[10,0.]
+c3 = SA[5,1.]
+c4 = SA[5,9.]
+c8 = (c1, c2)
+c9 = (c2, c3)
+c10 = (c3, c4)
+
+function test_tripoint(c1,c2,c3; bad=false)
+	r,b1,b2,b3 = V.tripoint(c1,c2,c3)
+	println("\e[7mreturned $r,$b1,$b2,$b3\e[m")
+	bad && return isnan(r)
+	isnan(r) && return false
+	s12 = V.Separator(c2,c1)
+	s23 = V.Separator(c3,c2)
+	s31 = V.Separator(c1,c3)
+	println("\e[35ms12=$s12\ns23=$s23\ns31=$s31\e[m")
+	ev1 = V.evaluate(s12, b1,r)
+	ev2 = V.evaluate(s23, b2,r)
+	ev3 = V.evaluate(s31, b3,r)
+	println("\e[34mev1=$ev1\nev2=$ev2\nev3=$ev3\e[m")
+	V.isparallel(s12) && return (ev2 ≈ ev3)
+	V.isparallel(s23) && return (ev3 ≈ ev1)
+	V.isparallel(s31) && return (ev1 ≈ ev2)
+	return ev1 ≈ ev2 ≈ ev3
+end
+# test_tripoint(c10,c9,c2)
+test_tripoint(s1a, s2c, SA[3.,6.])
+
+
+# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+
 #
 # v=V.OffsetDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
 # z = V.zerochains(v)
