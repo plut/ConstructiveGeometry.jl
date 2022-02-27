@@ -386,115 +386,12 @@ end
 # x = norm(b.tangent) * √(r-rmin)
 # r = rmin + (x/norm(b.tangent))^2
 
-# Triangulation via libtriangle««2
-function triangulate_loop(points, idx)
-	n = length(idx)
-	for i in idx
-		println("$(points[i][1])\t$(points[i][2])\t$i")
-	end
-	vmat = [ points[i][j] for i in idx, j in 1:2 ]
-	elist = [ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
-	println("vmat=",vmat)
-	println("idx=",idx)
-	println("elist=",elist)
-	return LibTriangle.constrained_triangulation(vmat, idx, elist)
-end
-
-# Minimizing a quadratic function
-"""    min_quadratic((a,b,c), (x1,x2))
-Returns the minimal value of (a x²+2bx+c) on the interval [x1,x2]."""
-function min_quadratic((a,b,c), (x1,x2))
-	x1,x2 = minmax(x1,x2)
-	iszero(a) && return min(b*x1,b*x2)+c
-	@assert a > 0
-	xc = -b/a
-	x1 < xc < x2 && return c-b^2/a
-	return min(x1*(b+a*x1), x2*(b+a*x2))+c
-end
-"""    min_quartic(f, (x1,x2))
-Returns the minimal value of the quartic f on the interval [x1,x2].
-f is given as a list of coefficients (a0,a1,a2,a3,a4)."""
-function min_quartic(f, (x1,x2))
-	x1,x2 = minmax(x1,x2)
-	r0 = (x1+x2)/2
-	for _ in 1:5
-		r1 = ((8*f[1]*r0+3*f[2])*r0^2-f[4])/(2*f[3]+r0*(6*f[2]+12*f[1]*r0))
-		abs(r1 - r0) ≤ 1e-6*abs(r0) && break
-		r0 = r1
-	end
-	r0 = clamp(r0, x1, x2)
-	return f[5]+r0*(f[4]+r0*(f[3]+r0*(f[2]+r0*f[1])))
-end
-# Separators (parametrized bisectors) ««1
-# Data structure ««2
-"""
-    Separator
-
-A structure holding the parametrization for the bisector between two sites
-(both of them either a point or a vector),
-The separator between `a` and `b` is parametrized by the distance to the sites,
-and represented as two branches: the `+` branch sees the site `a` on its right.
-
-This is either:
- - the bisector of two points: the line parametrized as
-   origin ± √(r²-rmin²)\\*tangent  (with normal == 0);
- - the bisector of a line and a point outside the line:
-   the parabola parametrized as
-   origin ± √(r-rmin)\\*tangent + (r-rmin)\\*normal;
- - the bisector of a segment and a point on the line supporting the segment:
-   this is a line, and an error if the point is in the interior of the segment;
- - the bisector of two non-crossing segments on secant lines:
-   the union of two half-lines parametrized as
-   origin + r\\*tangent, origin + r\\*normal (with rmin == 0);
- - the bisector of two touching, non-parallel segments is a straight line;
- - the bisector of two parallel segments: the central line,
-   described as origin + r\\*tangent, with normal = [NaN, NaN].
-
-The separator of two sites A,B is in all cases the union of two
-infinite branches: the + branch sees A on its right (along increasing r),
-while the - branch sees B on its right.
-"""
-struct Separator{T}
-	origin::SVector{2,T}
-	tangent::SVector{2,T}
-	normal::SVector{2,T}
-	rmin::T
-end
-
-# predicates
-@inline isparallel(sep::Separator) = any(isnan, sep.normal)
-@inline isstraight(sep::Separator) = iszero(sep.normal)
-@inline ishalflines(sep::Separator)= iszero(sep.rmin) && !iszero(sep.normal)
-# @inline isparabola(sep::Separator) = !iszero(sep.normal) # default case
-
-@inline Base.show(io::IO, sep::Separator) =
-	@printf(io, "sep %s(o=[%.3g,%.3g], r₀=%.3g, t=[%.3g,%.3g], n=[%.3g,%.3g])",
-		isparallel(sep) ? "═" :
-		isstraight(sep) ? "─" :
-		ishalflines(sep) ? "⋁" : "◡",
-		sep.origin..., sep.rmin, sep.tangent..., sep.normal...)
-
-"""    reverse(separator)
-
-Given `separator(a,b)`, returns `separator(b,a)`, i.e. such that
-`evaluate(sep′,b,s) = evaluate(sep,-b,s)."""
-@inline Base.reverse(s::Separator)= ishalflines(s) ?
-	Separator(s.origin, s.normal, s.tangent, s.rmin) :
-	Separator(s.origin,-s.tangent, s.normal, s.rmin)
-
-# Constructors ««2
-function Separator(a::AbstractVector, b::AbstractVector)# two points««
-	c = SVector{2}(a+b)/2
-	d = √(distance²(a,b))
-	u = quarterturn(a-b)/(d)
-	# guarantee: ‖tangent‖ = 1
-	return Separator(c, u, zero(u), d/2)
-end#»»
-# Segment positions ««««
+# Segment positions ««2
 """    segments_position(seg1, seg2)
 Given two segments `seg1`, `seg2` with positive determinant,
-returns the symbolic position of both segments, as an index in this matrix:
+returns the relative position of both segments, as indices in this matrix:
 (seg1 is horizontal, seg2 vertical)
+
         │    │    │
      ──     ───     ───
 
@@ -545,7 +442,116 @@ function segments_whichbranch((p1,q1)::Segment, (p2,q2)::Segment, x, y)#««
 	(x,y) == xyp && return Int8(+1)
 	return Int8(0)
 end#»»
-# »»
+# Triangulation via libtriangle««2
+function triangulate_loop(points, idx)
+	n = length(idx)
+	for i in idx
+		println("$(points[i][1])\t$(points[i][2])\t$i")
+	end
+	vmat = [ points[i][j] for i in idx, j in 1:2 ]
+	elist = [ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
+	println("vmat=",vmat)
+	println("idx=",idx)
+	println("elist=",elist)
+	return LibTriangle.constrained_triangulation(vmat, idx, elist)
+end
+
+# Minimizing a quadratic function
+"""    min_quadratic((a,b,c), (x1,x2))
+Returns the minimal value of (a x²+2bx+c) on the interval [x1,x2]."""
+function min_quadratic((a,b,c), (x1,x2))
+	x1,x2 = minmax(x1,x2)
+	iszero(a) && return min(b*x1,b*x2)+c
+	@assert a > 0
+	xc = -b/a
+	x1 < xc < x2 && return c-b^2/a
+	return min(x1*(b+a*x1), x2*(b+a*x2))+c
+end
+"""    min_quartic(f, (x1,x2))
+Returns the minimal value of the quartic f on the interval [x1,x2].
+f is given as a list of coefficients (a0,a1,a2,a3,a4)."""
+function min_quartic(f, (x1,x2))
+	x1,x2 = minmax(x1,x2)
+	r0 = (x1+x2)/2
+	for _ in 1:5
+		r1 = ((8*f[1]*r0+3*f[2])*r0^2-f[4])/(2*f[3]+r0*(6*f[2]+12*f[1]*r0))
+		abs(r1 - r0) ≤ 1e-6*abs(r0) && break
+		r0 = r1
+	end
+	r0 = clamp(r0, x1, x2)
+	return f[5]+r0*(f[4]+r0*(f[3]+r0*(f[2]+r0*f[1])))
+end
+# Separators (parametrized bisectors) ««1
+# FIXME:
+#  - simplify parabola to C+Nr+bB√(r-R)
+# Data structure ««2
+"""
+    Separator
+
+A structure holding the parametrization for the bisector between two sites
+(both of them either a point or a vector),
+The separator between `a` and `b` is parametrized by the distance to the sites,
+and represented as two branches: the `+` branch sees the site `a` on its right.
+
+This is either:
+ - the bisector of two points: the line parametrized as
+   origin ± √(r²-rmin²)\\*tangent  (with normal == 0);
+ - the bisector of a line and a point outside the line:
+   the parabola parametrized as
+   origin ± √(r-rmin)\\*tangent + (r-rmin)\\*normal;
+ - the bisector of a segment and a point on the line supporting the segment:
+   this is a line, and an error if the point is in the interior of the segment;
+ - the bisector of two non-crossing segments on secant lines:
+   the union of two half-lines parametrized as
+   origin + r\\*tangent, origin + r\\*normal (with rmin == 0);
+ - the bisector of two touching, non-parallel segments is a straight line;
+ - the bisector of two parallel segments: the central line,
+   described as origin + r\\*tangent, with normal = [NaN, NaN].
+
+The separator of two sites A,B is in all cases the union of two
+infinite branches: the + branch sees A on its right (along increasing r),
+while the - branch sees B on its right.
+"""
+struct Separator{T}
+	origin::SVector{2,T}
+	tangent::SVector{2,T}
+	normal::SVector{2,T}
+	rmin::T
+end
+
+# This avoids problems when comparing -0. to 0. (not bitwise identical):
+@inline Base.:(==)(s1::Separator, s2::Separator) =
+	(s1.origin == s2.origin) && (s1.tangent == s2.tangent) &&
+		(s1.normal == s2.normal) && (s1.rmin == s2.rmin)
+
+# predicates
+@inline isparallel(sep::Separator) = any(isnan, sep.normal)
+@inline isstraight(sep::Separator) = iszero(sep.normal)
+@inline ishalflines(sep::Separator)= iszero(sep.rmin) && !iszero(sep.normal)
+# @inline isparabola(sep::Separator) = !iszero(sep.normal) # default case
+
+@inline Base.show(io::IO, sep::Separator) =
+	@printf(io, "sep %s(o=[%.3g,%.3g], r₀=%.3g, t=[%.3g,%.3g], n=[%.3g,%.3g])",
+		isparallel(sep) ? "═" :
+		isstraight(sep) ? "─" :
+		ishalflines(sep) ? "⋁" : "◡",
+		sep.origin..., sep.rmin, sep.tangent..., sep.normal...)
+
+"""    reverse(separator)
+
+Given `separator(a,b)`, returns `separator(b,a)`, i.e. such that
+`evaluate(sep′,b,s) = evaluate(sep,-b,s)."""
+@inline Base.reverse(s::Separator)=
+	Separator(s.origin,-s.tangent, s.normal, s.rmin)
+
+# Constructors ««2
+function Separator(a::AbstractVector, b::AbstractVector)# two points««
+	c = SVector{2}(a+b)/2
+	d = √(distance²(a,b))
+	u = quarterturn(a-b)/(d)
+	# guarantee: ‖tangent‖ = 1
+	return Separator(c, u, zero(u), d/2)
+end#»»
 function Separator((p1,q1)::Segment, p2::AbstractVector; k=1)#««
 	p1q1, p1p2 = q1-p1, p2-p1
 	x1, x2, y2 = norm²(p1q1), p1q1⋅p1p2, det2(p1q1, p1p2)
@@ -561,7 +567,7 @@ function Separator((p1,q1)::Segment, p2::AbstractVector; k=1)#««
 		throw(PointInSegment())
 	end
 	rmin = y2/(2*f)
-	return Separator(p2 - y2/2*v/x1,
+	return Separator(p2 - y2*v/x1,
 		k*sign(y2)*√(2*abs(y2)/f)*p1q1/f,
 		sign(y2)*v/f, abs(rmin))
 end
@@ -580,8 +586,10 @@ function Separator((p1,q1)::Segment, (p2,q2)::Segment)#««
 	c = lineinter(p1, q1, p2, q2)
 	u1, u2 = √(norm²(p2q2))*p1q1/d, √(norm²(p1q1))*p2q2/d
 	((xm, ym), (xp, yp)) = segments_branches((p1,q1), (p2,q2))
-
-	return Separator(lineinter(p1,q1,p2,q2), xp*u1+yp*u2, xm*u1+ym*u2, zero(d))
+	return Separator(lineinter(p1,q1,p2,q2),
+		(xp-xm)/2 * u1 + (yp-ym)/2 * u2,
+		(xp+xm)/2 * u1 + (yp+ym)/2 * u2,
+		zero(d))
 end#»»
 # Evaluation, interpolation««2
 
@@ -592,13 +600,11 @@ sites and on the branch given by sign `s` (either + or -).
 The `+` branch sees `a` on its right and `b` on its left.
 """
 @inline function evaluate(sep::Separator, b, r) # b is a sign
-	ishalflines(sep) &&
-		return sep.origin + r * (b ≥ 0 ? sep.tangent : sep.normal)
+	ishalflines(sep) && return sep.origin + r * (sep.normal + b * sep.tangent)
 	isstraight(sep) &&
 		return sep.origin + b*sqrt(max(r^2-sep.rmin^2, 0))*sep.tangent
-	u = max(r-sep.rmin, 0)
-	# parabola arc
-	return sep.origin + u*sep.normal + b*sqrt(u)*sep.tangent
+	# parabola arc # WARNING: sep.origin is *NOT* the parabola apex
+	return sep.origin + r*sep.normal + b*sqrt(max(r-sep.rmin, 0))*sep.tangent
 end
 
 """    approximate(separator, r1, r2, atol)
@@ -779,93 +785,55 @@ function tripoint((p1,q1)::Segment, p2::AbstractVector, p3::AbstractVector)#««
 	return r, sign(Int8, s0), sign(Int8, s1), sign(Int8, s2)
 end#»»
 function tripoint((p1,q1)::Segment, (p2,q2)::Segment, p3::AbstractVector)#««
-	u1, u2 = q1-p1, q2-p2
-	l1, l2 = √norm²(u1), √norm²(u2)
-	a1, a2 = det2(u1, p3-p1), det2(u2, p3-p2)
-	# Since this does not depend on the orientation of both lines,
-	# we reorient them so that p3 lies on the positive side of both lines:
-	(a1 < 0) && ((a1, u1, p1, q1) = (-a1, -u1, q1, p1))
-	(a2 < 0) && ((a2, u2, p2, q2) = (-a2, -u2, q2, p2))
-	c, s = u1⋅u2, det2(u1, u2)
-	if iszero(s) # parallel segments case
-		h1 = det2(u1, p2-p1)
-		(h1 < 0) && ((h1, a1, p1, u1) = (-h1, -a1, q1, -u1)) # swap p1, q1
+	v1, v2 = q1-p1, q2-p2
+	a1 = det2(v1, p3-p1)
+	(a1 < 0) && ((a1, v1, p1, q1) = (-a1, -v1, q1, p1))
+	c, s, l1, l2 = v1⋅v2, det2(v1, v2), √norm²(v1), √norm²(v2)
+	# Reorient so that s ≥ 0 and a1 ≥ 0:
+	(s < 0) && ((c, s, v2, p2, q2) = (-c, -s, -v2, q2, p2))
+	a2 = det2(v2, p3-p2)
+
+	if iszero(s) # parallel segments case««
+		h1 = det2(v1, p2-p1)
+		(h1 < 0) && ((h1, a1, p1, v1) = (-h1, -a1, q1, -v1)) # swap p1, q1
 		(a1 < 0) || (a1 > h1) && return _BAD_TRIPOINT(c)
 		if iszero(a1) # p3 ∈ line1; must be left of segment1
-			x3 = (p3-p1)⋅u1 # x3/l1
+			x3 = (p3-p1)⋅v1 # x3/l1
 			x3 > 0 && return _BAD_TRIPOINT(c)
 			return h1/(2l1), Int8(0), Int8(-1), Int8(1)
 		elseif a1 == h1
-			xp3, xq3 = (p3-p2)⋅u1, (p3-q2)⋅u1
+			xp3, xq3 = (p3-p2)⋅v1, (p3-q2)⋅v1
 			(xp3 > 0 || xq3 > 0) && return _BAD_TRIPOINT(c)
 			return h1/(2l1), Int8(0), Int8(1), Int8(-1)
 		end
 		return h1/(2l1), Int8(0), Int8(1), Int8(1)
-	end
-	# Taking coordinates: u=(1,0), v=(c,s), p3=((ac-b)/s, a);
-	# bisector B₁₂ is parametrized as r ↦ r*((c-1)/s,1).
-	# This is equidistant from L1 and P3 whenever
-	# (1-c)²r² - 2(a+b)(1-c)r + (a²+b²-2abc) = 0;
-	# Δ'=2ab(1+c) hence (1-c)r = a+b±√Δ'.
-	# Geometry gives the smaller root (-√Δ') when s>0, +√Δ' when s<0.
-	#
-	# Orientation of the branches: the tripoint is the apex of the parabola P₁₃
-	# iff (c-1)r/s == (ac-b)/s i.e. a(1+c) = 2b; apex of P₂₃ iff b(1+c)=2a.
-	# The branch on the line/line bisector depends on the relative position
-	# of both segments...
-	p1p2, p1q2 = p2-p1, q2-p1
-	Dp2, Dq2, Dp1, Dq1 =
-		det2(u1, p1p2), det2(u1, p1q2), det2(p1p2, u2), det2(u2, q1-p2)
-	if iszero(a1) # special case: point is on one of the segments««
-		iszero(a2) && return a1, Int8(1), Int8(1), Int8(1)
-		# exchange p1↔q1 (a1 ← -a1 is a no-op)
-		(s < 0) && ((s, c, Dp1, Dq1, Dp2, Dq2) = (-s, -c, Dq1, Dp1, -Dp2, -Dq2))
-		if a2 ≥ Dp1 # left of segment 1
-			Dq2 ≤ 0 && return _BAD_TRIPOINT(c)
-			Dp1 ≤ 0 && return a2*l1/(l1*l2+c), Int8(-1), Int8(1), Int8(1)
-			return a2*l1/(l1*l2-c), Int8(+1), Int8(-1), Int8(1)
-		elseif a2 ≤ Dq1 # right of segment 1
-			Dp2 ≥ 0 && return _BAD_TRIPOINT(c)
-			Dq1 ≥ 0 && return a2*l1/(l1*l2+c), Int8(-1), Int8(1), Int8(1)
-			return a2*l1/(l1*l2-c), Int8(1), Int8(-1), Int8(1)
-		else
-			throw(PointInSegment())
-		end
-	elseif iszero(a2)
-		# exchange p2, q2 (b ← -b is a no-op)
-		(s < 0) && ((s, c, Dp1, Dq1, Dp2, Dq2) = (-s, -c, -Dp1, -Dq1, Dq2, Dp2))
-		if a1 ≥ Dq2 # “above” segment 2
-			Dp1 < 0 && return _BAD_TRIPOINT(c)
-			Dq2 ≤ 0 && return a1*l2/(l1*l2+c), Int8(-1), Int8(1), Int8(1)
-			return a1*l2/(l1*l2-c), Int8(1), Int8(1), Int8(-1)
-		elseif a1 ≤ Dp2 # “below” segment 2
-			Dq1 > 0 && return _BAD_TRIPOINT(c)
-			Dp2 ≥ 0 && return a1*l2/(l1*l2+c), Int8(-1), Int8(1), Int8(1)
-			return a1*l2/(l1*l2-c), Int8(1), Int8(1), Int8(-1)
-		else
-			throw(PointInSegment())
-		end
 	end#»»
-	d = √(2*a1*a2*(l1*l2+c)) # normalization factor l1*l2
-	# the factors indicating the position of the apex are: 2a-(1+c)b, 2b-(1+c)a
-	# after renormalization: 2l2^2*a1-(l1*l2+c)*a2, 2l1^2*a2-(l1*l2+c)*a1
-	if s > 0
-		b1 = (Dp2 ≥ 0) ? (Dp1 < 0 ? Int8(2) : Int8(1)) : # seg2 left of line1
-		     (Dq2 ≤ 0) ? (Dp1 ≤ 0 ? Int8(-1) : Int8(2)) :
-				 Dq1 ≥ 0 ? Int8(1) : Dp1 ≤ 0 ? Int8(2) : throw(CrossingSegments())
-		b1 == Int8(2) && return _BAD_TRIPOINT(c)
-		b2 = sign(Int8, 2*l2^2*a1-(l1*l2+c)*a2)
-		b3 = sign(Int8, 2*l1^2*a2-(l1*l2+c)*a1)
-		r = (a1*l2+a2*l1-d)/(l1*l2-c)
-		return r, b1, b2, b3
-	else
-		b1 = (Dq2 ≥ 0) ? (Dq1 < 0 ? Int8(2) : Int8(-1)) :
-		     (Dp2 ≤ 0) ? (Dq1 ≤ 0 ? Int8(1) : Int8(2)) :
-				 Dp1 ≥ 0 ? Int8(-1) : Dq1≤0 ? Int8(2) : throw(CrossingSegments())
-		b1 == Int8(2) && return _BAD_TRIPOINT(c)
-		r = (a1*l2+a2*l1+d)/(l1*l2-c)
-		return r, b1, Int8(1), Int8(1)
+	# Taking coordinates: u₁=(1,0), u₂=(c,s), p3=((c a₁-a₂)/s, a₁);
+	# consider the branch of B₁₂ directed by (ηu₂-εu₁)/s = [(ηc-ε)/s, η].
+	# (in general, η=sign(a1)=1 and ε=sign(a2)).
+	#
+	# This is equidistant from L1 and P3 whenever
+	# ((1-εηc)r)² - 2(ηa₁+εa₂)(1-εηc)r + (a₁²+a₂²-2a₁ a₂ c) = 0;
+	# Δ'= 2a₁a₂(εη+c) whence (1-εηc)r = ηa₁+εa₂±√Δ'; geometry forces sign to -εη
+	#
+	# ε,η represent the quadrant in which we look for the tripoint:
+	e, f = sign(Int, a2), sign(Int, a1)
+	if iszero(e)
+		iszero(f) && return a1, Int8(1), Int8(1), Int8(1) # trivial case
+		e = (a1 ≥ det2(v1,q2-p1)) ? 1 : (a1 ≤ det2(v1,p2-p1)) ? -1 :
+			throw(PointInSegment())
+	elseif iszero(f)
+		f = (a2 ≥ det2(v2,p1-p2)) ? 1 : (a2 ≤ det2(v2,q1-p2)) ? -1 :
+			throw(PointInSegment())
 	end
+	b1 = -segments_whichbranch((p1,q1),(p2,q2), -e, f) # minus bc L=seg1, R=seg2
+	iszero(b1) && return _BAD_TRIPOINT(c)
+	d = √(2*a1*a2*(e*l1*l2+c)) # this has normalization factor l1*l2
+	r = (f*a1*l2+e*(a2*l1-d))/(l1*l2-e*f*c)
+	# compute position relative to both parabolas
+	g1, g2 = 2*l2^2*a1-(l1*l2+c)*a2, 2*l1^2*a2-(l1*l2+c)*a1
+	b2, b3 = (e != f) ? (Int8(1), Int8(1)) : (f*sign(Int8, g1), f*sign(Int8, g2))
+	return r,b1,b2,b3
 end#»»
 function tripoint(l1::Line, l2::Line, l3::Line)#««
 	# let lᵢ: aᵢ x + bᵢ y + cᵢ = 0
@@ -2634,9 +2602,8 @@ using StaticArrays
 s1a = (SA[-5,0.],SA[-2,0.])
 s1b = (SA[-2,0.],SA[2,0.])
 s1c = (SA[2,0.],SA[5,0.])
-s2a = (SA[-3,-6.],SA[-1,-2.])
-s2b = (SA[-1,-2.],SA[1,2.])
-s2c = (SA[1,2.],SA[3,6.])
+us2 = SA[3,4.]
+s2a, s2b, s2c = (-2us2, -us2), (-us2, us2), (us2, 2us2)
 s3a = (SA[-5,2.],SA[-2,2.])
 s3b = (SA[-2,2.],SA[2,2.])
 s3c = (SA[2,2.],SA[5,2.])
