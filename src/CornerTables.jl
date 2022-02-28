@@ -377,6 +377,13 @@ function CornerTable{J}(triangles) where{J}
 end
 
 # Displaying & debugging ««1
+"finds the lex smallest cyclic permutation of 3 cells"
+@inline reorder((a,b,c)::NTuple{3,Cell}) =
+	(a < b) ? ((a < c) ? (a,b,c) : (c,a,b)) :
+		(b < c) ? (b,c,a) : (c,a,b)
+"returns a canonically sorted list of all triangles of this triangulation."
+@inline canonical_triangles(t::AbstractTriangulation{I}) where{I} =
+	NTuple{3,I}.(sort(reorder.(alltriangles(t))))
 function Base.show(io::IO, M::MIME"text/plain", t::AbstractTriangulation)
 	println(io, "\e[33;1m", nnodes(t), " nodes:\e[m")
 	for q in eachnode(t); show(io, M, (t, q)); println(io); end
