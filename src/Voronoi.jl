@@ -1537,10 +1537,8 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		anyedge!(v, s12, q11); anyedge!(v, s21, q21)
 		display((v, q1)); display((v,q2)); display((v, s12)); display((v, s21))
 		# fix geometric information:
-# 		l12, l21 = line(v, s12), line(v, s21)
-# 		separators!(v, q11, q21, Separator(l12, l21))
-		s12, s21 = segment(v, s12), segment(v, s21)
-		separators!(v, q11, q21, Separator(s12, s21))
+		seg12, seg21 = segment(v, seg12), segment(v, seg21)
+		separators!(v, q11, q21, Separator(seg12, seg21))
 		separator!(v, q12 => separator(v, e1), q22 => separator(v, e2),
 			q13 => separator(v, o1))
 		edgedata!(v, o1) # this also fixes q12
@@ -1549,10 +1547,6 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		for e in star(v, q21); nodedata!(v, node(e)); end
 		@assert iszero(noderadius(v,q1))
 		@assert iszero(noderadius(v,q2))
-# 		branch!(v, q11=>0, q21=>0,
-# 		)
-# 		geometricnode!(v, q1, p1)
-# 		geometricnode!(v, q2, p2)
 	end
 	return v
 end#»»
