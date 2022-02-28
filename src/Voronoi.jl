@@ -21,7 +21,6 @@ module Voronoi
 using StaticArrays
 using FastClosures
 using LinearAlgebra
-using LazyArrays
 using Random
 using Printf
 using HypergeometricFunctions
@@ -343,12 +342,6 @@ end
 # 	return z
 # end
 # 
-# # Bisectors ««2
-# "mediator line of segment (ab)"
-# function mediator(a,b)
-# 	return SA[2*(a[1]-b[1]), 2*(a[2]-b[2]), norm²(b)-norm²(a)]
-# end
-# 
 # Approximation of parabolic arc««2
 H(x)=x*_₂F₁(1/4,1/2,3/2,-x^2)
 H′(x)=_₂F₁(1/4,1/2,3/2,-x^2)-1/6*x^2*_₂F₁(5/4,3/2,5/2,-x^2)
@@ -410,8 +403,6 @@ const _BAD_BRANCH = Branch(Int8(-128)) # stable by unary minus
 @inline Base.:<((b1,r1)::Tuple{Branch,Real}, (b2,r2)::Tuple{Branch,Real}) =
 	int(b1)*r1 < int(b2)*r2
 @inline sqrt(b::Branch, x::Real) = int(b)*sqrtp(x)
-# @inline Base.sign(T::Type{<:Integer}, x) =
-# 	iszero(x) ? zero(T) : (x > 0) ? one(T) : -one(T)
 
 """    segments_position(seg1, seg2)
 Given two segments `seg1`, `seg2` with positive determinant,
@@ -515,7 +506,6 @@ end
 @inline isparallel(sep::Separator) = any(isnan, sep.normal)
 @inline isstraight(sep::Separator) = iszero(sep.normal)
 @inline ishalflines(sep::Separator)= iszero(sep.rmin) && !iszero(sep.normal)
-# @inline isparabola(sep::Separator) = !iszero(sep.normal) # default case
 
 @inline Base.show(io::IO, sep::Separator) =
 	@printf(io, "sep %s(o=[%.3g,%.3g], r₀=%.3g, t=[%.3g,%.3g], n=[%.3g,%.3g])",
@@ -754,7 +744,7 @@ function tripoint((p1,q1)::Segment, (p2,q2)::Segment, p3::AbstractVector)#««
 	# Δ'= 2a₁a₂(εη+c) whence (1-εηc)r = ηa₁+εa₂±√Δ'; geometry forces sign to -εη
 	#
 	# ε,η represent the quadrant in which we look for the tripoint:
-	e, f = sign(Int, a2), sign(Int, a1)
+	e, f = Int(sign(a2)), Int(sign(a1))
 	if iszero(e)
 		iszero(f) && return a1, Branch(1), Branch(1), Branch(1) # trivial case
 		e = (a1 ≥ det2(v1,q2-p1)) ? 1 : (a1 ≤ det2(v1,p2-p1)) ? -1 :
@@ -812,11 +802,8 @@ function tripoint((p1,q1)::Segment, (p2,q2)::Segment, (p3,q3)::Segment)#««
 	z32 = x32 + c23/s23*y32
 	a3 = abs(z31-z32)/l3
 
-	e = sign(Int, z13-z12)
+	e = Int(sign(z13-z12))
 	iszero(e) && throw(ConcurrentLines())
-# 	D1p2, D1q2, D1p3, D1q3 = (det2(u1, x-p1) for x in (p2,q2,p3,q3))
-# 	D2p3, D2q3, D2p1, D2q1 = (det2(u2, x-p2) for x in (p3,q3,p1,q1))
-# 	D3p1, D3q1, D3p2, D3q2 = (det2(u3, x-p3) for x in (p1,q1,p2,q2))
 	if s23 < 0 # the incenter
 		r = sqrtp((a1+a2-a3)*(a2+a3-a1)*(a3+a1-a2)/(a1+a2+a3))/2
 		# the situation must be this one (e=1) or its converse:
@@ -1440,7 +1427,7 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		anyedge!(v, s12, q11); anyedge!(v, s21, q21)
 		display((v, q1)); display((v,q2)); display((v, s12)); display((v, s21))
 		# fix geometric information:
-		seg12, seg21 = segment(v, seg12), segment(v, seg21)
+		seg12, seg21 = segment(v, s12), segment(v, s21)
 		separators!(v, q11, q21, Separator(seg12, seg21))
 		separator!(v, q12 => separator(v, e1), q22 => separator(v, e2),
 			q13 => separator(v, o1))
@@ -2393,7 +2380,7 @@ c10 = (c3, c4)
 
 
 
-v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 
 #
 # v=V.OffsetDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
