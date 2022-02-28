@@ -9,8 +9,8 @@
 #
 # TODO:
 # - remove Line:
-#   - tripoint(SSS)
-# - use separator orientation to determine edge capture (remove `capture`)
+#   + tripoint(SSS)
+# + use separator orientation to determine edge capture (remove `capture`)
 #
 """    Voronoi
 
@@ -1205,27 +1205,30 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 		println("\e[32m segment ($a,$b) does not see node $q=$(geometricnode(v,q))\e[m")
 		return false
 	end
-	l = line(v, right(v,e))
+# 	l = line(v, right(v,e))
 	sep = separator(v, e)
 	be, bo = branch(v,e), branch(v,o)
 	re, ro = noderadius(v,node(e)), noderadius(v,node(o))
-	z = capture(sep, be, re, -bo, ro, l)
+# 	z = capture(sep, be, re, -bo, ro, l)
 # 	println("  \e[32mcapture($e) = $z\e[m")
 	f = (be, re) < (-bo, ro)
 # 	f = (-bo > be) || (-bo == be && ro > re)
-	if f != (z > 0)
-		println("\e[35;7m  (trying to connect $(right(v,e))→$(left(v,e)), disconnect $(tail(v,e))/$(head(v,e))) found f=$f, z=$z\e[m\e[35m")
-	println("separator $e/$o = $(tail(v,e))/$(tail(v,o)) is $sep")
-	println("  node($e)=$(node(e)) (in $(tail(v,e))) has parameter ($be, $re)")
-	println("  node($o)=$(node(o)) (in $(tail(v,o))) has parameter ($bo, $ro)")
-	println(evaluate(separator(v,e), be, re))
-	println(evaluate(separator(v,o), bo, ro))
-	println(evaluate(separator(v,e), -be, re))
-	display((v,node(e)))
-	display((v,node(o)))
-
-	println("\e[35;1m view from $(tail(v,e)): $(-bo),$ro  increases to $be,$re\e[m")
-	end
+# 	if f != (z > 0)
+# 		println("\e[35;7m  (trying to connect $(right(v,e))→$(left(v,e)), disconnect $(tail(v,e))/$(head(v,e))) found f=$f, z=$z\e[m\e[35m")
+# 	println("separator $e/$o = $(tail(v,e))/$(tail(v,o)) is $sep")
+# 	println("  node($e)=$(node(e)) (in $(tail(v,e))) has parameter ($be, $re)")
+# 	println("   geometricnode[$e] = $(geometricnode(v,node(e)))")
+# 	println("  node($o)=$(node(o)) (in $(tail(v,o))) has parameter ($bo, $ro)")
+# 	println("   geometricnode[$o] = $(geometricnode(v,node(o)))")
+# 	println(evaluate(separator(v,e), be, re))
+# 	println(evaluate(separator(v,o), bo, ro))
+# 	println(evaluate(separator(v,e), -be, re))
+# 	display((v,node(e)))
+# 	display((v,node(o)))
+# 
+# 	println("\e[35;1m view from $(tail(v,e)): $(-bo),$ro  increases to $be,$re\e[m")
+# 		error("stop")
+# 	end
 	return f
 # 	return z > 0
 end#»»
@@ -1320,7 +1323,7 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 # 	println("\e[1;7m before splitting segments:\e[m"); display(v)
 
 	# split segments in two
-# 	splitsegments!(v)
+	splitsegments!(v)
 
 	return v
 end#»»
@@ -1342,24 +1345,10 @@ end
 	@assert issegment(v,c1)
 	@assert issegment(v,c2)
 	@assert ispoint(v,c3)
-# 	println("tripoint_llp($c1,$c2,$c3)")
-# 	if c3 ∈ cellsegment(v, c1)
-# 		c3 ∈ cellsegment(v, c2) &&
-# 			return (zero(first(v.noderadius)), Branch(0), Branch(0), Branch(0))
-# 		b1 = sum(cellsegment(v,c1)) - c3
-# 		return tripoint_seg((point(v,c3), point(v,b1)), segment(v, c2), Branch(1))
-# 		error("p3 ∈ s1: not implemented; other end is $b1")
-# 	elseif c3 ∈ cellsegment(v, c2)
-# 		b2 = sum(cellsegment(v,c2)) - c3
-# 		return tripoint_seg((point(v,c3), point(v,b2)), segment(v,c1), Branch(-1))
-# 		error("p3=$c3 ∈ s2=$c2: not implemented; other end is $b2")
-# 	end
-# 	# TODO: check if point c3 lies on either line; in this case, call
-# 	# specialized code
 	return tripoint(segment(v,c1), segment(v,c2), point(v,c3))
 end
 @inline function tripoint_lll(v::VoronoiDiagram, c1,c2,c3)
-	return tripoint(line(v,c1), line(v,c2), line(v,c3))
+	return tripoint(segment(v,c1), segment(v,c2), segment(v,c3))
 end
 
 @inline rot3l((r, a,b,c)) = (r, b,c,a) # rotate left
@@ -1548,8 +1537,10 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		anyedge!(v, s12, q11); anyedge!(v, s21, q21)
 		display((v, q1)); display((v,q2)); display((v, s12)); display((v, s21))
 		# fix geometric information:
-		l12, l21 = line(v, s12), line(v, s21)
-		separators!(v, q11, q21, Separator(l12, l21))
+# 		l12, l21 = line(v, s12), line(v, s21)
+# 		separators!(v, q11, q21, Separator(l12, l21))
+		s12, s21 = segment(v, s12), segment(v, s21)
+		separators!(v, q11, q21, Separator(s12, s21))
 		separator!(v, q12 => separator(v, e1), q22 => separator(v, e2),
 			q13 => separator(v, o1))
 		edgedata!(v, o1) # this also fixes q12
