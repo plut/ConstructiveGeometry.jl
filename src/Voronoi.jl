@@ -8,6 +8,7 @@
 # FIXME:
 #
 # TODO:
+# - remove segdistance²
 # - remove Line:
 #   + tripoint(SSS)
 # + use separator orientation to determine edge capture (remove `capture`)
@@ -77,14 +78,7 @@ function lineinter(a,b,c,d)
 	z = a+(t/D)*(b-a)
 	return z
 end
-function linedistance²(a,b,c)
-	# distance of c from segment (a,b)
-	ab,ac = b-a,c-a
-# 	d = dot(b,c); n = norm²(b)
-# 	d < 0 && return norm²(c)
-# 	d > n && return norm²(c-b)
-	return det2(ab,ac)^2/norm²(ab)
-end
+
 function segdistance²(a,b,c)
 	ab,ac = b-a,c-a
 	d = dot(ab,ac); ab2 = norm²(ab)
@@ -98,57 +92,69 @@ end
 @inline isleft(a,b,c) = det2(a,b,c) > 0
 @inline isleft(u,v) = det2(u,v) > 0
 
-# Lines ««2
-Point{T} = SVector{2,T}
-"the equation for a (normalized, oriented) straight line in the plane."
-struct Line{T}
-	# orientation: the normal vector points to the *left* of the line
-	normal::SVector{2,T} # normalized to ‖u‖=1
-	offset::T # line equation is normal⋅z + offset == 0
-end
-@inline Base.:*(a::Real, l::Line) = Line(a*l.normal, a*l.offset)
-@inline normalize(l::Line) = (1/√(norm²(l.normal)))*l
-@inline Base.:-(l::Line) = (-1)*l
+"""
+    isincircle(a,b,c,x)
 
-@inline direction(l::Line) = quarterturn(l.normal)
-# one arbitrary point on the line (actually the projection of the origin)
-# FIXME: since this line is normalized, we should not need to divide by norm
-@inline point(l::Line) = -l.normal*l.offset/(l.normal[1]^2+l.normal[2]^2)
-
-@inline Line(a::AbstractVector, b::AbstractVector) = # oriented from a to b
-	normalize(Line(SA[a[2]-b[2], b[1]-a[1]], a[1]*b[2]-a[2]*b[1]))
-
-# signed distance from l to a; positive sign corresponds to left side of l.
-@inline evaluate(l::Line, a::AbstractVector) = dot(l.normal, a) + l.offset
-
-"returns either the intersection point, or `nothing`."
-function Base.intersect(l1::Line, l2::Line)
-	(a1, b1), c1 = l1.normal, l1.offset
-	(a2, b2), c2 = l2.normal, l2.offset
-	d = a1*b2-a2*b1
-	iszero(d) && return nothing
-	return SA[b1*c2-c1*b2,c1*a2-a1*c2]/d
+Returns `true` iff point x is in circumcircle of oriented triangle `(a,b,c)`.
+"""
+function isincircle(a,b,c,x)
+	a,b,c = a-x,b-x,c-x
+	@assert !isleft(a,c,b) "incircle: triangle ($a,$b,$c) has wrong orientation"
+	m = SA[a[1] a[2] norm²(a); b[1] b[2] norm²(b); c[1] c[2] norm²(c)]
+	return det(m) > 0
 end
 
-"    det2(line1, line2): determinant of direction of these lines."
-@inline det2(l1::Line, l2::Line) = det2(l1.normal, l2.normal)
-"    dot(line1, line2): cosine of the angle formed by these lines."
-@inline LinearAlgebra.dot(l1::Line, l2::Line) = dot(l1.normal, l2.normal)
-"""    det2(line1, line2, line3):
-Returns (twice) the oriented area of the triangle bounded by these
-three lines (i.e. the intersection of the three half-planes).
-This independent of the order of the lines,
-but depends on the orientation of each line."""
-function det2(l1::Line, l2::Line, l3::Line)#««
-	D = det(SA[
-		l1.normal[1] l1.normal[2] l1.offset
-		l2.normal[1] l2.normal[2] l2.offset
-		l3.normal[1] l3.normal[2] l3.offset
-		])
-	d1, d2, d3 = det2(l2, l3), det2(l3,l1), det2(l1, l2)
-	return (l1.offset+l2.offset+l3.offset)*D/(d1*d2*d3)
-end#»»
-
+# # Lines ««2
+# Point{T} = SVector{2,T}
+# "the equation for a (normalized, oriented) straight line in the plane."
+# struct Line{T}
+# 	# orientation: the normal vector points to the *left* of the line
+# 	normal::SVector{2,T} # normalized to ‖u‖=1
+# 	offset::T # line equation is normal⋅z + offset == 0
+# end
+# @inline Base.:*(a::Real, l::Line) = Line(a*l.normal, a*l.offset)
+# @inline normalize(l::Line) = (1/√(norm²(l.normal)))*l
+# @inline Base.:-(l::Line) = (-1)*l
+# 
+# @inline direction(l::Line) = quarterturn(l.normal)
+# # one arbitrary point on the line (actually the projection of the origin)
+# # FIXME: since this line is normalized, we should not need to divide by norm
+# @inline point(l::Line) = -l.normal*l.offset/(l.normal[1]^2+l.normal[2]^2)
+# 
+# @inline Line(a::AbstractVector, b::AbstractVector) = # oriented from a to b
+# 	normalize(Line(SA[a[2]-b[2], b[1]-a[1]], a[1]*b[2]-a[2]*b[1]))
+# 
+# # signed distance from l to a; positive sign corresponds to left side of l.
+# @inline evaluate(l::Line, a::AbstractVector) = dot(l.normal, a) + l.offset
+# 
+# "returns either the intersection point, or `nothing`."
+# function Base.intersect(l1::Line, l2::Line)
+# 	(a1, b1), c1 = l1.normal, l1.offset
+# 	(a2, b2), c2 = l2.normal, l2.offset
+# 	d = a1*b2-a2*b1
+# 	iszero(d) && return nothing
+# 	return SA[b1*c2-c1*b2,c1*a2-a1*c2]/d
+# end
+# 
+# "    det2(line1, line2): determinant of direction of these lines."
+# @inline det2(l1::Line, l2::Line) = det2(l1.normal, l2.normal)
+# "    dot(line1, line2): cosine of the angle formed by these lines."
+# @inline LinearAlgebra.dot(l1::Line, l2::Line) = dot(l1.normal, l2.normal)
+# """    det2(line1, line2, line3):
+# Returns (twice) the oriented area of the triangle bounded by these
+# three lines (i.e. the intersection of the three half-planes).
+# This independent of the order of the lines,
+# but depends on the orientation of each line."""
+# function det2(l1::Line, l2::Line, l3::Line)#««
+# 	D = det(SA[
+# 		l1.normal[1] l1.normal[2] l1.offset
+# 		l2.normal[1] l2.normal[2] l2.offset
+# 		l3.normal[1] l3.normal[2] l3.offset
+# 		])
+# 	d1, d2, d3 = det2(l2, l3), det2(l3,l1), det2(l1, l2)
+# 	return (l1.offset+l2.offset+l3.offset)*D/(d1*d2*d3)
+# end#»»
+# 
 # # Circumscribed circle ««2
 # function circumcenter(a,b,c)
 # 	ab,ac = b-a,c-a
@@ -180,17 +186,6 @@ end#»»
 # # 	return sqrt(norm²(ab)*norm²(ac)*norm²(bc))/(2*abs(det2(ab,ac)))
 # # end
 # 
-"""
-    isincircle(a,b,c,x)
-
-Returns `true` iff point x is in circumcircle of oriented triangle `(a,b,c)`.
-"""
-function isincircle(a,b,c,x)
-	a,b,c = a-x,b-x,c-x
-	@assert !isleft(a,c,b) "incircle: triangle ($a,$b,$c) has wrong orientation"
-	m = SA[a[1] a[2] norm²(a); b[1] b[2] norm²(b); c[1] c[2] norm²(c)]
-	return det(m) > 0
-end
 # 
 # """
 #     isincircle(a,b,c,p,q)
@@ -401,31 +396,6 @@ function triangulate_loop(points, idx)
 	return LibTriangle.constrained_triangulation(vmat, idx, elist)
 end
 
-# Minimizing a quadratic function
-"""    min_quadratic((a,b,c), (x1,x2))
-Returns the minimal value of (a x²+2bx+c) on the interval [x1,x2]."""
-function min_quadratic((a,b,c), (x1,x2))
-	x1,x2 = minmax(x1,x2)
-	iszero(a) && return min(b*x1,b*x2)+c
-	@assert a > 0
-	xc = -b/a
-	x1 < xc < x2 && return c-b^2/a
-	return min(x1*(b+a*x1), x2*(b+a*x2))+c
-end
-"""    min_quartic(f, (x1,x2))
-Returns the minimal value of the quartic f on the interval [x1,x2].
-f is given as a list of coefficients (a0,a1,a2,a3,a4)."""
-function min_quartic(f, (x1,x2))
-	x1,x2 = minmax(x1,x2)
-	r0 = (x1+x2)/2
-	for _ in 1:5
-		r1 = ((8*f[1]*r0+3*f[2])*r0^2-f[4])/(2*f[3]+r0*(6*f[2]+12*f[1]*r0))
-		abs(r1 - r0) ≤ 1e-6*abs(r0) && break
-		r0 = r1
-	end
-	r0 = clamp(r0, x1, x2)
-	return f[5]+r0*(f[4]+r0*(f[3]+r0*(f[2]+r0*f[1])))
-end
 # Separators (parametrized bisectors) ««1
 # Segment positions and branches««2
 struct Branch; sign::Int8; end
@@ -642,52 +612,6 @@ end
 """    atan(separator)
 Returns the angle of the initial normal of this separator."""
 @inline Base.atan(sep::Separator) = atan(sep.normal[2], sep.normal[1])
-# Capture ««
-	# edge is captured if for all r, d(p(r), L) < r
-	# i.e. min(r² - d²(p(r), L)) > 0
-"""    capture(separator, b1, r1, b2, r2, line)
-
-Returns a positive value iff the separator arc [r1,r2] is entirely closer
-to the line than to either of its sides."""
-function capture(sep::Separator, b1::Branch, r1, b2::Branch, r2, l::Line)
-	# this returns a positive value iff, for all r: d²(eval(sep, r), L) < r
-	# i.e. min(r²-d²(eval(sep, r), L)) > 0
-	# Let p(r) = eval(sep, r), N=l.normal, A=l.offset;
-	# we return min(f(r)), f(r) = r²-(N.p(r)+A)².
-	if b1 == _BAD_BRANCH || b2 == _BAD_BRANCH
-		error("not implemented: separator from incorrect node")
-	end
-	if isparallel(sep)
-		error("not implemented")
-	end
-	if isstraight(sep)
-		# in this case: p(r) = o+ht, where h=±√(r²-r₀²)
-		# so that f(r) = r₀²+h²-(N.o+A+ h N.t)²
-		#              = h²(1-(N.t)²) - 2(N.t)(N.o+A) h + r₀²-(N.o+A)²
-		# we return the minimum of f on [h1, h2]:
-		Nt = l.normal ⋅ sep.tangent
-		Noa= l.normal ⋅ sep.origin + l.offset
-		r0 = sep.rmin
-		a = 1 - Nt^2
-		b = -Nt*Noa
-		c = r0^2 - Noa^2
-		return min_quadratic((a, b, c), (sqrt(b1,r1^2-r0^2), sqrt(b2,r2^2-r0^2)))
-	end
-	# in this case, p(r) = o+ht + h²n, where h=±√(r-r₀)  (so that r=r₀+h²)
-	# f(r) = r₀+h²-(N.o+A + hN.t + h²N.n)²
-	#      = -(N.n)²h⁴ -2(N.t)(N.n) h³ + (1-(N.t)²-(N.o+A)²) h²
-	#        - 2(N.o-A)(N.t) h + r₀ - (N.o+A)²
-	Nn = l.normal ⋅ sep.normal
-	Nt = l.normal ⋅ sep.tangent
-	Noa= l.normal ⋅ sep.origin + l.offset
-	r0 = sep.rmin
-	a4 = -Nn^2
-	a3 = -2*Nt*Nn
-	a2 = 1-Nt^2-Noa^2
-	a1 = -2*Noa*Nt
-	a0 = r0 - Noa^2
-	return min_quartic((a0,a1,a2,a3,a4), (sqrt(b1, r1-r0), sqrt(b2, r2-r0)))
-end
 # Tripoints ««1
 @inline _BAD_TRIPOINT(x) = (oftype(x,NaN), _BAD_BRANCH,_BAD_BRANCH,_BAD_BRANCH)
 # docstring ««2
@@ -1147,7 +1071,6 @@ function influences(v::AbstractVoronoi, i, j, q)
 	a,b,g = point(v, i), point(v,j), geometricnode(v,q)
 	ab, ag = b-a, g-a
 	return (0 < dot(ab,ag) < dot(ab,ab))
- # (det2(ab,ag) ≥ 0) &&
 end
 
 """    findrootnode(v, a, b)
@@ -1170,14 +1093,6 @@ function findrootnode(v::AbstractVoronoi, a,b)
 	return node(emin)
 end
 
-# function meetscircle(v::AbstractVoronoi, q::Node, i, j)
-# 	g, r = geometricnode(v, q), noderadius(v, q)
-# 	a, b = point(v, i), point(v, j)
-# 	ab2 = norm²(b-a)
-# 	d = dot(g-a,b-a)
-# # 	println("   seg($i,$j)-node($q=$(triangle(v,q))) distance:\n   a=$a\n   b=$b\n   g=$g\n   $(segdistance²(a,b,g))<? r^2=$r^2")
-# 	return segdistance²(a, b, g) < r^2
-# end
 # Segment insertion ««2
 """    edgecapture(v,e)
 
@@ -1442,18 +1357,6 @@ end#»»
 # 	swapnodes!(CornerTables.triangulation(v), q1, q2)
 # 	v.geomnode[SA[int(q1),int(q2)]] = v.geomnode[SA[int(q2),int(q1)]]
 # 	v.noderadius[SA[int(q1),int(q2)]] = v.noderadius[SA[int(q2),int(q1)]]
-# end
-
-# @inline function geometricnode!(v::VoronoiDiagram, q::Node, g=equidistant(v,q))
-# # 	println("geometricnode!($q)/$(nnodes(v))")
-# 	v.geomnode[int(q)] = g
-# 	s = cell(v, q, 1)
-# 	v.noderadius[int(q)] = if issegment(v, s)
-# 		(c1, c2) = cellsegment(v, s)
-# 		segdistance²(point(v, c1), point(v, c2), g)
-# 	else
-# 		distance²(point(v, s), g)
-# 	end
 # end
 
 function separator(v::AbstractVoronoi, c1, c2)#««
