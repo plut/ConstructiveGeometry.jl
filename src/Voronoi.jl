@@ -961,7 +961,8 @@ struct VoronoiDiagram{J,T} <: AbstractVoronoi{J}
 	noderadius::Vector{T} # indexed by nodes
 	separator::Vector{Separator{T}} # indexed by edges
 	branch::Vector{Branch} # indexed by edges
-	neighbours::Vector{J} # indexed by points
+	nextsegment::Vector{J} # indexed by points
+	prevsegment::Vector{J} # indexed by points
 
 	@inline VoronoiDiagram{J,T}(triangulation::CornerTable, points, segments
 		) where{J,T} =
@@ -970,7 +971,7 @@ struct VoronoiDiagram{J,T} <: AbstractVoronoi{J}
 			Vector{T}(undef, nnodes(triangulation)),
 			Vector{Separator{T}}(undef, nedges(triangulation)),
 			Vector{Int8}(undef, nedges(triangulation)),
-			Vector{J}(undef, length(points)))
+			zeros(J, length(points)), zeros(J, length(points)))
 end
 
 @inline CornerTables.triangulation(v::VoronoiDiagram) = v.triangulation
@@ -1136,6 +1137,10 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 end#»»
 function addsegment!(v::VoronoiDiagram, c::Cell)#««
 	a,b = cellsegment(v, c)
+	# v.nextsegment, v.prevsegment are encoded as:
+	# 0 = no info yet, -1 = several segments from this one, >0 = one segment
+	v.nextsegment[a] = iszero(v.nextsegment[a]) ? int(c) : -1
+	v.prevsegment[b] = iszero(v.prevsegment[b]) ? int(c) : -1
 	println("\e[31;1;7minserting segment $c = ($a,$b)\e[m")
 	display(v)
 	q0 = findrootnode(v, a, b)
@@ -1226,9 +1231,84 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 
 	# split segments in two
 	splitsegments!(v)
+	for l in (v.nextsegment, v.prevsegment)
+		l .= max.(2 .* l .- npoints(v) .- 1, 0)
+	end
+
 
 	return v
 end#»»
+# Split segments ««2
+"""
+    splitsegments!(voronoidiagram)
+
+Splits segment cells in two parts depending on the orientation of the segment:
+(right of segment, left of segment).
+"""
+function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
+	np = length(v.points)
+	ns = length(v.segments)
+	# sanity check:
+	for (a,b) in v.segments; @assert (b,a) ∉ v.segments; end
+# 	display(v)
+	ncells!(v, np+2ns)
+	# rename cells to alternate segments and their opposites;
+	# since we are swapping with undefined cells,
+	# there is no need to worry about side-effects.
+	for i in ns:-1:1
+		movecell!(v, Cell(np+i), Cell(np+2i-1))
+	end
+	origsegments = copy(v.segments)
+	sizehint!(empty!(v.segments), 2ns)
+	for (i, (a,b)) in pairs(origsegments)
+		push!(v.segments, (a,b), (b,a))
+	end
+	# now split each cell in two
+	for i in 1:ns
+		s12, s21 = Cell(np+2i-1), Cell(np+2i)
+		(c1,c2) = cellsegment(v, s12)
+		(p1,p2) = point(v, c1), point(v, c2)
+		println("\e[7m splitting cell $s12 = ($c1,$c2)\e[m")
+# 		showcell(stdout, v, s12)
+		e2 = anyedge(v, s12)
+		while head(v, e2) ≠ c2; e2 = after(v, e2); end
+		e1 = e2
+		while head(v, e1) ≠ c1; tail!(v, e1, s21); e1 = after(v, e1); end
+		println("found e1=$e1, e2=$e2")
+		# split the cell by inserting two new nodes
+		# (= split vertex s12 of the dual triangulation)
+		#
+		#   c1  o1|e1  s12 e2|o2 c2 becomes:
+		#
+		#   o1│q12  s21 e2│
+		#     │    q21    │q23
+		#  c1 q1─────────q2 c2
+		#  q13│    q11    │
+		#     │e1      q22│o2
+		#
+		o1, o2 = opposite(v, e1), opposite(v, e2)
+		q1, q2 = newnodes!(v, 2)
+		q11, q12, q13 = side(q1,1), side(q1,2), side(q1,3)
+		q21, q22, q23 = side(q2,1), side(q2,2), side(q2,3)
+		tail!(v, q11=>s12, q12=>s21, q13=>c1, q21=>s21, q22=>s12, q23=>c2)
+		opposites!(v, q11=>q21, q12=>o1, q13=>e1, q22=>o2, q23=>e2)
+		anyedge!(v, s12, q11); anyedge!(v, s21, q21)
+		display((v, q1)); display((v,q2)); display((v, s12)); display((v, s21))
+		# fix geometric information:
+		seg12, seg21 = segment(v, s12), segment(v, s21)
+		separators!(v, q11, q21, Separator(seg12, seg21))
+		separator!(v, q12 => separator(v, e1), q22 => separator(v, e2),
+			q13 => separator(v, o1))
+		edgedata!(v, o1) # this also fixes q12
+		edgedata!(v, e2) # this also fixes q23
+		for e in star(v, q21); edgedata!(v, e); end
+		for e in star(v, q21); nodedata!(v, node(e)); end
+		@assert iszero(noderadius(v,q1))
+		@assert iszero(noderadius(v,q2))
+	end
+	return v
+end#»»
+
 # Voronoi diagram: geometry««1
 # Geometric branch computation ««2
 @inline function tripoint_ppp(v::VoronoiDiagram, c1,c2,c3)
@@ -1370,189 +1450,6 @@ function separator(v::AbstractVoronoi, c1, c2)#««
 end#»»
 
 # Offset ««1
-# Split segments ««2
-"""
-    splitsegments!(voronoidiagram)
-
-Splits segment cells in two parts depending on the orientation of the segment:
-(right of segment, left of segment).
-"""
-function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
-	np = length(v.points)
-	ns = length(v.segments)
-	# sanity check:
-	for (a,b) in v.segments; @assert (b,a) ∉ v.segments; end
-# 	display(v)
-	ncells!(v, np+2ns)
-	# rename cells to alternate segments and their opposites;
-	# since we are swapping with undefined cells,
-	# there is no need to worry about side-effects.
-	for i in ns:-1:1
-		movecell!(v, Cell(np+i), Cell(np+2i-1))
-	end
-	origsegments = copy(v.segments)
-	sizehint!(empty!(v.segments), 2ns)
-	for (i, (a,b)) in pairs(origsegments)
-		push!(v.segments, (a,b), (b,a))
-	end
-	# now split each cell in two
-	for i in 1:ns
-		s12, s21 = Cell(np+2i-1), Cell(np+2i)
-		(c1,c2) = cellsegment(v, s12)
-		(p1,p2) = point(v, c1), point(v, c2)
-		println("\e[7m splitting cell $s12 = ($c1,$c2)\e[m")
-# 		showcell(stdout, v, s12)
-		e2 = anyedge(v, s12)
-		while head(v, e2) ≠ c2; e2 = after(v, e2); end
-		e1 = e2
-		while head(v, e1) ≠ c1; tail!(v, e1, s21); e1 = after(v, e1); end
-		println("found e1=$e1, e2=$e2")
-		# split the cell by inserting two new nodes
-		# (= split vertex s12 of the dual triangulation)
-		#
-		#   c1  o1|e1  s12 e2|o2 c2 becomes:
-		#
-		#   o1│q12  s21 e2│
-		#     │    q21    │q23
-		#  c1 q1─────────q2 c2
-		#  q13│    q11    │
-		#     │e1      q22│o2
-		#
-		o1, o2 = opposite(v, e1), opposite(v, e2)
-		q1, q2 = newnodes!(v, 2)
-		q11, q12, q13 = side(q1,1), side(q1,2), side(q1,3)
-		q21, q22, q23 = side(q2,1), side(q2,2), side(q2,3)
-		tail!(v, q11=>s12, q12=>s21, q13=>c1, q21=>s21, q22=>s12, q23=>c2)
-		opposites!(v, q11=>q21, q12=>o1, q13=>e1, q22=>o2, q23=>e2)
-		anyedge!(v, s12, q11); anyedge!(v, s21, q21)
-		display((v, q1)); display((v,q2)); display((v, s12)); display((v, s21))
-		# fix geometric information:
-		seg12, seg21 = segment(v, s12), segment(v, s21)
-		separators!(v, q11, q21, Separator(seg12, seg21))
-		separator!(v, q12 => separator(v, e1), q22 => separator(v, e2),
-			q13 => separator(v, o1))
-		edgedata!(v, o1) # this also fixes q12
-		edgedata!(v, e2) # this also fixes q23
-		for e in star(v, q21); edgedata!(v, e); end
-		for e in star(v, q21); nodedata!(v, node(e)); end
-		@assert iszero(noderadius(v,q1))
-		@assert iszero(noderadius(v,q2))
-	end
-	return v
-end#»»
-
-# OffsetDiagram type and constructor ««2
-struct OffsetDiagram{J,P,T} <: AbstractVoronoi{J}
-	triangulation::CornerTable{J}
-	voronoi::VoronoiDiagram{J,T}
-	# parametrizations of edges by distance to sites:
-	separator::Vector{Separator{T}} # indexed by edges
-	# this encodes the direction of increasing distance of the cells
-	# at the tail node of this edge; +1 = to the node, -1 = away from node
-	# and 0 for a parallel bisector branch
-	branch::Vector{Branch} # indexed by edges
-	# number of neighbours of each point:
-	# (this is used for deciding where to stop offsetting)
-	neighbours::Vector{J}
-end
-
-@inline voronoi(v::OffsetDiagram) = v.voronoi
-for f in (:(CornerTables.triangulation), :npoints, :nsegments, :point,
-	:cellsegment, :geometricnode, :noderadius)
-	@eval @inline $f(t::OffsetDiagram, args...;kwargs...) =
-		$f(voronoi(t), args...;kwargs...)
-end
-
-
-@inline OffsetDiagram(points, segments; kw...) =
-	OffsetDiagram{Int32}(points, segments; kw...)
-function OffsetDiagram{J}(points::AbstractVector{P}, segments;
-		extra = 0) where{J,P}
-	v = VoronoiDiagram{J}(points, segments; extra)
-# 	println("\e[1;7m in OffsetDiagram, got the following Voronoi diagram:\e[m")
-# 	showall(v)
-	splitsegments!(v)
-println("\e[1;7m after split segments!:\e[m")
-print(stdout, v.points)
-showall(v)
-gnuplot(v)
-	# replace all node radii (squared distance) by their square roots:
-	map!(√, v.noderadius, v.noderadius)
-	# compute number of neighbours of each point:
-	neighbours = zeros(J, npoints(v))
-	for s in segments, a in s
-		neighbours[a]+= one(J)
-	end
-
-	seplist = Vector{Separator{eltype(P)}}(undef, nedges(v))
-	branch = Vector{Branch}(undef, nedges(v))
-	for e in eachedge(v)
-		o = opposite(v, e)
-		o < e && continue
-		# the separator is oriented with tail(o) = head(e) on its right,
-		# i.e. pointing to the *left* of a:
-		#       ╲n  head    ╱ 
-		#  left  ╲____o____╱  right
-		# +<⋯⋯   ╱    e    ╲  ⋯⋯>-
-		#      p╱   tail    ╲
-		#
-		# branch[e] = +1 iff node(e) lies on the + branch of the separator
-		# branch[e] = 0 iff this separator is a parallel bisector
-		sep = separator(v, tail(v,o), tail(v,e))
-		seplist[int(e)] = sep
-		seplist[int(o)] = reverse(sep)
-
-		if any(isnan, sep.normal)
-			branch[int(e)] = branch[int(o)] = Branch(0)
-			continue
-		end
-
-		q0, q1 = node(e), node(o)
-		g0, g1 = geometricnode(v, q0), geometricnode(v, q1)
-		r0, r1 = noderadius(v, q0), noderadius(v, q1)
-
-		g0p, g0m = evaluate(sep, Branch(+1), r0), evaluate(sep, Branch(-1), r0)
-		g1p, g1m = evaluate(sep, Branch(+1), r1), evaluate(sep, Branch(-1), r1)
-		@debug """
-edge $e (opposite $o): identifying node branches
-  $q0 = $g0 at $r0
-     (branch + $(g0≈g0p) $g0p
-             - $(g0≈g0m) $g0m)
-  $q1 = $g1 at $r1
-     (branch + $(g1≈g1p) $g1p
-             - $(g1≈g1m) $g1m)
-  sep = $sep
-"""
-
-# 		println(" g0=$g0 $r0\n g1=$g1 $r1\n")
-# 		println("  g0+=$g0p\n  g0-=$g0m\n  g1+=$g1p\n  g1-=$g1m\n")
-		if r0 == sep.rmin
-			if r1 == sep.rmin
-				branch[int(e)] = branch[int(o)] = Branch(0)
-			else
-				@assert g1 ≈ g1m
-				branch[int(e)], branch[int(0)] = Branch(-1), Branch(+1)
-			end
-		elseif r1 == sep.rmin
-			@assert g0 ≈ g0p
-			branch[int(e)], branch[int(0)] = Branch(+1), Branch(-1)
-		else
-# 			branch[int(e)] = iscloser(g0, g0p, g0m) ? one(Int8) : -one(Int8)
-# 			branch[int(o)] = iscloser(g1, g1p, g1m) ? one(Int8) : -one(Int8)
-			    if g0 ≈ g0p; branch[int(e)] = Branch(+1)
-			elseif g0 ≈ g0m; branch[int(e)] = Branch(-1)
-			else; error("no branch found for g0"); end
-			    if g1 ≈ g1p; branch[int(o)] = Branch(-1)
-			elseif g1 ≈ g1m; branch[int(o)] = Branch(+1)
-			else; error("no branch found for g1"); end
-		end
-		@debug " branches = $(branch[int(e)]), $(branch[int(o)]) "
-# 		println("branch[$e, $o] = $(branch[int(e)]), $(branch[int(o)])")
-	end
-
-	return OffsetDiagram{J,P,eltype(P)}(v, seplist, branch, neighbours)
-end
-
 # Single edge offset ««2
 """
     edgecross(v, e::Edge, r)
@@ -1565,7 +1462,7 @@ returns the following booleans:
 (The third boolean is *not* the disjunction of the two first ones:
 namely, the separator may be fully included in the interior of R).
 """
-@inline function edgecross(v::OffsetDiagram, e::Edge, radius)#««
+@inline function edgecross(v::VoronoiDiagram, e::Edge, radius)#««
 	o = opposite(v, e)
 	q0, q1 = node(e), node(o)
 	r0, r1 = noderadius(v, q0), noderadius(v, q1)
@@ -1603,7 +1500,7 @@ end#»»
 """    prevedge(v, e, r)
 Given an edge bounding a cell c, return the previous edge where
 the offset segment at distance r enters the cell."""
-function prevedge(v::OffsetDiagram, e0::Edge, r)#««
+function prevedge(v::VoronoiDiagram, e0::Edge, r)#««
 	@assert r ≥ 0
 	for e in star(v, e0)
 		(bl, _) = edgecross(v, e, r)
@@ -1614,7 +1511,7 @@ end#»»
 """    nextedge(v, e, r)
 Given an edge bounding a cell c, return the next edge where
 the offset segment at distance r exits the cell."""
-function nextedge(v::OffsetDiagram, e0::Edge, r)#««
+function nextedge(v::VoronoiDiagram, e0::Edge, r)#««
 	@assert r ≥ 0
 	for e in reverse(star(v, e0))
 		(_, br) = edgecross(v, e, r)
@@ -1624,33 +1521,22 @@ function nextedge(v::OffsetDiagram, e0::Edge, r)#««
 end#»»
 """    firstedge(v, c, r)
 Returns the first edge for an offset segment in cell `c`."""
-@inline firstedge(v::OffsetDiagram, c::Cell, r) = prevedge(v, anyedge(v, c), r)
+@inline firstedge(v::VoronoiDiagram, c::Cell, r) = prevedge(v, anyedge(v, c), r)
 """    edgeinter(v, e, r)
 Returns the status of 
 """
 
 # Offset chain ««2
-"    finds a segment starting at a and *not* going to b"
-function nextsegment(v::OffsetDiagram, a::Cell, b::Cell)
-	v.neighbours[int(a)] ≠ 2 && return zero(a)
-# 	showcell(stdout, v, a)
-	for e in star(v, a)
-		c = head(v, e)
-# 		println("  $e => $c: $(issegment(v,c))")
-		issegment(v, c) || continue
-# 		println("     $(cellsegment(v,c))")
-		cellsegment(v, c)[2] ≠ b && return c
-	end
-	return zero(a)
-end
-function zerochains_plus(v::OffsetDiagram{J,P}) where{J,P}#««
+@inline nextsegment(v::VoronoiDiagram, a::Cell) = Cell(v.nextsegment[a])
+@inline prevsegment(v::VoronoiDiagram, a::Cell) = Cell(v.prevsegment[a])
+function zerochains_plus(v::VoronoiDiagram{J,T}) where{J,T}#««
 	chains = Vector{Edge{J}}[]
-	points = Vector{P}[]
+	points = Vector{SVector{2,T}}[]
 	done = falses(ncells(v))
 	for startcell in J(npoints(v)+1):J(2):ncells(v)
 		done[startcell] && continue; c = Cell(startcell)
 		l = Edge{J}[]; push!(chains, l)
-		p = P[]; push!(points, p)
+		p = SVector{2,T}[]; push!(points, p)
 		while !iszero(c) && !done[int(c)]
 			e0 = anyedge(v, c) # guaranteed to be the segment-split edge
 			e1, e2 = after(v, e0), opposite(v, before(v, e0))
@@ -1658,14 +1544,14 @@ function zerochains_plus(v::OffsetDiagram{J,P}) where{J,P}#««
 			done[int(c)] = done[int(b)] = true
 			push!(l, e1, e2)
 			push!(p, point(v, b))
-			c = nextsegment(v, b, a)
+			c = nextsegment(v, b)
 		end
 		# now complete the chain to the left (if open)
 		(a, b) = cellsegment(v, Cell(startcell))
 		while !done[int(a)]
 			done[int(a)] = true
 			pushfirst!(p, point(v, a))
-			c = nextsegment(v, a, b)
+			c = prevsegment(v, a)
 			iszero(c) && break
 			done[int(c)] && break; done[int(c)] = true
 			e0 = anyedge(v, c)
@@ -1676,7 +1562,7 @@ function zerochains_plus(v::OffsetDiagram{J,P}) where{J,P}#««
 	end
 	return (chains, points)
 end#»»
-function zerochains_reverse(v::OffsetDiagram{J}, zplus) where{J}#««
+function zerochains_reverse(v::VoronoiDiagram{J}, zplus) where{J}#««
 	chains = Vector{Edge{J}}[]
 	(cplus, pplus) = zplus
 	for c in cplus
@@ -1689,18 +1575,18 @@ function zerochains_reverse(v::OffsetDiagram{J}, zplus) where{J}#««
 	end
 	return (chains, reverse.(pplus))
 end#»»
-"""    zerochains(v::OffsetDiagram, reversed)
+"""    zerochains(v::VoronoiDiagram, reversed)
 Returns the canonical chain corresponding to zero offset
 on either side of the trajectory.
 """
-function zerochains(v::OffsetDiagram)
+function zerochains(v::VoronoiDiagram)
 	zplus = zerochains_plus(v)
 	zminus = zerochains_reverse(v, zplus)
 	(zplus, zminus)
 end
 
 
-"""    offsetchains(v::OffsetDiagram, radius, reversed)
+"""    offsetchains(v::VoronoiDiagram, radius, reversed)
 
 Returns the set of chains encoding the offset curves for this radius.
 Each chain is represented as a list of edges. Each edge correspond
@@ -1709,7 +1595,7 @@ the curve enters the cell. The last edge in the chain represents either
 the closure of the chain (if identical to the first) or the opposite edge to
 the endpoint of the curve (if the chain is open).
 """
-function offsetchains(v::OffsetDiagram{J}, radius, reversed) where{J}#««
+function offsetchains(v::VoronoiDiagram{J}, radius, reversed) where{J}#««
 	# The last segment encodes the endpoint of the chain; it is either
 	# identical to the first segment (if closed loop) or the opposite edge
 	# of the true last point of the chain.
@@ -1755,7 +1641,7 @@ Interpolates an arc of ∂R as a polygonal pathwith absolute precision `atol`.
 Returns (P = list of points, L = list of indices),
 so that chain[i] corresponds to the points P[L[i]:L[i+1]].
 """
-function interpolate(v::OffsetDiagram{J,P,T}, chain, radius, atol) where{J,P,T}
+function interpolate(v::VoronoiDiagram{J,T}, chain, radius, atol) where{J,T}
 	e0 = first(chain); sep0 = separator(v, e0)
 	r = abs(radius)
 	δ = √(r/(8*atol)) # used for discretizing circle arcs
@@ -1793,7 +1679,7 @@ Optional parameter `atol` is the maximal distance of consecutive
 interpolated points on a circular arc.
 """
 function offset(points, segments, radius::Real; atol=DEFAULT_ATOL)
-	v = OffsetDiagram(points, segments)
+	v = VoronoiDiagram(points, segments)
 	r = abs(radius)
 	chains = offsetchains(v, r, radius < 0)
 	return [ interpolate(v, l, r, atol)[1] for l in chains ]
@@ -1805,7 +1691,7 @@ but all offset paths are computed simultaneously.
 """
 function offset(points, segments, radii::AbstractVector{<:Real};
 		atol=DEFAULT_ATOL)
-	v = OffsetDiagram(points, segments)
+	v = VoronoiDiagram(points, segments)
 	chains = [ offsetchains(v, abs(r), r < 0) for r in radii ]
 	[[ interpolate(v, l, abs(r), atol)[1] for l in chains ] for r in radii ]
 end
@@ -1910,7 +1796,7 @@ function Base.show(io::IO, a::AxialExtrude)
 			last(c) == first(c) ? "(closed)" : "(open)")
 	end
 end
-function AxialExtrude(v::OffsetDiagram{J}, points, p, atol, zchains) where{J}
+function AxialExtrude(v::VoronoiDiagram{J}, points, p, atol, zchains) where{J}
 	rp = abs(p[1])
 	indices = Dict{J,Vector{J}}()
 	if iszero(rp)
@@ -1976,7 +1862,7 @@ The description is encoded as (edge, type), where type is:
 1 for ∂R1 (in reverse direction), 2 for ∂R2,
 3 for + branch of edge, 4 for - branch of edge.
 """
-function cell_contour(v::OffsetDiagram, e1, e2, c2next)
+function cell_contour(v::VoronoiDiagram, e1, e2, c2next)
 	elist, etype = [e1], [Int8(1)]
 	lastedge = opposite(v, e2)
 	# orbit around the cell (fragment) c until we find the start point
@@ -2008,7 +1894,7 @@ OLD: a list of tuples
  - edgetypes = list of types matching each edge, encoded as:
  1=∂R1, 2=∂R2, 3=positive edge, 4=negative edge.
 """
-function chain_contour(v::OffsetDiagram{J}, chains1, chains2) where{J}#««
+function chain_contour(v::VoronoiDiagram{J}, chains1, chains2) where{J}#««
 	# build next-edge map for chains2 ««
 	c2next = zeros(Edge{J}, nedges(v))
 	for ch in chains2
@@ -2040,8 +1926,8 @@ Produces a list of points approximating the open interval [r1,r2] on edge e
 (in this order), on the positive branch.
 Returns list of [point; r], where r is distance to trajectory.
 """
-function edge_transverse(v::OffsetDiagram{J,P,T}, e, r1, r2, aff, atol#««
-		) where{J,P,T}
+function edge_transverse(v::VoronoiDiagram{J,T}, e, r1, r2, aff, atol#««
+		) where{J,T}
 	o = opposite(v, e)
 	q0, q1 = node(e), node(o)
 	g0, g1 = geometricnode(v, q0), geometricnode(v, q1)
@@ -2068,7 +1954,7 @@ end#»»
 
 Returns an interpolated list of points along this edge.
 """
-function edgepoints(v::OffsetDiagram, points, edge, edgetype,
+function edgepoints(v::VoronoiDiagram, points, edge, edgetype,
 		r1,ax1,r2,ax2, aff, atol)#««
 	if edgetype == 1 # use segment from ∂R1, backwards
 # 		println("use segment $edge from ∂R1 (backwards)")
@@ -2099,7 +1985,7 @@ end#»»
 Extrudes a loop of points [xi, yi] along the polygonal path(s);
 returns (points, triangulation).
 """
-function extrude_loop(v::OffsetDiagram{J,P,T}, loop, atol) where{J,P,T}
+function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}
 	# insert new points in the loop when it crosses [x=0] ««
 	p = last(loop)
 	newloop = []
@@ -2208,7 +2094,7 @@ function extrude(trajectory, profile, atol)
 	end#»»
 	extra = maximum(maximum(p[1] for p in loop) for loop in profile)
 	println("plist=$plist\nslist=$slist\nextra=$extra\n")
-	v = OffsetDiagram(plist, slist; extra)
+	v = VoronoiDiagram(plist, slist; extra)
 	return [ extrude_loop(v, loop, atol) for loop in profile ]
 end
 #»»1
@@ -2317,32 +2203,7 @@ function Base.show(io::IO, ::MIME"text/plain",
 # 		oo ≠ e && println(io, "  \e[31;7m opposite($o) = $oo, should be $e\e[m")
 # 	end
 end
-# function showedge(io::IO, v::OffsetDiagram, a::Edge)
-# 	if !iszero(branch(v, a))
-# 		q = node(a)
-# 		sep = separator(v, edge(v, a))
-# 		g = geometricnode(v, q)
-# 		r = √(noderadius(v, q))
-# 		b = branch(v, a)
-# 		h = evaluate(sep, r, b)
-# 		println("evaluate(sep, $r, $b) = $h ≈ $g?")
-# 		g ≈ h ||
-# 			println(io, "  \e[31;7mgeometricnode($q) = $g; evaluate($r, $b) = $h\e[m")
-# 	end
-# end
-# function Base.show(io::IO, ::MIME"text/plain", v::AbstractVoronoi)
-# 	println(io, "\e[1m begin Voronoi diagram with $(nnodes(v)) nodes and $(ncells(v)) cells:\e[m")
-# 	for q in eachnode(v); shownode(io, v, q); end
-# 	for c in eachcell(v); showcell(io, v, c); end
-# 	println(io, "\e[1m end Voronoi diagram\e[m")
-# end
-# function Base.show(io::IO, ::MIME"text/plain", v::OffsetDiagram)
-# 	println(io, "\e[1m begin offset diagram with $(nnodes(v)) nodes and $(ncells(v)) cells:\e[m")
-# 	for q in eachnode(v); shownode(io, v, q); end
-# 	for c in eachcell(v); showcell(io, v, c); end
-# 	println(io, "\e[1m end offset diagram\e[m")
-# end
-# end »»1
+# »»1
 end
 
 V=Voronoi
@@ -2380,11 +2241,11 @@ c10 = (c3, c4)
 
 
 
-# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 
 #
-# v=V.OffsetDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
-# z = V.zerochains(v)
+# v=V.VoronoiDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
+z = V.zerochains(v)
 # el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
 
 # v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)])
