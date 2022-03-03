@@ -159,9 +159,11 @@ include("scad.jl")
 """
     mesh(opt::MeshOptions, object, children_meshes)
 
-This is the main function used by each concrete `AbstractGeometry` subtype
+This is the main method used by each concrete `AbstractGeometry` subtype
 to compute the main mesh for this object type
 from the (possibly empty) list of meshes of its children.
+
+This method should not be called by the end user.
 """
 function mesh end
 
