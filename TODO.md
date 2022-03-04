@@ -1,3 +1,12 @@
+# 1d paths
+ * use `AbstractGeometry{1}` for this!
+ * concrete subtypes include segments, circular arcs, splines, loop closing
+ * allow moves to be relative as well as absolute
+ * circular arc: defined either by angle+center+radius, sagitta+endpoints...
+ * meshing methods produce polylines
+ * concrete type for polyline
+ * operators 1d ↔ 2d: border, interior
+ * `path_extrude(surface, profile) => path_extrude(∂surface)`
 # Bug fixes
  - [x] `matrix*set_parameters` etc.; `raise(.8)*mat*cone(3)*lozenge`...
  - [x] `raise` in 2d
