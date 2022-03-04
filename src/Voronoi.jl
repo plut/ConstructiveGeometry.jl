@@ -53,6 +53,24 @@ const DEFAULT_ATOL=1e-1
 #      p╱a  tail   b╲
 
 # Geometry ««1
+# tool: consecutives around an array, wrapping around ««2
+struct ConsecutiveWrap{T,A<:AbstractVector{T}} <: AbstractVector{NTuple{2,T}}
+	vector::A
+end
+@inline Base.size(w::ConsecutiveWrap) = size(w.vector)
+@inline consecutives(v::AbstractVector{T}) where{T} =
+	ConsecutiveWrap{T,typeof(v)}(v)
+function Base.iterate(w::ConsecutiveWrap)
+	isempty(w.vector) && return nothing
+	y = first(w.vector); return ((last(w.vector), y), (2, y))
+end
+function Base.iterate(w::ConsecutiveWrap, (i, x))
+	i > length(w.vector) && return nothing
+	y = w.vector[i]; return ((x, y), (i+1, y))
+end
+
+
+	
 # Elementary geometry ««2
 
 abstract type GeometryException <: Exception end
@@ -142,8 +160,8 @@ function triangulate_loop(points, idx)
 	for i in idx
 		println("$(points[i][1])\t$(points[i][2])\t$i")
 	end
-	vmat = [ points[i][j] for i in idx, j in 1:2 ]
-	elist = [ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
+	vmat = Float64[ points[i][j] for i in idx, j in 1:2 ]
+	elist = Int[ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
 	println("vmat=",vmat)
 	println("idx=",idx)
 	println("elist=",elist)
@@ -939,11 +957,11 @@ are closer to right(e) than to tail(e)/head(e)."""
 function edgecapture(v::VoronoiDiagram, e::Edge)#««
 	# edge is captured if for all r, d(p(r), L) < r
 	# i.e. min(r² - d²(p(r), L)) > 0
-	println("\e[32;7medgecapture($(right(v,e)) = $(cellsegment(v,right(v,e))) -> $e = $(tail(v,e))⋯$(head(v,e))\e[m")
+# 	println("\e[32;7medgecapture($(right(v,e)) = $(cellsegment(v,right(v,e))) -> $e = $(tail(v,e))⋯$(head(v,e))\e[m")
 	o = opposite(v,e)
 	be, bo = branch(v, e), branch(v, o)
 	if bo == _BAD_BRANCH
-		println("\e[32;1m right node $(node(o))=$(triangle(v,node(o))) is bad, must flip edge\e[m")
+# 		println("\e[32;1m right node $(node(o))=$(triangle(v,node(o))) is bad, must flip edge\e[m")
 		return true
 	end
 	@assert issegment(v, right(v, e))
@@ -955,7 +973,7 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 # 		return true
 # 	end
 	if !influences(v, a, b, q)
-		println("\e[32m segment ($a,$b) does not see node $q=$(geometricnode(v,q))\e[m")
+# 		println("\e[32m segment ($a,$b) does not see node $q=$(geometricnode(v,q))\e[m")
 		return false
 	end
 # 	l = line(v, right(v,e))
@@ -987,10 +1005,10 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 end#»»
 function addsegment!(v::VoronoiDiagram, c::Cell)#««
 	a,b = cellsegment(v, c)
-	println("\e[31;1;7minserting segment $c = ($a,$b)\e[m")
-	display(v)
+# 	println("\e[31;1;7minserting segment $c = ($a,$b)\e[m")
+# 	display(v)
 	q0 = findrootnode(v, a, b)
-	print("\e[31mroot node is $q0:\e[m "); display((v,q0))
+# 	print("\e[31mroot node is $q0:\e[m "); display((v,q0))
 	stack = [opposite(v, e) for e in sides(q0)]
 	insert!(v, q0, c)
 # 	println("\e[31;7m after insert!($q0, $c) =$stack:\e[m") # ; display(v)
@@ -1011,7 +1029,7 @@ function addsegment!(v::VoronoiDiagram, c::Cell)#««
 # 		influences(v, a, b, q) || println("   segment($a,$b) does not see node $q =$(geometricnode(v,q))")
 # 		influences(v, a, b, q) || continue
 		edgecapture(v, e) || continue
-		println("   \e[7m flipping edge $e: connect $(right(v,e))->$(left(v,e)), disconnect $(head(v,e)) - $(tail(v,e))\e[m")
+# 		println("   \e[7m flipping edge $e: connect $(right(v,e))->$(left(v,e)), disconnect $(head(v,e)) - $(tail(v,e))\e[m")
 		if left(v,e) == c
 			error("  closing loop around cell $(tail(v,e))")
 		end
@@ -1141,13 +1159,12 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		c12, c21 = Cell(np+2i-1), Cell(np+2i)
 		(c1,c2) = cellsegment(v, c12)
 		(p1,p2) = point(v, c1), point(v, c2)
-		println("\e[7m splitting cell $c12 = ($c1,$c2)\e[m")
+# 		println("\e[7m splitting cell $c12 = ($c1,$c2)\e[m")
 # 		showcell(stdout, v, c12)
 		e2 = anyedge(v, c12)
 		while head(v, e2) ≠ c2; e2 = after(v, e2); end
 		e1 = e2
 		while head(v, e1) ≠ c1; tail!(v, e1, c21); e1 = after(v, e1); end
-		println("found e1=$e1, e2=$e2")
 		# split the cell by inserting two new nodes
 		# (= split vertex c12 of the dual triangulation)
 		#
@@ -1166,7 +1183,7 @@ function splitsegments!(v::VoronoiDiagram{J}) where{J}#««
 		tail!(v, e11=>c12, e12=>c21, e13=>c1, e21=>c21, e22=>c12, e23=>c2)
 		opposites!(v, e11=>e21, e12=>o1, e13=>e1, e22=>o2, e23=>e2)
 		anyedge!(v, c12, e11); anyedge!(v, c21, e21)
-		display((v, q1)); display((v,q2)); display((v, c12)); display((v, c21))
+# 		display((v, q1)); display((v,q2)); display((v, c12)); display((v, c21))
 		# fix geometric information:
 		seg12, seg21 = segment(v, c12), segment(v, c21)
 		separators!(v, e11, e21, Separator(seg12, seg21))
@@ -1401,100 +1418,6 @@ Returns the status of
 """
 
 # Offset chain ««2
-# # function zerochains_plus(v::VoronoiDiagram{J,T}) where{J,T}#««
-# # 	chains = Vector{Edge{J}}[]
-# # 	points = Vector{SVector{2,T}}[]
-# # 	done = falses(ncells(v))
-# # 	for startcell in J(npoints(v)+1):J(2):ncells(v)
-# # 		done[startcell] && continue; c = Cell(startcell)
-# # 		l = Edge{J}[]; push!(chains, l)
-# # 		p = SVector{2,T}[]; push!(points, p)
-# # 		while !iszero(c) && !done[int(c)]
-# # 			e0 = anyedge(v, c) # guaranteed to be the segment-split edge
-# # 			e1, e2 = after(v, e0), opposite(v, before(v, e0))
-# # 			a, b = cellsegment(v, c)
-# # 			done[int(c)] = done[int(b)] = true
-# # 			push!(l, e1, e2)
-# # 			push!(p, point(v, b))
-# # 			c = nextedge(v, b)
-# # 		end
-# # 		# now complete the chain to the left (if open)
-# # 		(a, b) = cellsegment(v, Cell(startcell))
-# # 		while !done[int(a)]
-# # 			done[int(a)] = true
-# # 			pushfirst!(p, point(v, a))
-# # 			c = prevedge(v, a)
-# # 			iszero(c) && break
-# # 			done[int(c)] && break; done[int(c)] = true
-# # 			e0 = anyedge(v, c)
-# # 			e1, e2 = after(v, e0), opposite(v, before(v, e0))
-# # 			a, b = cellsegment(v, c)
-# # 			pushfirst!(l, e1, e2)
-# # 		end
-# # 	end
-# # 	return (chains, points)
-# # end#»»
-# function zerochains_plus(v::VoronoiDiagram{J,T}) where{J,T}#««
-# 	chains = Vector{Edge{J}}[]
-# 	points = Vector{SVector{2,T}}[]
-# 	done = falses(ncells(v))
-# 	for startcell in J(npoints(v)+1):J(2):ncells(v)
-# 		done[startcell] && continue; c = Cell(startcell)
-# 		l = Edge{J}[]; push!(chains, l)
-# 		p = SVector{2,T}[]; push!(points, p)
-# 		while !iszero(c) && !done[int(c)]
-# 			done[int(c)] = true
-# 			issegment(v, c) && push!(p, point(v, cellsegment(v, c)[1]))
-# 			e = nextedge(v, c)
-# 			if iszero(e)
-# 				push!(p, point(v, cellsegment(v, c)[2])) # last edge for open chain
-# 				break
-# 			end
-# 			push!(l, e)
-# 			c = head(v, e)
-# 		end
-# 		println("  after first step: l=$l, p=$p")
-# 		# now complete the chain to the left (if open)
-# 		c = Cell(startcell)
-# 		e = prevedge(v, c)
-# 		while !iszero(e)
-# 			c = head(v, e)
-# 			done[int(c)] && break
-# 			issegment(v, c) && push!(p, point(v, cellsegment(v, c)[1]))
-# 			e = prevedge(v, c)
-# 		end
-# 	end
-# 	return (chains, points)
-# end#»»
-# function zerochains_reverse(v::VoronoiDiagram{J}, zplus) where{J}#««
-# 	chains = Vector{Edge{J}}[]
-# 	done = falses(ncells(c))
-# 	(cplus, pplus) = zplus
-# 	for ch in cplus
-# 		l = Edge{J}[]; push!(chains, l)
-# 		c = Cell(int(last(ch))+1) # opposite of last edge
-# 		while !iszero(c) && !done[int(c)]
-# 			done[int(c)] = true
-# 		end
-# # 		for i in length(c):-2:1
-# # 			e1, e2 = c[i], c[i-1]
-# # 			push!(l, opposite(v, next(opposite(v, e1))),
-# # 				opposite(v, prev(opposite(v, e2))))
-# # 		end
-# 	end
-# 	return (chains, reverse.(pplus))
-# end#»»
-# """    zerochains(v::VoronoiDiagram, reversed)
-# Returns the canonical chain corresponding to zero offset
-# on either side of the trajectory.
-# """
-# function zerochains(v::VoronoiDiagram)
-# 	zplus = zerochains_plus(v)
-# 	zminus = zerochains_reverse(v, zplus)
-# 	(zplus, zminus)
-# end
-
-
 """    offsetchains(v::VoronoiDiagram, radius, reversed)
 
 Returns the set of chains encoding the offset curves for this radius.
@@ -1608,18 +1531,20 @@ end
 # These functions compute a triangulation of the difference of two offset
 # regions R(r2)∖R(r1), where r2 > r1.
 # Point collection ««2
-"""    PointSet
+"""    Mesh
 
-A set of points, with double indexation (by integers and by the points)."""
-struct PointSet{J,P} <: AbstractVector{P}
+Points are doubly-indexed (by integers and points) to prevent repeats.
+Faces are triangle of point indices."""
+struct Mesh{J,P} <: AbstractVector{P}
 	points::Vector{P}
 	index::Dict{P,J}
+	triangles::Vector{NTuple{3,J}}
 end
-@inline PointSet{J,P}() where{J,P} = PointSet{J,P}(P[], Dict{P,J}())
-@inline Base.size(plist::PointSet) = (length(plist.points),)
-@inline Base.getindex(plist::PointSet, i::Integer) = plist.points[i]
+@inline Mesh{J,P}() where{J,P} = Mesh{J,P}(P[], Dict{P,J}(), [])
+@inline Base.size(plist::Mesh) = (length(plist.points),)
+@inline Base.getindex(plist::Mesh, i::Integer) = plist.points[i]
 
-function Base.push!(plist::PointSet{J,P}, p) where{J,P} # returns index
+function Base.push!(plist::Mesh{J,P}, p) where{J,P} # returns index
 	k = get(plist.index, p, zero(J))
 	!iszero(k) && return k
 	push!(plist.points, p)
@@ -1627,10 +1552,10 @@ function Base.push!(plist::PointSet{J,P}, p) where{J,P} # returns index
 	plist.index[p] = k
 	return k
 end
-@inline Base.append!(plist::PointSet{J}, p) where{J} =
+@inline Base.append!(plist::Mesh{J}, p) where{J} =
 	J[ push!(plist, x) for x in p ]
 
-function Base.show(io::IO, plist::PointSet)
+function Base.show(io::IO, plist::Mesh)
 	for (i, p) in pairs(plist.points)
 		println(io, " ",i, ": ", p)
 		if plist.index[p] ≠ i
@@ -1702,14 +1627,12 @@ function Base.show(io::IO, a::AxialExtrude)
 			last(c) == first(c) ? "(closed)" : "(open)")
 	end
 end
-function AxialExtrude(v::VoronoiDiagram{J}, points::PointSet,
-		p::AbstractVector{T}, atol, neg) where{J,T}
-	# `points`: `PointSet` collecting all points for this offset
+function AxialExtrude(v::VoronoiDiagram{J}, points::Mesh,
+		rp::T, zp, side, atol) where{J,T}
+	# `points`: `Mesh` collecting all points for this offset
 	# `p`: the single point we are extruding
-	rp, zp = abs(p[1]), p[2]
-	println((rp, zp))
 	indices = Dict{J,Vector{J}}()
-	chains = offsetchains(v, rp, neg)
+	chains = offsetchains(v, rp, side)
 	for ch in chains
 		np = J(length(points))
 		(newpoints, idx) = interpolate(v, ch, rp, atol)
@@ -1849,7 +1772,7 @@ firt of those two edges.
 The points are pushed on the point-set and the corresponding indices are
 returned.
 """
-function edgepoints(v::VoronoiDiagram, points::PointSet,
+function edgepoints(v::VoronoiDiagram, points::Mesh,
 		edge, edgetype, ax1, ax2, aff, atol)#««
 	println("\e[34mdraw ($edge, $edgetype); r1=$(ax1.r) r2=$(ax2.r)\e[m")
 	if edgetype == 1 # use segment from ∂R1, backwards
@@ -1867,6 +1790,45 @@ function edgepoints(v::VoronoiDiagram, points::PointSet,
 end#»»
 
 # Extrusion of a polygonal loop««2
+function extrude_vertical(v::VoronoiDiagram, mesh, p, q, atol)
+	r, side, zp, zq = abs(p[1]), p[1] < 0, p[2], q[2]
+	println("\e[48;5;88mextrude a vertical face at r=$r: z=($zp, $zq)\e[m")
+	chains = offsetchains(v, r, side)
+	for ch in chains
+		l = interpolate(v, ch, r, atol)[1]
+		a = first(l);
+		pa, qa = append!(mesh, (SA[a...; zp], SA[a...; zq]))
+		for b in l[2:end]
+			pb, qb = append!(mesh, (SA[b...; zp], SA[b...; zq]))
+			push!(mesh.triangles, (pa,pb,qa), (pb,qb,qa))
+			a, pa, qa = b, pb, qb
+		end
+	end
+end
+function extrude_sloped(v::VoronoiDiagram{J}, mesh, p, q, atol) where{J}
+	println("\e[7mextrude a sloped face: $p->$q\e[m")
+	side = p[1] < 0 || q[1] < 0
+	rp, rq = abs(p[1]), abs(q[1])
+	(r1,r2,z1,z2,rev) = rp < rq ? (rp,rq,p[2],q[2],false) : (rq,rp,q[2],p[2],true)
+	aff = Affine3(r1=>z1, r2=>z2)
+	ax1 = AxialExtrude(v, mesh, r1, z1, side, atol)
+	ax2 = AxialExtrude(v, mesh, r2, z2, side, atol)
+	for (c, elist, tlist) in chain_contour(v, ax1.chains, ax2.chains)
+		cellpoints = Int64[] # this will be passed to LibTriangle
+		println("\e[35;7min cell $c: $elist, $tlist\e[m")
+		for (e, t) in zip(elist, tlist) #(edge, edgetype)
+			ep = edgepoints(v, mesh, e, t, ax1, ax2, aff, atol)
+			println("  \e[1m($e,$t) contributes $ep=$(mesh[ep])\e[m")
+			append!(cellpoints, ep)
+		end
+		unique!(cellpoints)
+		if length(cellpoints) ≥ 3
+			tri = triangulate_loop(mesh, cellpoints)
+			println("triangulation is $tri")
+			append!(mesh.triangles, (rev ? (a,b,c) : (a,c,b) for (a,b,c) in tri))
+		end
+	end
+end
 """    extrude_loop(v, loop)
 
 Extrudes a loop of points [xi, yi] along the polygonal path(s);
@@ -1874,122 +1836,21 @@ returns (points, triangulation).
 """
 function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}
 	# axial paths: extrusions of individual points of the loop««
-	points = PointSet{J,SVector{3,T}}()
-	triangles = NTuple{3,Int}[]
-	loops, sides = split_loop(loop)
-	println((loops, sides))
-	for (loop, side) in zip(loops, sides)
-		println("\e[7mloop: $loop / side=$side\e[m")
-		# extrude all the points in this loop:
-		axial = [ AxialExtrude(v, points, p, atol, side) for p in loop ]
-		# and triangulate the resulting tube:
-		axp = last(axial)
-		for (p, ax) in zip(loop, axial); println("\e[32m$p: $ax\e[m"); end
-		for axq in axial
-			if axp.r == axq.r # vertical face: easy case««
-				@assert axp.chains == axq.chains
-				println("  triangulating a vertical face at r=$(axp.r)")
-				println("  chains=$(axp.chains)")
-			#»»
-			else # oblique face««
-				println("  \e[34;7mtriangulating an oblique face: $(axp.r)->$(axq.r)\e[m")
-				ax1, ax2, rev = axp.r<axq.r ? (axp,axq,false) : (axq,axp,true)
-				aff = Affine3(ax1.r=>ax1.z, ax2.r=>ax2.z)
-				# the surface between the axial paths for p1 and p2 is
-				# split along the cells traversed by axial(p1) (= the closest one)
-				# and each fragment is triangulated separately
-				for (c, elist, tlist) in chain_contour(v, ax1.chains, ax2.chains)
-					println("\e[35;7min cell $c: $elist, $tlist\e[m")
-					cellpoints = Int[]
-					for (e, t) in zip(elist, tlist) # (edge, edgetype)
-						ep = edgepoints(v, points, e, t, ax1, ax2, aff, atol)
-						println("  \e[1m($e,$t) contributes $ep=$(points[ep])\e[m")
-						append!(cellpoints, ep)
-					end
-					unique!(cellpoints)
-					if length(cellpoints) ≥ 3
-						tri = triangulate_loop(points, cellpoints)
-						println("triangulation is $tri")
-						append!(triangles, (rev ? (a,b,c) : (a,c,b) for (a,b,c) in tri))
-					end
-				end
-			end#»»
-			axp = axq
+	mesh = Mesh{J,SVector{3,T}}()
+	p = last(loop)
+	for q in loop
+		if p[1]*q[1] < 0
+			s = SA[zero(p[1]), (p[1]*q[2]-p[2]*q[1])/(p[1]-q[1])]
+			extrude_sloped(v, mesh, p, s, atol)
+			extrude_sloped(v, mesh, s, q, atol)
+		elseif p[1] == q[1]
+			extrude_vertical(v, mesh, p, q, atol)
+		else
+			extrude_sloped(v, mesh, p, q, atol)
 		end
+		p = q
 	end
-	return (points, triangles)
-# 	zchains = zerochains(v)
-# 	axial = [ AxialExtrude(v, points, p, atol, zchains) for p in loop ]
-	println("\e[34m$points\e[m")
-	for (p, ax) in zip(loop, axial)
-		println("\e[36;1m extrusion of $p is:\e[m\n$ax")
-	end
-	# zero offset on the negative side:
-	triangles = NTuple{3,Int}[]
-# 	for (p, axp) in zip(loop, axial); println(p => axp); end
-	# triangulate between consecutive axial paths««
-	p, axp = last(loop), last(axial)
-	for (q, axq) in zip(loop, axial)
-		println("\e[1;7mtriangulate face: $p -> $q\e[m\n  axp=$axp\n  axq=$axq")
-		if p[1] == q[1] # vertical face: easy case««
-# 			println("\e[1mface is vertical\e[m")
-			@assert axp.chains == axq.chains
-			# axp and axq are composed of matched chains
-			for c in axp.chains
-				if first(c) == last(c)
-# 					println("  build torus: $c")
-				else
-# 					println("  build tube: $c")
-				end
-# 					ip, iq = first(ap), first(aq)
-# 					for i in 2:length(ap)
-# 						jp, jq = ap[i], aq[i]
-# # 						push!(triangles, (ip, jp, iq), (jp, jq, q))
-# 						ip, iq = jp, jq
-# 					end
-# 					# TODO: end caps!
-# 				end
-			end
-			#»»
-		else # oblique face ««
-			println("\e[1mface is oblique\e[m")
-			r1, ax1, r2, ax2, aff, reversed =
-				standard_orientation(p, axp, q, axq, zchains)
-			println("  $r1:$r2 (reversed $reversed); z=$(aff.a)*r + $(aff.b)\n$r1: $ax1\n$r2: $ax2")
-			println(" with aff = $aff, aff.b=$(aff.b)")
-			# the surface between the axial paths for p1 and p2 is
-			# split along the cells traversed by axial(p1) (= the closest one)
-			# and each fragment is triangulated separately
-			ct = chain_contour(v, ax1.chains, ax2.chains)
-			println("contour:");for (c, el, et) in ct; println("   $c: $el, $et"); end
-			for (c, elist, tlist) in ct
-				println("\e[1m in cell $c: $elist, $tlist\e[m")
-				cellpoints = Int[]
-				for (edge, edgetype) in zip(elist, tlist)
-					epoints = edgepoints(v, points, edge, edgetype,
-						r1,ax1, r2,ax2, aff, atol)
-					println("  \e[1m($edge, $edgetype) contributes $epoints = $(points[epoints])\e[m")
-					append!(cellpoints, epoints)
-				end
-				println("  before unique!: $cellpoints")
-				unique!(cellpoints)
-				# build a loop for this cell fragment
-				println("\e[36mcellpoints for $c = $cellpoints\e[m")
-				for c in cellpoints
-					println("  \e[36mpoint[$c] = $(points[c])\e[m")
-				end
-				if length(cellpoints) ≥ 3
-					tri = triangulate_loop(points, cellpoints)
-					for (a,b,c) in tri
-						reversed && ((b,c) = (c,b))
-						push!(triangles, (a,b,c))
-					end
-				end
-			end
-		end#»»
-		p, axp = q, axq
-	end
-	(points, triangles)
+	return (mesh.points, mesh.triangles)
 end
 """    extrude(trajectory, profile, atol)
 
@@ -2170,11 +2031,11 @@ c10 = (c3, c4)
 
 v = V.VoronoiDiagram([[0.,0],[10,0]],[(1,2)])
 l = [[0,0.],[3,0],[0,4]]
-# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 # v=V.VoronoiDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
-# z = V.zerochains(v)
 
-# el = V.extrude_loop(v, [[-4.,-6],[6,-4],[4,6],[-6,4]], .1)
+# el = V.extrude_loop(v, [[-4.,-6],[4,-4.4],[4,6],[-6,4]], .1)
+el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
 # el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
 
 # v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)])
