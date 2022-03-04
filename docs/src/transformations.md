@@ -188,6 +188,10 @@ png("swept_cube", s); # hide
 
 ```
 ![example: a cube swept along a helix](swept_cube.png)
+### Path extrusion
+```@docs
+path_extrude
+```
 
 ## User-defined volume deformations
 ```@docs
