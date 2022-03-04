@@ -147,83 +147,12 @@ function triangulate_loop(points, idx)
 	return LibTriangle.constrained_triangulation(vmat, idx, elist)
 end
 
-# split_loop ««2
-""" split_loop(points)
-
-Splits a loop in the (x,y) plane at the (x=0) axis;
-returns matched lists (list of new loops), (list of sides)
-(with sign encoded as `true` for left side and `false` for right side)."""
-function split_loop(loop)
-	loop = copy(loop) # we will modify this array
-	j, q = length(loop), last(loop)
-	newloops = (typeof(loop)[], typeof(loop)[])
-	loopstart = 0
-	z = Int[] # indices of zero-crossings
-	# we cannot iterate on pairs() since we grow the array
-	i = 1; while i ≤ length(loop); p = loop[i]
-		if (p[1] < 0 < q[1]) || (q[1] < 0 < p[1])
-			p = SA[zero(p[1]), (p[1]*q[2]-p[2]*q[1])/(p[1]-q[1])]
-			insert!(loop, i, p)
-		end
-		iszero(p[1]) && push!(z, i)
-		j, q = i, p
-		i+=1
-	end
-	sort!(z; by=i->loop[i][2])
-	n = length(loop)
-	b0, b1 = false, false # is left/right side of line in polygon?
-	next0, next1 = Dict{Int,Int}(), Dict{Int,Int}()
-	last0, last1 = 0, 0
-	nextindex = @closure i->(i==n) ? 1 : i+1
-	previndex = @closure i->(i==1) ? n : i-1
-	# build correspondence tables on both sides
-	for i2 in z#««
-		s1, s3 = (Int(sign(loop[i][1])) for i in (previndex(i2), nextindex(i2)))
-		if (s1 < 0) ⊻ (s3 < 0)
-			if b0
-				next0[last0] = i2; b0 = false
-			else
-				last0 = i2; b0 = true
-			end
-		end
-		if (s1 > 0) ⊻ (s3 > 0)
-			if b1
-				next1[i2] = last1; b1 = false
-			else
-				last1 = i2; b1 = true
-			end
-		end
-# 		(s1 < 0) ⊻ (s3 < 0) && (b0 = !b0; push!(c0, i2))
-# 		(s1 > 0) ⊻ (s3 > 0) && (b1 = !b1; push!(c1, i2))
-	end#»»
-	done = falses(length(loop))
-	newloops = Vector{Int}[]; sides = falses(0)
-# 	newloops = (Vector{Int}[], Vector{Int}[])
-	# we could also do something intelligent with a stack, but whatever:
-	for startindex in eachindex(loop)#««
-		i = startindex
-		x0 = loop[i][1]
-		(iszero(x0) || done[i]) && continue
-		l = Int[]; push!(newloops, l); push!(sides, x0 < 0)
-		while !done[i]
-			done[i] = true
-			push!(l, i)
-			x = loop[i][1]
-			if iszero(x)
-				i = x0 > 0 ? next1[i] : next0[i]
-				push!(l, i)
-			end
-			i = nextindex(i)
-		end
-	end#»»
-	return ([loop[l] for l in newloops], sides)
-end
 # Separators (parametrized bisectors) ««1
 # Segment positions and branches««2
 struct Branch; sign::Int8; end
 @inline CornerTables.int(b::Branch) = b.sign
 const _BAD_BRANCH = Branch(Int8(-128)) # stable by unary minus
-@inline isbad(b::Branch) = b == _BAD_BRANCH
+@inline isbad(b::Branch) = (b == _BAD_BRANCH)
 @inline Base.convert(::Type{Branch}, x::Real) = Branch(x)
 @inline branch(x::Real) = Branch(iszero(x) ? 0 : (x > 0) ? 1 : -1)
 
@@ -310,9 +239,8 @@ This is either:
  - the bisector of a segment and a point on the line supporting the segment:
    this is a line, and an error if the point is in the interior of the segment;
  - the bisector of two non-crossing segments on secant lines:
-   the union of two half-lines parametrized as
-   origin + r\\*tangent, origin + r\\*normal (with rmin == 0);
- - the bisector of two touching, non-parallel segments is a straight line;
+   the union of two half-lines, parametrized as
+   origin + r\\*(normal ± tangent);
  - the bisector of two parallel segments: the central line,
    described as origin + r\\*tangent, with normal = [NaN, NaN].
 
@@ -977,10 +905,7 @@ function addsegment!(v::VoronoiDiagram, c::Cell)#««
 # 		println("examining outgoing edge $e: l=$(left(v,e)) h=$(head(v,e)) t=$(tail(v,e))")
 		o = opposite(v, e)
 # 		println("  branches:  at e: $(branch(v,e)) at o=$o: $(branch(v,o))")
-# 		int(o) ≤ 3 && continue # this is the phony outer node
 		q = node(e)
-# 		influences(v, a, b, q) || println("   segment($a,$b) does not see node $q =$(geometricnode(v,q))")
-# 		influences(v, a, b, q) || continue
 		edgecapture(v, e) || continue
 # 		println("   \e[7m flipping edge $e: connect $(right(v,e))->$(left(v,e)), disconnect $(head(v,e)) - $(tail(v,e))\e[m")
 		if left(v,e) == c
@@ -989,11 +914,6 @@ function addsegment!(v::VoronoiDiagram, c::Cell)#««
 		@assert int(e) ≠ 7
 		e1, e2 = opposite(v, next(e)), opposite(v, prev(e))
 		flip!(v, e)
-# 		println("  flip done")
-# 		println("  now e has h=$(head(v,e)) t=$(tail(v,e)) l=$(left(v,e)) r=$(right(v,e))")
-# 		println("  now right($e1) = $(right(v,e1)); right($e2) = $(right(v,e2))")
-		# XXX fixme: move separators for all concerned edges
-		# & compute new separators
 		push!(stack, e1, e2)
 	end
 end#»»
@@ -1005,10 +925,6 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	np, ns = length(points), length(segments)
 	v = VoronoiDiagram{J,T}(CornerTable{J}(points), points, segments)
 
-# 	println("\e[1;7m after triangulating all points:\e[m")
-# 	global V=v
-# 	display(v)
-# 	gnuplot(v)
 	# update geometric information ««
 	for e in eachedge(v)
 		e < opposite(v, e) && edgedata!(v, e)
@@ -1049,37 +965,6 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	# split segments in two
 	for s in segments, a in s; v.neighbours[a]+=one(J); end
 	splitsegments!(v)
-
-# 	println("segment = $(v.segments)")
-# 	# connect each point to its right-side segment, if any:
-# 	nc = zeros(J, np)
-# 	for i in 1:2:length(v.segments); (a,b) = v.segments[i]
-# 		nc[a] = iszero(nc[a]) ? np+3+i : -1
-# 	end
-# 	nc .= max.(0, nc)
-# 	# and use this to build a doubly-linked list of cells
-# 	for i in 1:2:ns; (a1,a2) = v.segments[i]
-# 		j = nc[a2]; iszero(j) && continue
-# 		c12, c21, c23, c32 = Cell.(J.((np+3+i, np+4+i, j, j+1)))
-# 		# two configurations are now possible:
-# 		# turn-left:              turn-right:
-# 		#            |             _c21_|   c2    |_c32_
-# 		#          ,' `.            c12  `.     .'  c23
-# 		#   _c21_,'     `._c32_            `. ,'
-# 		#    c12 |  c2   | c23               |
-# 		# (the anyedge() data for segment cells is always the segment-split edge)
-# 		b12, b32 = (before(v, anyedge(v, c)) for c in (c12, c32))
-# 		a21, a23 = (after(v, anyedge(v, c)) for c in (c21, c23))
-# 		bb12, bb32 = before(v, b12), before(v, b32)
-# 		if head(v, bb32) == c21 # turn-left configuration
-# 			nextedge!(v, b12, bb32)
-# 			prevedge!(v, after(v, anyedge(v, c23)))
-# 		else # turn-right
-# 			@assert head(v, bb12) == c23
-# 			nextedge!(v, bb12, b32)
-# 			prevedge!(v, after(v, anyedge(v, c21)))
-# 		end
-# 	end
 	return v
 end#»»
 # Split segments ««2
@@ -1227,27 +1112,11 @@ function nodedata!(v::VoronoiDiagram, q::Node)#««
 	r, b1, b2, b3 = tripoint(v, q)
 	@assert (r ≥ 0) || (isnan(r))
 	branch!(v, e1=>b1, e2=>b2, e3=>b3)
-# 	# special case: two consecutive segments ««
-# 	if issegment(v, c1) && issegment(v, c2) &&
-# 		c3 ∈ cellsegment(v, c1) && c3 ∈ cellsegment(v, c2)
-# 		v.noderadius[int(q)], v.geomnode[int(q)] = 0, point(v,c3)
-# 	end
-# 	if issegment(v, c2) && issegment(v, c3) &&
-# 		c1 ∈ cellsegment(v, c2) && c1 ∈ cellsegment(v, c3)
-# 		v.noderadius[int(q)], v.geomnode[int(q)] = 0, point(v,c1)
-# 	end
-# 	if issegment(v, c3) && issegment(v, c1) &&
-# 		c2 ∈ cellsegment(v, c3) && c2 ∈ cellsegment(v, c1)
-# 		v.noderadius[int(q)], v.geomnode[int(q)] = 0, point(v,c2)
-# 	end
 # 	#»»
 
 	s1, s2, s3 = separator(v, e1), separator(v, e2), separator(v, e3)
 	noderadius!(v, q=>r)
 	p = evaluate(s1,b1,r)
-# 	println("sep $c1/$c2: ", s1, b1, evaluate(s1,b1,r))
-# 	println("sep $c2/$c3: ", s2, b2, evaluate(s2,b2,r))
-# 	println("sep $c3/$c1: ", s3, (b3,r), evaluate(s3,b3,r))
 	any(isnan, p) && return
 	@assert evaluate(s1,b1,r) ≈ evaluate(s2,b2,r)
 	@assert evaluate(s2,b2,r) ≈ evaluate(s3,b3,r)
@@ -1256,13 +1125,6 @@ function nodedata!(v::VoronoiDiagram, q::Node)#««
 		isstraight(s2) ? evaluate(s2, b2, r) :
 		evaluate(s3, b3, r))
 	@assert !isinf(geometricnode(v, q)[1])
-# 	if int(q) == 11
-# 	println("  tripoint($q = $c1,$c2,$c3) = $r, $b1, $b2, $b3")
-# 	println(isstraight.((s1,s2,s3)))
-# 	println("  e1 = $c1/$(head(v,e1))")
-# 	println(s1)
-# 	display((v,q))
-# 	end
 end#»»
 # function CornerTables.swapnodes!(v::VoronoiDiagram, q1::Node, q2::Node)
 # 	swapnodes!(CornerTables.triangulation(v), q1, q2)
@@ -1414,7 +1276,7 @@ Interpolates an arc of ∂R as a polygonal path with absolute precision `atol`.
 Returns (P = list of points, L = list of indices),
 so that chain[i] corresponds to the points P[L[i]:L[i+1]].
 """
-function interpolate(v::VoronoiDiagram{J,T}, chain, radius, atol) where{J,T}
+function interpolate(v::VoronoiDiagram, chain, radius, atol)
 	r = abs(radius)
 	δ = √(r/(8*atol)) # used for discretizing circle arcs
 	e0 = first(chain); sep0 = separator(v, e0)
@@ -1564,8 +1426,6 @@ function Base.show(io::IO, a::AxialExtrude)#««
 end#»»
 function AxialExtrude(v::VoronoiDiagram{J}, mesh::Mesh,#««
 		rp::T, zp, side, atol) where{J,T}
-	# `mesh`: `Mesh` collecting all mesh for this offset
-	# `p`: the single point we are extruding
 	indices = Dict{J,Vector{J}}()
 	chains = offsetchains(v, rp, side)
 	for ch in chains
@@ -1666,8 +1526,7 @@ Produces a list of points approximating the open interval [r1,r2] on edge e
 Returns list of [point; aff(r)] where r is distance to trajectory,
 as well as the r parameters (rstart, rstop) delimitating this interpolation.
 """
-function approximate(v::VoronoiDiagram{J,T}, e, r1, r2, aff, atol#««
-		) where{J,T}
+function approximate(v::VoronoiDiagram, e, r1, r2, aff, atol)#««
 	o = opposite(v, e)
 	qe, qo = node(e), node(o)
 	ge, go = geometricnode(v, qe), geometricnode(v, qo)
@@ -1707,7 +1566,6 @@ returned.
 """
 function edgepoints(v::VoronoiDiagram, mesh::Mesh,
 		edge, edgetype, ax1, ax2, aff, atol)#««
-# 	println("\e[34mdraw ($edge, $edgetype); r1=$(ax1.r) r2=$(ax2.r)\e[m")
 	if edgetype == 1 # use segment from ∂R1, backwards
 		return reverse(indices(ax1, edge)[begin+1:end])
 	elseif edgetype == 2 # segment from ∂R2, forwards
@@ -1918,25 +1776,8 @@ end
 end
 
 V=Voronoi
-using FastClosures
 
 using StaticArrays
-l = [[-2,0.],[1,0],[-1,2],[0,2],[0,3],[-1,3],[0,4],[-1,4],[1,5],[-2,7]]
-l1 = [[-1,0.],[1,0],[1,1],[-1,1]]
-l2 = [[1,1.],[-1,1],[-1,0],[1,0]]
-V.split_loop(l1)
-V.split_loop(l2)
-# # TODO: tests
-# # V = Voronoi
-# # t=V.triangulate([[-10,0],[10,0],[0,10.]])
-# # v=V.voronoi([(0,0),(10,0),(11,3),(6,2),(5,9),(1,10)],[(6,1),(1,2),(2,3),(3,4),(4,5),(5,6)])
-# # v=V.VoronoiDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(3,4),(5,6)])
-# 
-# # v=V.OffsetDiagram([[0.,0],[10,0]],[])
-# # println(V.point(v,V.Cell(3)))
-# # println(V.point(v,V.Cell(4)))
-# # println(V.point(v,V.Cell(5)))
-
 # HERE:
 s1a = (SA[-5,0.],SA[-3,0.])
 s1b = (SA[-2,0.],SA[2,0.])
