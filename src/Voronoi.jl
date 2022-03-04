@@ -137,14 +137,14 @@ end
 # Triangulation via libtriangle««2
 function triangulate_loop(points, idx)
 	n = length(idx)
-# 	for i in idx
-# 		println("$(points[i][1])\t$(points[i][2])\t$i")
-# 	end
-	vmat = Float64[ points[i][j] for i in idx, j in 1:2 ]
+	for (p,i) in zip(points, idx)
+		println("$(p[1])\t$(p[2])\t$i")
+	end
+	vmat = Float64[ p[j] for p in points, j in 1:2 ]
 	elist = Int[ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
-# 	println("vmat=",vmat)
-# 	println("idx=",idx)
-# 	println("elist=",elist)
+	println("vmat=",vmat)
+	println("idx=",idx)
+	println("elist=",elist)
 	return LibTriangle.constrained_triangulation(vmat, idx, elist)
 end
 
@@ -1366,6 +1366,51 @@ function Base.show(io::IO, mesh::Mesh)#««
 		end
 	end
 end#»»
+# cap closing
+function close_caps!(mesh::Mesh{J}) where{J}
+	# find all unpaired edges ««
+	edges = [ J[] for _ in eachindex(mesh.points) ]
+	for (a,b,c) in mesh.triangles
+		push!(edges[a], b); push!(edges[b], c); push!(edges[c], a)
+	end
+	sort!.(edges)
+	border = [ (J(i),j) for i in eachindex(mesh.points) for j in edges[i]
+		if isempty(searchsorted(edges[j], i)) ]
+	isempty(border) && return
+	println("  border is $border")
+	#«« assemble in a set of loops
+	done = falses(size(border))
+	for i in eachindex(border)
+		done[i] && continue
+		loop = Int[] # loop of *existing* edges - we will need to reverse later...
+		while !done[i]
+			done[i] = true; push!(loop, border[i][1])
+			u = searchsorted(border, border[i][2]; by=first)
+			j = i
+			for k in u
+				k == first(loop) && @goto loopdone
+				!done[k] && (j = k; break)
+			end
+			i = j
+		end
+		@label loopdone
+		g = sum(mesh.points[loop]); g /= length(loop) # barycenter
+		# relative points
+		q = [ p - g for p in mesh.points[loop]]
+		n = length(q); push!(q, first(q))
+		# pick a vector which maximizes the surface of the projected loop
+		w = SVector{3}(sum(q[i][j]*q[i+1][k]-q[i][k]-q[i+1][j] for i in 1:n)
+			for (j,k) in ((2,3),(3,1),(1,2))); w/= norm(w)
+		v = abs(w[1]) < abs(w[2]) ?
+			(abs(w[1]) < abs(w[3]) ? SA[0,w[3],-w[2]] : SA[w[2],-w[1],0]) :
+			(abs(w[2]) < abs(w[3]) ? SA[w[3],0,-w[1]] : SA[w[2],-w[1],0])
+		u = cross(v, w); v = cross(w, u)
+		# we need to reverse orientation, the simplest is to do it here:
+		pts = [ SA[dot(v,p), dot(u,p)] for p in mesh.points[loop] ]
+		tri = triangulate_loop(pts, loop)
+		for (a,b,c) in tri; push!(mesh.triangles, (a,b,c)); end
+	end#»»
+end
 
 # Affine map ««2
 """    Affine3
@@ -1581,7 +1626,7 @@ function edgepoints(v::VoronoiDiagram, mesh::Mesh,
 end#»»
 
 # Extrusion of a polygonal loop««2
-function extrude_vertical(v::VoronoiDiagram, mesh, axp, axq, atol)
+function extrude_vertical(v::VoronoiDiagram, mesh, axp, axq, atol)#««
 # 	println("\e[48;5;88mextrude a vertical face on $(axp.side) at r=$(axp.r): $(axp.z)->$(axq.z)\e[m")
 	@assert axp.side == axq.side
 	@assert axp.r == axq.r
@@ -1595,8 +1640,8 @@ function extrude_vertical(v::VoronoiDiagram, mesh, axp, axq, atol)
 			a, pa, qa = b, pb, qb
 		end
 	end
-end
-function extrude_sloped(v::VoronoiDiagram{J}, mesh, ax1, ax2, atol) where{J}
+end#»»
+function extrude_sloped(v::VoronoiDiagram{J}, mesh, ax1, ax2, atol) where{J}#««
 # 	println("\e[7mextrude a sloped face on side $(ax1.side): $(ax1.r),$(ax1.z)->$(ax2.r),$(ax2.z)\e[m")
 	@assert ax1.side == ax2.side
 	rev = ax1.side
@@ -1613,18 +1658,17 @@ function extrude_sloped(v::VoronoiDiagram{J}, mesh, ax1, ax2, atol) where{J}
 		end
 		unique!(cellpoints)
 		if length(cellpoints) ≥ 3
-			tri = triangulate_loop(mesh, cellpoints)
+			tri = triangulate_loop(view(mesh, cellpoints), cellpoints)
 			append!(mesh.triangles, (rev ? (a,b,c) : (a,c,b) for (a,b,c) in tri))
 		end
 	end
-end
+end#»»
 """    extrude_loop(v, loop)
 
 Extrudes a loop of points [xi, yi] along the polygonal path(s);
 returns (points, triangulation).
 """
-function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}
-	# axial paths: extrusions of individual points of the loop««
+function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}#««
 	mesh = Mesh{J,SVector{3,T}}()
 	p = last(loop)
 	axp = AxialExtrude(v, mesh, abs(p[1]), p[2], p[1]<0, atol)
@@ -1647,8 +1691,9 @@ function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}
 		end
 		p, axp = q, axq
 	end
+	close_caps!(mesh)
 	return (mesh.points, mesh.triangles)
-end
+end#»»
 """    extrude(trajectory, profile, atol)
 
  - `trajectory`: vector of paths, either open or closed
@@ -1809,13 +1854,13 @@ c10 = (c3, c4)
 
 
 
-# v = V.VoronoiDiagram([[0.,0],[10,0]],[(1,2)])
+v = V.VoronoiDiagram([[0.,0],[3,0]],[(1,2)])
 # l = [[0,0.],[3,0],[0,4]]
-v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 # v=V.VoronoiDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
 
-el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
-# el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
+# el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
+el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
 # el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
 
 # v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)])

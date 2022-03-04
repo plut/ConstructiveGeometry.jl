@@ -408,5 +408,28 @@ function splitedges!(t::CTMesh{J,T,A}, maxlen; distance2=distance2) where{J,T,A}
 end
 
 #  »»1
+# Debugging ««1
+function debug(m::TriangleMesh, io::IO = stdout;
+	scale=1, offset=[0.,0.,0.], name="m")
+	println(io, """
+module $name(pos=$offset, c="gray", s=$scale) {
+translate(s*pos) {
+""")
+	for (i, p) in pairs(vertices(m))
+		println(io, """
+translate(s*$(Vector{Float64}(p))) {
+	color("red") sphere(1);
+	color("black", .8) linear_extrude(1) text("$i", size=5);
+}
+""")
+	end
+	println(io, "color(c, .7) polyhedron([")
+	join(io, [ " s*$(Vector{Float64}(p))" for p in vertices(m) ], ",\n")
+	println(io, "],[")
+	join(io, [ " $(Vector{Int}([f...]) .- 1)" for f in faces(m) ], ",\n")
+	println(io, "]); } }\n$name();")
+end
+@inline debug(m::TriangleMesh, f::AbstractString; kwargs...) =
+	open(f, "w") do io debug(m, io; kwargs...) end
 export TriangleMesh
 end
