@@ -59,12 +59,6 @@ png("circles", s); # hide
 ```
 ![example: circles with various parameters](circles.png)
 
-### Auxiliary meshes
-
-These are the meshes of any `highlight`()ed parts of the objects.
-Auxiliary meshes are only used for displaying;
-they are ignored when exporting the object to STL or SVG format.
-
 ## [Precision: `atol` and `rtol`](@id atol_rtol)
 
  - `atol` is the maximum absolute deviation allowed when meshing an object.
@@ -90,7 +84,7 @@ a perfect circle,
 and the latter value corresponds to the fact
 that large circles have 32 sides (see below).
 
-### Circles
+### [Circles](@id circle_vertices)
 
 A circle of radius ``r`` is approximated by an inscribed ``n``-gon.
 The deviation between the ideal circle and the ``n``-gon
@@ -132,7 +126,7 @@ The result is only approximated in the case of spheres,
 with the approximation being worse for small-radius spheres.
 
 
-### Spheres
+### [Spheres](@id sphere_vertices)
 
 Spheres are rendered as [Fibonacci
 spheres](http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/).
@@ -157,7 +151,6 @@ n ≈ 2 + (π/√3)/(\textrm{max}(\texttt{rtol},\texttt{atol}/r)).
 With the default values for `atol` and `rtol`:
  - small spheres have approximately ``2+18r`` vertices (and always at least 6 vertices);
  - large spheres have 365 vertices.
-
 
 ## Symmetry
 
@@ -195,3 +188,10 @@ s = surface(x) # this is an explicit `Surface` object
 ```
 This can avoid repeating the mesh computation when e.g.
 using several copies of the object.
+
+### Auxiliary meshes
+
+These are the meshes of any `highlight`()ed parts of the objects.
+Auxiliary meshes are only used for displaying;
+they are ignored when exporting the object to STL or SVG format.
+

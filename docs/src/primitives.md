@@ -35,6 +35,12 @@ png("circle", s); # hide
 ```
 ![example: a circle](circle.png)
 
+When a circle (and circle-like objects such as cylinders, cones,
+or rotational extrusions) is converted to an explicit mesh,
+it is instantiated as a regular polygon,
+which number of sides depends on the `atol` and `rtol` parameters;
+see [Number of vertices of circles](@ref circle_vertices).
+
 ### Stroke path
 ```@docs
 stroke
@@ -96,6 +102,13 @@ s = sphere(50);
 png("sphere", s); # hide
 ```
 ![example: a sphere](sphere.png)
+
+When a sphere is converted to an explicit mesh,
+a Fibonacci sphere is used, with a number of vertices
+depending on the `atol` and `rtol` parameters,
+as explained in [Number of vertices of spheres](@ref sphere_vertices).
+
+TODO: allow various other models of spheres (icosphere, etc.).
 
 ### Surface
 ```@docs

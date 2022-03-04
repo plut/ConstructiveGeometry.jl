@@ -135,7 +135,7 @@ png("closing", s); # hide
 ![example: the closing of the L-shape](closing.png)
 
 ## Extrusion
-### Linear extrusion
+### Prism (linear extrusion)
 ```@docs
 linear_extrude
 ```
@@ -147,6 +147,7 @@ png("linear_extrude_twist", s2); # hide
 ```
 ![example: linear extrusion of a L-shape](linear_extrude.png)
 ![example: linear extrusion with twist](linear_extrude_twist.png)
+### Revolution (rotatoinal extrusion)
 ```@docs
 rotate_extrude
 ```
@@ -159,6 +160,13 @@ png("slide", s2); # hide
 ![example: rotation extrusion of a L-shape](rotate_extrude.png)
 ![example: rotational extrusion with slide](slide.png)
 
+The number of samples used for a revolution depends on the radius
+(i.e. the maximal abscisssa of a point on the shape)
+and the `atol` and `rtol` parameters,
+in the same way as the number of vertices of a circle does;
+see [Number of vertices of circles](@ref circle_vertices).
+
+### Conical extrusion
 The `cone` function may also be used as an operator
 to build a cone out of an arbitrary shape:
 ```@repl 0
