@@ -83,8 +83,8 @@ For MeshIO: stl needs
  - [ ] test if point is in shape and random sample of shapes
  - [ ] add some relational definitions: mutual tangent, intersection, etc.
  - [ ] path sweep: use straight skeleton/medial axis for disappearing vertices
-  - [ ] compute medial axis
-  - [ ] compute straight skeleton
+  - [x] compute medial axis
+  - [x] compute straight skeleton
  - [ ] volume \ surface := volume \ extrude(surface)
  - [ ] propagate `atol` and `rtol` through transformation matrices (use largest eigenvalue)
  - [x] equivalent of OpenSCAD's for loop?!
@@ -109,7 +109,8 @@ For MeshIO: stl needs
   - [ ] fix Clipper's missing sweep? (e.g. adding a few extra points far
     away (preserving tangents) and removing anything close to those points)
     [ ] or write a patch for the C++ library?
- - [ ] find a way to fix path extrusion? either
+ - [x] find a way to fix path extrusion? either
+   - [x] write something from scratch...
    - [ ] cut “by hand” the result of a “butt” extrusion;
    - [ ] intersect the result of a custom “fill” extrusion;
    - [ ] patch the `clipper` library...

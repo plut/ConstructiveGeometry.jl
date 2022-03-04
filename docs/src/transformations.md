@@ -5,6 +5,7 @@ CurrentModule = ConstructiveGeometry
 ```@setup 0
 using ConstructiveGeometry
 using Makie
+using Colors
 using CairoMakie
 png(name, s) = save(name*".png", Makie.plot(s));
 ```
@@ -246,7 +247,7 @@ refine
 color
 ```
 ```@repl 0
-green, red = parse.(ConstructiveGeometry.Colorant, ("green", "red"))
+green, red = colorant"green", colorant"red"
 s = union(green * cube(10), [10,0,0]+red*sphere(10));
 png("color", s); # hide
 ```

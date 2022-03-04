@@ -8,7 +8,8 @@
 # FIXME:
 #
 # TODO:
-# - remove segdistance²
+# - remove segdistance²?
+# - append end caps to extrusion on open chains
 #
 """    Voronoi
 
@@ -136,14 +137,14 @@ end
 # Triangulation via libtriangle««2
 function triangulate_loop(points, idx)
 	n = length(idx)
-	for i in idx
-		println("$(points[i][1])\t$(points[i][2])\t$i")
-	end
+# 	for i in idx
+# 		println("$(points[i][1])\t$(points[i][2])\t$i")
+# 	end
 	vmat = Float64[ points[i][j] for i in idx, j in 1:2 ]
 	elist = Int[ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
-	println("vmat=",vmat)
-	println("idx=",idx)
-	println("elist=",elist)
+# 	println("vmat=",vmat)
+# 	println("idx=",idx)
+# 	println("elist=",elist)
 	return LibTriangle.constrained_triangulation(vmat, idx, elist)
 end
 
@@ -1404,6 +1405,7 @@ as points indexed by edge crossings."""
 struct AxialExtrude{J,T}
 	r::T
 	z::T
+	side::Bool
 	chains::Vector{Vector{Edge{J}}}
 	indices::Dict{J,Vector{J}} # indexed by edges
 # 	indices::Dict{J,NTuple{2,J}} # if the indices are always intervals
@@ -1437,7 +1439,7 @@ function AxialExtrude(v::VoronoiDiagram{J}, mesh::Mesh,#««
 			indices[int(ch[i])] = ind
 		end
 	end
-	return AxialExtrude{J,T}(rp, zp, chains, indices)
+	return AxialExtrude{J,T}(rp, zp, side, chains, indices)
 end#»»
 
 # Region between chains««2
@@ -1493,7 +1495,7 @@ returns all edges delimiting cells in R(r2)∖R(r1), as a list of tuples
 """
 function chain_contour(v::VoronoiDiagram{J}, chains1, chains2) where{J}#««
 	# build next-edge map for chains2 ««
-	println("chains1 = $chains1; chains2=$chains2")
+# 	println("chains1 = $chains1; chains2=$chains2")
 	c2next = zeros(Edge{J}, nedges(v))
 	for ch in chains2
 		e1 = first(ch)
@@ -1508,7 +1510,7 @@ function chain_contour(v::VoronoiDiagram{J}, chains1, chains2) where{J}#««
 		for e1new in ch[2:end]
 			c = tail(v, e1in)
 			elist, etype = cell_band(v, e1in, opposite(v, e1new), c2next)
-			println("  cell_contour($c; $e1in→opp($e1new)) is ($elist, $etype)")
+# 			println("  cell_contour($c; $e1in→opp($e1new)) is ($elist, $etype)")
 			# ∂R1 enters the cell c at e1 and exits at o = opposite(e2)
 			push!(r, (c, elist, etype))
 			e1in = e1new
@@ -1579,35 +1581,34 @@ function edgepoints(v::VoronoiDiagram, mesh::Mesh,
 end#»»
 
 # Extrusion of a polygonal loop««2
-function extrude_vertical(v::VoronoiDiagram, mesh, p, q, atol)
-	r, side, zp, zq = abs(p[1]), p[1] < 0, p[2], q[2]
-	println("\e[48;5;88mextrude a vertical face at r=$r: z=($zp, $zq)\e[m")
-	chains = offsetchains(v, r, side)
-	for ch in chains
-		l = interpolate(v, ch, r, atol)[1]
+function extrude_vertical(v::VoronoiDiagram, mesh, axp, axq, atol)
+# 	println("\e[48;5;88mextrude a vertical face on $(axp.side) at r=$(axp.r): $(axp.z)->$(axq.z)\e[m")
+	@assert axp.side == axq.side
+	@assert axp.r == axq.r
+	for ch in axp.chains
+		l = interpolate(v, ch, axp.r, atol)[1]
 		a = first(l);
-		pa, qa = append!(mesh, (SA[a...; zp], SA[a...; zq]))
+		pa, qa = append!(mesh, (SA[a...; axp.z], SA[a...; axq.z]))
 		for b in l[2:end]
-			pb, qb = append!(mesh, (SA[b...; zp], SA[b...; zq]))
+			pb, qb = append!(mesh, (SA[b...; axp.z], SA[b...; axq.z]))
 			push!(mesh.triangles, (pa,pb,qa), (pb,qb,qa))
 			a, pa, qa = b, pb, qb
 		end
 	end
 end
-function extrude_sloped(v::VoronoiDiagram{J}, mesh, p, q, atol) where{J}
-	println("\e[7mextrude a sloped face: $p->$q\e[m")
-	side = p[1] < 0 || q[1] < 0
-	rp, rq = abs(p[1]), abs(q[1])
-	(r1,r2,z1,z2,rev) = rp < rq ? (rp,rq,p[2],q[2],side) : (rq,rp,q[2],p[2],!side)
-	aff = Affine3(r1=>z1, r2=>z2)
-	ax1 = AxialExtrude(v, mesh, r1, z1, side, atol)
-	ax2 = AxialExtrude(v, mesh, r2, z2, side, atol)
+function extrude_sloped(v::VoronoiDiagram{J}, mesh, ax1, ax2, atol) where{J}
+# 	println("\e[7mextrude a sloped face on side $(ax1.side): $(ax1.r),$(ax1.z)->$(ax2.r),$(ax2.z)\e[m")
+	@assert ax1.side == ax2.side
+	rev = ax1.side
+	ax1.r > ax2.r && ((ax1,ax2,rev) = (ax2,ax1,!rev))
+	@assert ax1.r < ax2.r
+	aff = Affine3(ax1.r=>ax1.z, ax2.r=>ax2.z)
 	for (c, elist, tlist) in chain_contour(v, ax1.chains, ax2.chains)
 		cellpoints = Int64[] # this will be passed to LibTriangle
-		println("\e[35;7min cell $c: $elist, $tlist\e[m")
+# 		println("\e[35;7min cell $c: $elist, $tlist\e[m")
 		for (e, t) in zip(elist, tlist) #(edge, edgetype)
 			ep = edgepoints(v, mesh, e, t, ax1, ax2, aff, atol)
-			println("  \e[1m($e,$t) contributes $ep=$(mesh[ep])\e[m")
+# 			println("  \e[1m($e,$t) contributes $ep=$(mesh[ep])\e[m")
 			append!(cellpoints, ep)
 		end
 		unique!(cellpoints)
@@ -1626,17 +1627,25 @@ function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}
 	# axial paths: extrusions of individual points of the loop««
 	mesh = Mesh{J,SVector{3,T}}()
 	p = last(loop)
+	axp = AxialExtrude(v, mesh, abs(p[1]), p[2], p[1]<0, atol)
 	for q in loop
+		axq = AxialExtrude(v, mesh, abs(q[1]), q[2], q[1]<0, atol)
 		if p[1]*q[1] < 0
-			s = SA[zero(p[1]), (p[1]*q[2]-p[2]*q[1])/(p[1]-q[1])]
-			extrude_sloped(v, mesh, p, s, atol)
-			extrude_sloped(v, mesh, s, q, atol)
+			y = det2(p,q)/(p[1]-q[1])
+			axsp = AxialExtrude(v, mesh, zero(y), y, p[1]<0, atol)
+			axsq = AxialExtrude(v, mesh, zero(y), y, q[1]<0, atol)
+			extrude_sloped(v, mesh, axp, axsp, atol)
+			extrude_sloped(v, mesh, axsq, axq, atol)
 		elseif p[1] == q[1]
-			extrude_vertical(v, mesh, p, q, atol)
+			extrude_vertical(v, mesh, axp, axq, atol)
 		else
-			extrude_sloped(v, mesh, p, q, atol)
+			if axp.side ≠ axq.side
+				@assert iszero(axp.r)
+				axp = AxialExtrude(v, mesh, abs(p[1]), p[2], q[1]<0, atol)
+			end
+			extrude_sloped(v, mesh, axp, axq, atol)
 		end
-		p = q
+		p, axp = q, axq
 	end
 	return (mesh.points, mesh.triangles)
 end
@@ -1802,10 +1811,10 @@ c10 = (c3, c4)
 
 # v = V.VoronoiDiagram([[0.,0],[10,0]],[(1,2)])
 # l = [[0,0.],[3,0],[0,4]]
-# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 # v=V.VoronoiDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
 
-# el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
+el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
 # el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
 # el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
 

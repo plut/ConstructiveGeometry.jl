@@ -11,7 +11,7 @@ using FileIO
 bust = load("beethoven.ply")
 ```
 
-The following formats should be supported: `.stl` (ASCII and binary)
+The following formats are supported: `.stl` (ASCII and binary);
 `.ply` (ASCII and little-endian/big-endian binary).
 
 TODO: `.dxf`
@@ -42,8 +42,10 @@ ConstructiveGeometry.scad
     Since the constructions from this package have started to diverge
     from those of OpenSCAD, (and also since the possibilities for export
     and visualization have improved), OpenSCAD output is being deprecated
-    and may be removed in a future version.
+    and may be removed in a future version. Only those constructions
+    which exists in OpenSCAD are supported (e.g. spheres, but not sweeps).
 
 ## OpenSCAD to Julia conversion.
 
-Might be possible for a limited subset of OpenSCAD language. TODO.
+Might be possible for a limited subset of OpenSCAD language.
+TODO (with a low priority).

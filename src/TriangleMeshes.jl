@@ -376,7 +376,7 @@ until no edge has length² > `maxlen`.
 
 function splitedges!(t::CTMesh{J,T,A}, maxlen; distance2=distance2) where{J,T,A}
 	elist = VecSortedSet{J}(T[ a > opposite(t, a) ? zero(T) :
-		edgelength(t, a; distance2) for a in eacharrow(t) ])
+		edgelength(t, a; distance2) for a in eachedge(t) ])
 	while true
 	e = Edge(last(elist)); o = opposite(t, e)
 	elist.size[e] ≤ maxlen && break
