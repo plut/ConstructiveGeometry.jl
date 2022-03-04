@@ -20,6 +20,8 @@
    fix by something better (but this is likely Clipper's fault)
  - [x] simple syntax for making conditionals (⇒ use those empty objects)
 # Simple fixes
+ - [ ] make default `children` return an error and add
+   `AbstractGeometryLeaf`
  - [x] `atol`/`rtol` ?
  - [x] auto-compute `offset` npoints from meshing options
  - [x] likewise for `sweep` (volume case)

@@ -9,6 +9,7 @@ makedocs(
 		"operations.md",
 		"meshing.md",
 		"io.md",
+		"extending.md",
 	],
 # 	modules = [ConstructiveGeometry],
 	sitename="ConstructiveGeometry.jl",
