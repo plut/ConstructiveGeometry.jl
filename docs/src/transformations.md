@@ -180,13 +180,6 @@ s = sweep(square(50))*circle(5);
 png("swept_circle", s); # hide
 ```
 ![example: a circle swept along a square](swept_circle.png)
-!!! warning "Swept surfaces"
-
-    A surface may only be swept along a closed loop
-    (or the union of several closed loops) for now;
-    this is a limitation of the `clipper` library,
-    which [does not support single-path extrusion](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm)
-    for now (and this is unlikely to change in the near future).
 
 ```@repl 0
 f(t) =([ cospi(t) -sinpi(t) 0;sinpi(t) cospi(t) 0;0 0 1],[0 0 10*t]);

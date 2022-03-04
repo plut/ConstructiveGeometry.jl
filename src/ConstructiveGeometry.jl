@@ -1044,12 +1044,15 @@ A cylinder (or cone frustum)
 with basis centered at the origin, lower radius `r1`, upper radius `r2`,
 and height `h`.
 
-**Warning:** `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
-not `(h,r,0)` as in OpenSCAD. For a cone, using `(cone(h,r))` instead is recommended.
-
 The mesh is a regular prism,
 circumscribed to the cylinder if `circumscribed == true`
 and inscribed otherwise.
+
+!!!    note "OpenSCAD compatibility"
+
+    `cylinder(h,r)` is interpreted as `cylinder(h,r,r)`,
+    not `(h,r,0)` as in OpenSCAD. To input a cone, use `cone(h,r)` instead.
+
 """
 @inline cylinder(h::Real, r::Real;center::Bool=false, circumscribed=false) =
 	let c = linear_extrude(h)*circle(r;circumscribed)
@@ -1286,12 +1289,16 @@ Extrudes the given `shape` by
 1) rotating perpendicular to the path (rotating the unit *y*-vector to the direction *z*), and 
 2) sweeping it along the `path`, with the origin on the path.
 
-FIXME: open-path extrusion is broken because `ClipperLib` currently
-does not support the `etOpenSingle` offset style.
+# Extended help
+!!! warning "Swept surfaces: limitations"
 
-FIXME: this function will only work if each vertex of the profile
-describes a full trajectory (i.e. no loops in the trajectory
-are closed by the extrusion process).
+    The `sweep` feature currently has two main limitations:
+    1. the trajectory may only contain closed loops (no open paths);
+    2. the extrusion of each profile vertex must preserve this topology.
+
+    Both of these restrictions are due to the `clipper` library, which
+    [does not support single-side offset](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm).
+    For an (**experimental**) remedy, see `path_extrude`.
 """
 function sweep end
 
@@ -1319,6 +1326,7 @@ defining an affine transform.
 	VolumeSweep(transform, nsteps, maxgrid, isolevel, s)
 
 
+# Path extrusion ««2
 struct PathExtrude <: AbstractGeometry{3}
 	trajectory::Vector{Vector{SVector{2,Float64}}}
 	profile::AbstractGeometry{2}
@@ -1330,6 +1338,18 @@ function mesh(g::MeshOptions, s::PathExtrude, (m,))
 	return reduce(symdiff, v)
 end
 
+"""    path_extrude(trajectory)*profile
+
+Extrusion of the given `profile` along the trajectory.
+
+!!! note "Warning: path extrusion"
+
+    This feature is still experimental. Success is not guaranteed.
+    Also, API should not be considered stable.
+
+"""
+@inline path_extrude(trajectory, s...) =
+	operator(PathExtrude, (trajectory,), s...)
 # Generic coordinate transform ««1
 struct Deformation{D} <: AbstractTransform{D}
 	transform::Function
