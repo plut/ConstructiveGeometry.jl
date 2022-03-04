@@ -137,14 +137,14 @@ end
 # Triangulation via libtriangle««2
 function triangulate_loop(points, idx)
 	n = length(idx)
-	for (p,i) in zip(points, idx)
-		println("$(p[1])\t$(p[2])\t$i")
-	end
+# 	for (p,i) in zip(points, idx)
+# 		println("$(p[1])\t$(p[2])\t$i")
+# 	end
 	vmat = Float64[ p[j] for p in points, j in 1:2 ]
 	elist = Int[ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
-	println("vmat=",vmat)
-	println("idx=",idx)
-	println("elist=",elist)
+# 	println("vmat=",vmat)
+# 	println("idx=",idx)
+# 	println("elist=",elist)
 	return LibTriangle.constrained_triangulation(vmat, idx, elist)
 end
 
@@ -1828,43 +1828,3 @@ function Base.show(io::IO, ::MIME"text/plain",
 end
 # »»1
 end
-
-V=Voronoi
-
-using StaticArrays
-# HERE:
-s1a = (SA[-5,0.],SA[-3,0.])
-s1b = (SA[-2,0.],SA[2,0.])
-s1c = (SA[3,0.],SA[5,0.])
-us2 = SA[3,4.]
-s2a, s2b, s2c = (-2us2, -us2), (-us2, us2), (us2, 2us2)
-s3a = (SA[-5,2.],SA[-2,2.])
-s3b = (SA[-2,2.],SA[2,2.])
-s3c = (SA[2,2.],SA[5,2.])
-s4a = (SA[6,-3.],SA[6,-1.])
-s4b = (SA[6,1.],SA[6,2.])
-
-c1 = SA[0,0.]
-c2 = SA[10,0.]
-c3 = SA[5,1.]
-c4 = SA[5,9.]
-c8 = (c1, c2)
-c9 = (c2, c3)
-c10 = (c3, c4)
-
-
-
-v = V.VoronoiDiagram([[0.,0],[3,0]],[(1,2)])
-# l = [[0,0.],[3,0],[0,4]]
-# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
-# v=V.VoronoiDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
-
-# el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
-el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
-# el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
-
-# v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)])
-# l=V.offsetchains(v, 1., false)
-# o=V.offset([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)], 1.)
-# ci = V.chain_contour(v, V.offsetchains(v, 1., false), V.offsetchains(v, 10., false))
-# el=V.extrude_loop(v, [SA[1.,1],SA[-1.,0],SA[1.,-1]], .1)
