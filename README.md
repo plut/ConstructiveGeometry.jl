@@ -39,10 +39,10 @@ using the IGL graphics library.
 ## Why write this when OpenSCAD exists?
 
 Our goal is to replicate what OpenSCAD proved works well
-(a simple syntax for script-based CAD),
+(a simple syntax for script-based CAD)
 while fixing some of the less-fun parts.
 
-We believe that using Julia could provide following advantages:
+We believe that using Julia provides the following advantages:
  - a more complete (and easier to use) programming language
    (e.g. a language which natively contains linear algebra is easier to
    use for constraint-based design);
@@ -66,7 +66,7 @@ however, the second, third plots etc. are much faster.
 
 Reaching feature-parity (at least for static designs)
 is one of the first goals of this package.
-The main missing parts for this is the primitive `text`.
+The main missing part for this is the primitive `text`.
 On the other hand, this package already provides a few constructions
 absent from (base) OpenSCAD, such as 3d offsetting or surface sweep.
 
@@ -76,13 +76,9 @@ absent from (base) OpenSCAD, such as 3d offsetting or surface sweep.
 Once this feature parity is achieved, we plan to move on to
 include more content (e.g. some of what is usually implemented
 library-side in OpenSCAD), such as:
- - I/O to more file formats (e.g. `png`, `ply`, etc.);
- - add more ways to generate surfaces (e.g. swung/swept surfaces);
  - add an annotation system to ease the design of complex models;
- - add an anchor system.
-
-In the more remote future, we plan to examine whether it would be
-possible to replace polygons by e.g. NURBs to add even more features.
+ - add an anchor system;
+ - use splines and NURBs to define models.
 
 ## Libraries used
 
@@ -94,7 +90,9 @@ the following libraries:
  - [`Triangle`](https://cvdlab.github.io/Triangle.jl/) for triangulation;
  - [`Polyhedra`](https://github.com/JuliaPolyhedra/Polyhedra.jl) and [`GLPK`](https://github.com/jump-dev/GLPK.jl) for convex hull.
 
+## Joining the project
 
-## Contributions
-
-This project is open to contributions.
+This project is currently still at the “one-person effort” stage,
+although it is not indended that it remain here. There are multiple parts
+which could use some help; apart from the Todo-list above, even something
+as simple as playtesting the project would be appreciable help.

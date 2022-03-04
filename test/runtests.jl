@@ -6,21 +6,22 @@ using LinearAlgebra
 G = ConstructiveGeometry
 
 @testset "2d" begin#««
-nva(s::G.PolygonXor) = (length.(G.paths(s)), G.Shapes.area(s.poly))
+mainmesh(s) = G.fullmesh(s).main
+nva(s::G.ShapeMesh) = (length.(G.paths(s)), G.Shapes.area(s.poly))
 r1 = G.square(2.,1)
 r2 = G.square(1.,2)
 r3 = G.square(3.,3)
 r4 = [4,4] + G.square(1,1)
-@test nva(mesh(union(r1,r2))) == ([6], 3)
-@test nva(mesh(union(r1,r3))) == ([4], 9)
-@test nva(mesh(union(r1,r4))) == ([4,4], 3)
-@test nva(mesh(intersect(r1,r2))) == ([4], 1)
-@test nva(mesh(intersect(r2,r1))) == ([4], 1)
-@test nva(mesh(intersect(r1,r3))) == ([4], 2)
-@test nva(mesh(intersect(r3,r1))) == ([4], 2)
-@test nva(mesh(intersect(r1,r4))) == ([], 0)
-@test nva(mesh(setdiff(r1,r2))) == ([4], 1)
-@test nva(mesh(setdiff(r3,r1))) == ([6], 7)
+@test nva(mainmesh(union(r1,r2))) == ([6], 3)
+@test nva(mainmesh(union(r1,r3))) == ([4], 9)
+@test nva(mainmesh(union(r1,r4))) == ([4,4], 3)
+@test nva(mainmesh(intersect(r1,r2))) == ([4], 1)
+@test nva(mainmesh(intersect(r2,r1))) == ([4], 1)
+@test nva(mainmesh(intersect(r1,r3))) == ([4], 2)
+@test nva(mainmesh(intersect(r3,r1))) == ([4], 2)
+@test nva(mainmesh(intersect(r1,r4))) == ([], 0)
+@test nva(mainmesh(setdiff(r1,r2))) == ([4], 1)
+@test nva(mainmesh(setdiff(r3,r1))) == ([6], 7)
 end#»»
 # @testset "Extrusion" begin #««1
 # # using ConstructiveGeometry: nvertices, nfaces
@@ -83,11 +84,6 @@ end
 # @test length(triangulate(square_with_hole)) == 8
 # @test CG.ladder_triangles(5,4,0,10) ==
 # 	[(0,10,1),(1,10,11),(1,11,2),(2,11,12),(2,12,3),(3,12,13),(3,13,4)]
-# end
-# @testset "Basic geometry" begin#««1
-# v = [[-1,0],[0,-1],[1,0],[0,1]]
-# m = [CG.circular_sign(i,j) for i in v, j in v]
-# @test sign.(m) == [0 1 1 1; -1 0 1 1; -1 -1 0 1; -1 -1 -1 0]
 # end
 # @testset "Triangle intersection" begin#««1
 # TI=CG.TriangleIntersections

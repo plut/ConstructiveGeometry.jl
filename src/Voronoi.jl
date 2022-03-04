@@ -18,7 +18,7 @@ module Voronoi
 using StaticArrays
 using FastClosures
 using LinearAlgebra
-using Random
+# using Random
 using Printf
 using HypergeometricFunctions
 module LibTriangle
@@ -678,8 +678,8 @@ function triangulate(points; kw...)
 	return [(int(cell(t,q,1)),int(cell(t,q,2)),int(cell(t,q,3)))
 		for q in eachnode(t)]
 end#»»
-
-function CornerTable{J}(points; extra = 0) where{J}
+struct Delaunay end
+function CornerTable{J}(::Type{Delaunay}, points; extra = 0) where{J}
 	# Builds a Delaunay triangulation of these points using Bowyer-Watson's
 	# algorithm:
 	T = float(eltype(eltype(points)))
@@ -695,7 +695,7 @@ function CornerTable{J}(points; extra = 0) where{J}
 	append!(points, [SA[0,-3m], SA[3m,2m], SA[-3m,2m]])
   #»»
 	# incrementally add all points ««
-	Random.seed!(0)
+# 	Random.seed!(0)
 	for c in Cell(J(1)):Cell(J(np)) # Random.randperm(np)
 		addpoint!(v, points, c, points[int(c)])
 	end #»»
@@ -923,7 +923,7 @@ end#»»
 
 function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	np, ns = length(points), length(segments)
-	v = VoronoiDiagram{J,T}(CornerTable{J}(points), points, segments)
+	v = VoronoiDiagram{J,T}(CornerTable{J}(Delaunay, points), points, segments)
 
 	# update geometric information ««
 	for e in eachedge(v)
@@ -1800,12 +1800,12 @@ c10 = (c3, c4)
 
 
 
-v = V.VoronoiDiagram([[0.,0],[10,0]],[(1,2)])
-l = [[0,0.],[3,0],[0,4]]
-v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
+# v = V.VoronoiDiagram([[0.,0],[10,0]],[(1,2)])
+# l = [[0,0.],[3,0],[0,4]]
+# v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 # v=V.VoronoiDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
 
-el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
+# el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
 # el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
 # el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
 
