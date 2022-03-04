@@ -9,9 +9,6 @@
 #
 # TODO:
 # - remove segdistance²
-# - remove Line:
-#   + tripoint(SSS)
-# + use separator orientation to determine edge capture (remove `capture`)
 #
 """    Voronoi
 
@@ -53,24 +50,6 @@ const DEFAULT_ATOL=1e-1
 #      p╱a  tail   b╲
 
 # Geometry ««1
-# tool: consecutives around an array, wrapping around ««2
-struct ConsecutiveWrap{T,A<:AbstractVector{T}} <: AbstractVector{NTuple{2,T}}
-	vector::A
-end
-@inline Base.size(w::ConsecutiveWrap) = size(w.vector)
-@inline consecutives(v::AbstractVector{T}) where{T} =
-	ConsecutiveWrap{T,typeof(v)}(v)
-function Base.iterate(w::ConsecutiveWrap)
-	isempty(w.vector) && return nothing
-	y = first(w.vector); return ((last(w.vector), y), (2, y))
-end
-function Base.iterate(w::ConsecutiveWrap, (i, x))
-	i > length(w.vector) && return nothing
-	y = w.vector[i]; return ((x, y), (i+1, y))
-end
-
-
-	
 # Elementary geometry ««2
 
 abstract type GeometryException <: Exception end
@@ -451,9 +430,11 @@ function approximate(sep::Separator, r1, r2, atol)
 	return y
 end
 
-"""    atan(separator)
-Returns the angle of the initial tangent of this separator."""
-@inline Base.atan(sep::Separator) = atan(sep.tangent[2], sep.tangent[1])
+"""    vectors_angles(u, v)
+
+Returns (angle(u), angle(v)-angle(u)); second angle always in [0,2π[."""
+@inline vectors_angles(u::AbstractVector, v::AbstractVector) =
+	(atan(u[2], u[1]), atan(det2(u,v), u⋅v))
 # Tripoints ««1
 @inline _BAD_TRIPOINT(x) = (oftype(x,NaN), _BAD_BRANCH,_BAD_BRANCH,_BAD_BRANCH)
 # docstring ««2
@@ -814,8 +795,6 @@ struct VoronoiDiagram{J,T} <: AbstractVoronoi{J}
 	separator::Vector{Separator{T}} # indexed by edges
 	branch::Vector{Branch} # indexed by edges
 	neighbours::Vector{J} # indexed by points
-# 	nextedge::Vector{J} # indexed by cells
-# 	prevedge::Vector{J} # indexed by cells
 
 	@inline VoronoiDiagram{J,T}(triangulation::CornerTable, points, segments
 		) where{J,T} =
@@ -825,8 +804,6 @@ struct VoronoiDiagram{J,T} <: AbstractVoronoi{J}
 			Vector{Separator{T}}(undef, nedges(triangulation)),
 			Vector{Branch}(undef, nedges(triangulation)),
 			zeros(J, length(points)), # neighbours
-# 			zeros(J, length(points)+2*length(segments)),
-# 			zeros(J, length(points)+2*length(segments)),
 			)
 end
 
@@ -841,15 +818,12 @@ end
 	Cell.(v.segments[int(c)-npoints(v)])
 @inline segment(v::VoronoiDiagram, c::Cell) =
 	tuple((point(v,i) for i in cellsegment(v,c))...)
-@inline line(v::VoronoiDiagram, c::Cell) =
-	let (a,b) = cellsegment(v, c); Line(point(v,a), point(v,b)) end
 @inline geometricnode(v::VoronoiDiagram, q::Node) = v.geomnode[int(q)]
 @inline geometricnode!(v::VoronoiDiagram, l::Pair{<:Node,<:AbstractVector}...)=
 	for (q, p) in l; v.geomnode[int(q)] = p; end
 @inline noderadius(v::VoronoiDiagram, q::Node) = v.noderadius[int(q)]
 @inline noderadius!(v::VoronoiDiagram, l::Pair{<:Node,<:Real}...) =
 	for (q, r) in l; v.noderadius[int(q)] = r; end
-# @inline noderadius!(v::VoronoiDiagram, q::Node, r) = v.noderadius[int(q)] = r
 @inline branch(v::VoronoiDiagram, e::Edge) = v.branch[int(e)]
 @inline branch!(v::VoronoiDiagram, l::Pair{<:Edge,Branch}...) =
 	for (e, b) in l; v.branch[int(e)] = b; end
@@ -863,18 +837,9 @@ end
 @inline edgedata(v::VoronoiDiagram, e::Edge) = separator(v,e), branch(v,e)
 @inline edgedata!(v::VoronoiDiagram, e::Edge, (s, b)) =
 	v.separator[int(e)], v.branch[int(e)] = s, b
-	# right-side segments if side=false, left-side if side=true:
+# right-side segments if side=false, left-side if side=true:
 @inline sidesegments(v::VoronoiDiagram{J}, side) where{J} =
 	J(npoints(v)+1+side):J(2):ncells(v)
-# following chains of segments:
-# @inline nextedge(v::VoronoiDiagram, c::Cell) = Edge(v.nextedge[c])
-# @inline prevedge(v::VoronoiDiagram, c::Cell) = Edge(v.prevedge[c])
-# @inline npedge!(v::VoronoiDiagram, n, p, l::Edge...) =
-# 	for e in l; n[tail(v,e)] = int(e); p[head(v,e)] = int(opposite(v,e)); end
-# @inline nextedge!(v::VoronoiDiagram, l::Edge...) =
-# 	npedge!(v, v.nextedge, v.prevedge, l...)
-# @inline prevedge!(v::VoronoiDiagram, l::Edge...) =
-# 	npedge!(v, v.prevedge, v.nextedge, l...)
 
 # Updates of `CornerTables` functions preserving geometry ««2
 @inline geometrictriangle(v::VoronoiDiagram, q::Node) =
@@ -960,23 +925,11 @@ function edgecapture(v::VoronoiDiagram, e::Edge)#««
 # 	println("\e[32;7medgecapture($(right(v,e)) = $(cellsegment(v,right(v,e))) -> $e = $(tail(v,e))⋯$(head(v,e))\e[m")
 	o = opposite(v,e)
 	be, bo = branch(v, e), branch(v, o)
-	if bo == _BAD_BRANCH
-# 		println("\e[32;1m right node $(node(o))=$(triangle(v,node(o))) is bad, must flip edge\e[m")
-		return true
-	end
+	bo == _BAD_BRANCH && return true
 	@assert issegment(v, right(v, e))
 	(a, b) = cellsegment(v, right(v,e))
 	q = node(e)
-# 	if !influences(v, a, b, node(o))
-# 		println("\e[32;3m segment ($a, $b) does not see new node $(node(o)), \e[1mmust flip\e[m")
-# 		display((v, node(o)))
-# 		return true
-# 	end
-	if !influences(v, a, b, q)
-# 		println("\e[32m segment ($a,$b) does not see node $q=$(geometricnode(v,q))\e[m")
-		return false
-	end
-# 	l = line(v, right(v,e))
+	influences(v, a, b, q) || return false
 	sep = separator(v, e)
 	be, bo = branch(v,e), branch(v,o)
 	re, ro = noderadius(v,node(e)), noderadius(v,node(o))
@@ -1323,18 +1276,12 @@ function separator(v::AbstractVoronoi, c1, c2)#««
 		a1, b1 = point(v, i1), point(v, j1)
 		if issegment(v, c2)
 			return Separator(segment(v, c1), segment(v, c2))
-# 		elseif (c2 == i1 || c2 == j1) # degenerate parabola (exact)
-# 			return degenerate_separator(line(v, c1), point(v, c2))
 		else # generic parabola separator
 			return Separator(segment(v, c1), point(v,c2))
 		end
 	elseif issegment(v, c2)
 		i2, j2 = cellsegment(v, c2)
-# 		if c1 == i2 || c1 == j2
-# 			return reverse(degenerate_separator(line(v, c2), point(v, c1)))
-# 		else # generic parabola
 			return Separator(point(v, c1), segment(v, c2))
-# 		end
 	else # point-point separator
 		return Separator(point(v, c1), point(v, c2))
 	end
@@ -1418,7 +1365,7 @@ Returns the status of
 """
 
 # Offset chain ««2
-"""    offsetchains(v::VoronoiDiagram, radius, reversed)
+"""    offsetchains(v::VoronoiDiagram, radius, side)
 
 Returns the set of chains encoding the offset curves for this radius.
 Each chain is represented as a list of edges. Each edge correspond
@@ -1427,7 +1374,7 @@ the curve enters the cell. The last edge in the chain represents either
 the closure of the chain (if identical to the first) or the opposite edge to
 the endpoint of the curve (if the chain is open).
 """
-function offsetchains(v::VoronoiDiagram{J}, radius, reversed) where{J}#««
+function offsetchains(v::VoronoiDiagram{J}, radius, side) where{J}#««
 	# The last segment encodes the endpoint of the chain; it is either
 	# identical to the first segment (if closed loop) or the opposite edge
 	# of the true last point of the chain.
@@ -1436,7 +1383,7 @@ function offsetchains(v::VoronoiDiagram{J}, radius, reversed) where{J}#««
 	chains = Vector{Edge{J}}[]
 	done = falses(nedges(v))
 	@assert radius ≥ 0
-	for startcell in sidesegments(v, reversed)
+	for startcell in sidesegments(v, side)
 		c = Cell(startcell); e = firstedge(v, c, radius)
 		iszero(e) && continue # this cell is not traversed by the offset curve
 		done[int(e)] && continue # we already visited this curve segment
@@ -1457,12 +1404,6 @@ function offsetchains(v::VoronoiDiagram{J}, radius, reversed) where{J}#««
 			pushfirst!(l, e); done[int(e)] = true
 		end
 	end
-# 	if radius < 0 # correct the orientation of all chains
-# 		for l in chains
-# 			reverse!(l)
-# 			for (i, e) in pairs(l); l[i] = opposite(v, e); end
-# 		end
-# 	end
 	return chains
 end#»»
 
@@ -1474,30 +1415,28 @@ Returns (P = list of points, L = list of indices),
 so that chain[i] corresponds to the points P[L[i]:L[i+1]].
 """
 function interpolate(v::VoronoiDiagram{J,T}, chain, radius, atol) where{J,T}
-	e0 = first(chain); sep0 = separator(v, e0)
 	r = abs(radius)
 	δ = √(r/(8*atol)) # used for discretizing circle arcs
-	plist = [evaluate(sep0, Branch(+1), r)]
-	llist = [1]
+	e0 = first(chain); sep0 = separator(v, e0)
+	p0 = evaluate(sep0, Branch(+1), r)
+	plist, llist = [p0], [1]
 	for e1 in chain[2:end]
 		sep1 = separator(v, e1)
+		p1 = evaluate(sep1, Branch(+1), r)
 		c = tail(v, e0)
 		if !issegment(v, c) # circular arc
-			@assert issegment(v, tail(v, e1))
-			a0, a1 = atan(sep0), atan(sep1)
-			a1 < a0 && (a1+= 2π)
-			n = ceil(Int, (a1-a0)*δ)
-			p = point(v, c); θ = (a1-a0)/n
+			p = point(v, c)
+			a0, a01 = vectors_angles(p0-p, p1-p)
+			n = ceil(Int, a01*δ); θ = a01/n
 			for i in 1:n-1
 				a = a0+i*θ
-				push!(plist, SA[p[1] + cos(a)*r, p[2]+sin(a)*r])
+				push!(plist, SA[p[1]+cos(a)*r, p[2]+sin(a)*r])
 			end
 		end
 		# this is either the single point (for a straight segment), or the
 		# closure of a circular arc
-		push!(plist, evaluate(sep1, Branch(+1), r))
-		push!(llist, length(plist))
-		e0, sep0 = e1, sep1
+		push!(plist, p1); push!(llist, length(plist))
+		e0, sep0, p0 = e1, sep1, p1
 	end
 	(radius < 0) && reverse!(plist)
 	return (plist, llist)
@@ -1530,43 +1469,40 @@ end
 # Extrusion««1
 # These functions compute a triangulation of the difference of two offset
 # regions R(r2)∖R(r1), where r2 > r1.
-# Point collection ««2
+# Mesh structure ««2
 """    Mesh
 
 Points are doubly-indexed (by integers and points) to prevent repeats.
-Faces are triangle of point indices."""
+Faces are triangles of point indices."""
 struct Mesh{J,P} <: AbstractVector{P}
 	points::Vector{P}
 	index::Dict{P,J}
 	triangles::Vector{NTuple{3,J}}
 end
 @inline Mesh{J,P}() where{J,P} = Mesh{J,P}(P[], Dict{P,J}(), [])
-@inline Base.size(plist::Mesh) = (length(plist.points),)
-@inline Base.getindex(plist::Mesh, i::Integer) = plist.points[i]
+@inline Base.size(mesh::Mesh) = (length(mesh.points),)
+@inline Base.getindex(mesh::Mesh, i::Integer) = mesh.points[i]
 
-function Base.push!(plist::Mesh{J,P}, p) where{J,P} # returns index
-	k = get(plist.index, p, zero(J))
+function Base.push!(mesh::Mesh{J,P}, p) where{J,P} # returns index
+	k = get(mesh.index, p, zero(J))
 	!iszero(k) && return k
-	push!(plist.points, p)
-	k = J(length(plist))
-	plist.index[p] = k
+	push!(mesh.points, p)
+	k = J(length(mesh))
+	mesh.index[p] = k
 	return k
 end
-@inline Base.append!(plist::Mesh{J}, p) where{J} =
-	J[ push!(plist, x) for x in p ]
+@inline Base.append!(mesh::Mesh{J}, p) where{J} =
+	J[ push!(mesh, x) for x in p ]
 
-function Base.show(io::IO, plist::Mesh)
-	for (i, p) in pairs(plist.points)
+function Base.show(io::IO, mesh::Mesh)#««
+	for (i, p) in pairs(mesh.points)
 		println(io, " ",i, ": ", p)
-		if plist.index[p] ≠ i
-			println(io, "\e[31;7m bad index[$p] = $(plist.index[p]), should be $i")
+		if mesh.index[p] ≠ i
+			println(io, "\e[31;7m bad index[$p] = $(mesh.index[p]), should be $i")
 			error("bad index")
 		end
 	end
-# 	for (p, i) in pairs(plist.index)
-# 		@assert plist.points[i] == p
-# 	end
-end
+end#»»
 
 # Affine map ««2
 """    Affine3
@@ -1585,15 +1521,14 @@ function Affine3((r1,z1)::Pair{T}, (r2,z2)::Pair{T}) where{T}
 	b = (z1*r2-r1*z2)/(r2-r1)
 	return Affine3{T}(a, b, r1, r2, z1, z2)
 end
-@inline Base.:-(aff::Affine3) =
-	Affine3(-aff.a, aff.b, -aff.r1, -aff.r2, aff.z1, aff.z2)
+# @inline Base.:-(aff::Affine3) =
+# 	Affine3(-aff.a, aff.b, -aff.r1, -aff.r2, aff.z1, aff.z2)
 function evaluate(aff::Affine3, r)
 	# exact cases:
 	r == aff.r1 && return aff.z1
 	r == aff.r2 && return aff.z2
 	return aff.a*r + aff.b
 end
-
 
 # Axial extrusion of a single point ««2
 """    AxialExtrude{J}
@@ -1615,7 +1550,7 @@ end
 @inline npoints(a::AxialExtrude) = sum(length.(values(a.indices)))
 @inline indices(a::AxialExtrude, e::Edge) = a.indices[int(e)]
 
-function Base.show(io::IO, a::AxialExtrude)
+function Base.show(io::IO, a::AxialExtrude)#««
 	println(io, "axial offset of [", a.r, ",", a.z, "] has ",
 		join(length.(a.chains),"+"), " crossings, $(npoints(a)) points:")
 	for c in a.chains
@@ -1626,24 +1561,24 @@ function Base.show(io::IO, a::AxialExtrude)
 		println(io, "   last edge $(last(c)) ",
 			last(c) == first(c) ? "(closed)" : "(open)")
 	end
-end
-function AxialExtrude(v::VoronoiDiagram{J}, points::Mesh,
+end#»»
+function AxialExtrude(v::VoronoiDiagram{J}, mesh::Mesh,#««
 		rp::T, zp, side, atol) where{J,T}
-	# `points`: `Mesh` collecting all points for this offset
+	# `mesh`: `Mesh` collecting all mesh for this offset
 	# `p`: the single point we are extruding
 	indices = Dict{J,Vector{J}}()
 	chains = offsetchains(v, rp, side)
 	for ch in chains
-		np = J(length(points))
+		np = J(length(mesh))
 		(newpoints, idx) = interpolate(v, ch, rp, atol)
 		for i in 1:length(idx)-1
 			j = idx[i]:idx[i+1]
-			ind = append!(points, [[q; zp] for q in newpoints[j]])
+			ind = append!(mesh, [[q; zp] for q in newpoints[j]])
 			indices[int(ch[i])] = ind
 		end
 	end
 	return AxialExtrude{J,T}(rp, zp, chains, indices)
-end
+end#»»
 
 # Region between chains««2
 """    cell_band(v, e1in, e1out, c2next)
@@ -1738,7 +1673,6 @@ function approximate(v::VoronoiDiagram{J,T}, e, r1, r2, aff, atol#««
 	ge, go = geometricnode(v, qe), geometricnode(v, qo)
 	re, ro = noderadius(v, qe), noderadius(v, qo)
 	be, bo = branch(v, e), branch(v, o)
-	println("  approx($e, $r1->$r2): edge goes from $qo($ro,$bo) to $qe($re,$be)")
 	sep = separator(v, e)
 	pt3 = @closure (p, r) -> SA[p[1], p[2], evaluate(aff, r)]
 	isparallel(sep) && return [pt3(g, r) for (g,r) in ((ge,re), (go,ro))]
@@ -1757,7 +1691,6 @@ function approximate(v::VoronoiDiagram{J,T}, e, r1, r2, aff, atol#««
 	end
 	r1 > r2 && return [pt3(ge, re)]
 
-	println("  approx now done on $r1:$r2")
 	rlist = approximate(sep, r1, r2, atol)
 
 	return [pt3(evaluate(sep, Branch(+1), r), r) for r in rlist]
@@ -1772,21 +1705,19 @@ firt of those two edges.
 The points are pushed on the point-set and the corresponding indices are
 returned.
 """
-function edgepoints(v::VoronoiDiagram, points::Mesh,
+function edgepoints(v::VoronoiDiagram, mesh::Mesh,
 		edge, edgetype, ax1, ax2, aff, atol)#««
-	println("\e[34mdraw ($edge, $edgetype); r1=$(ax1.r) r2=$(ax2.r)\e[m")
+# 	println("\e[34mdraw ($edge, $edgetype); r1=$(ax1.r) r2=$(ax2.r)\e[m")
 	if edgetype == 1 # use segment from ∂R1, backwards
-		println("use segment $edge from ∂R1 (backwards)")
 		return reverse(indices(ax1, edge)[begin+1:end])
 	elseif edgetype == 2 # segment from ∂R2, forwards
-		println("use segment $edge from ∂R2 (forwards)")
 		return indices(ax2, edge)[begin:end-1]
 	end # interpolate along an edge:
 	# (increasing if edgetype == 4, decreasing if edgetype == 3)
 	seg = approximate(v, edge, ax1.r, ax2.r, aff, atol)
 	edgetype == 4 && reverse!(seg)
 	pop!(seg)
-	return append!(points, seg)
+	return append!(mesh, seg)
 end#»»
 
 # Extrusion of a polygonal loop««2
@@ -1809,7 +1740,7 @@ function extrude_sloped(v::VoronoiDiagram{J}, mesh, p, q, atol) where{J}
 	println("\e[7mextrude a sloped face: $p->$q\e[m")
 	side = p[1] < 0 || q[1] < 0
 	rp, rq = abs(p[1]), abs(q[1])
-	(r1,r2,z1,z2,rev) = rp < rq ? (rp,rq,p[2],q[2],false) : (rq,rp,q[2],p[2],true)
+	(r1,r2,z1,z2,rev) = rp < rq ? (rp,rq,p[2],q[2],side) : (rq,rp,q[2],p[2],!side)
 	aff = Affine3(r1=>z1, r2=>z2)
 	ax1 = AxialExtrude(v, mesh, r1, z1, side, atol)
 	ax2 = AxialExtrude(v, mesh, r2, z2, side, atol)
@@ -1824,7 +1755,6 @@ function extrude_sloped(v::VoronoiDiagram{J}, mesh, p, q, atol) where{J}
 		unique!(cellpoints)
 		if length(cellpoints) ≥ 3
 			tri = triangulate_loop(mesh, cellpoints)
-			println("triangulation is $tri")
 			append!(mesh.triangles, (rev ? (a,b,c) : (a,c,b) for (a,b,c) in tri))
 		end
 	end
@@ -2034,8 +1964,8 @@ l = [[0,0.],[3,0],[0,4]]
 v=V.VoronoiDiagram([[0.,0],[10,0],[5,1],[5,9]],[(1,2),(2,3),(3,4)];extra=0)
 # v=V.VoronoiDiagram([[0.,0],[10.,0],[10,10.]],[(1,2),(2,3)];extra=5)
 
-# el = V.extrude_loop(v, [[-4.,-6],[4,-4.4],[4,6],[-6,4]], .1)
-el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
+el = V.extrude_loop(v, [[-.4,-.6],[.4,-.44],[.4,.6],[-.6,.4]], .1)
+# el = V.extrude_loop(v, [[.5,0],[2,0],[2,1]], .1)
 # el = V.extrude_loop(v, [[-.5,-1],[1,-.5],[.5,1],[-1,.5]], .1)
 
 # v=V.OffsetDiagram([[0.,0],[10,0],[0,10],[10,10],[5,9],[5,1]],[(1,2),(2,6),(6,5),(5,4),(3,1)])
