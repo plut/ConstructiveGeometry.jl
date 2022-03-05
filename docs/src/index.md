@@ -59,4 +59,4 @@ or [exported](@ref io) in several formats,
 including as an STL (for 3d objects) or SVG (for 2d objects) file.
 
 The [documentation about extending `ConstructiveGeometry`](@ref extending)
-also contains some explanations about the inner workings of this package.
+also contains some explanations about the internals.

@@ -1346,7 +1346,7 @@ end
 @inline Base.size(mesh::Mesh) = (length(mesh.points),)
 @inline Base.getindex(mesh::Mesh, i::Integer) = mesh.points[i]
 
-function Base.push!(mesh::Mesh{J,P}, p) where{J,P} # returns index
+function Base.push!(mesh::Mesh{J}, p) where{J} # returns index
 	k = get(mesh.index, p, zero(J))
 	!iszero(k) && return k
 	push!(mesh.points, p)
@@ -1354,8 +1354,7 @@ function Base.push!(mesh::Mesh{J,P}, p) where{J,P} # returns index
 	mesh.index[p] = k
 	return k
 end
-@inline Base.append!(mesh::Mesh{J}, p) where{J} =
-	J[ push!(mesh, x) for x in p ]
+@inline Base.append!(mesh::Mesh{J}, p) where{J} = J[ push!(mesh, x) for x in p ]
 
 function Base.show(io::IO, mesh::Mesh)#««
 	for (i, p) in pairs(mesh.points)
@@ -1366,52 +1365,6 @@ function Base.show(io::IO, mesh::Mesh)#««
 		end
 	end
 end#»»
-# cap closing
-function close_caps!(mesh::Mesh{J}) where{J}
-	# find all unpaired edges ««
-	edges = [ J[] for _ in eachindex(mesh.points) ]
-	for (a,b,c) in mesh.triangles
-		push!(edges[a], b); push!(edges[b], c); push!(edges[c], a)
-	end
-	sort!.(edges)
-	border = [ (J(i),j) for i in eachindex(mesh.points) for j in edges[i]
-		if isempty(searchsorted(edges[j], i)) ]
-	isempty(border) && return
-	println("  border is $border")
-	#«« assemble in a set of loops
-	done = falses(size(border))
-	for i in eachindex(border)
-		done[i] && continue
-		loop = Int[] # loop of *existing* edges - we will need to reverse later...
-		while !done[i]
-			done[i] = true; push!(loop, border[i][1])
-			u = searchsorted(border, border[i][2]; by=first)
-			j = i
-			for k in u
-				k == first(loop) && @goto loopdone
-				!done[k] && (j = k; break)
-			end
-			i = j
-		end
-		@label loopdone
-		g = sum(mesh.points[loop]); g /= length(loop) # barycenter
-		# relative points
-		q = [ p - g for p in mesh.points[loop]]
-		n = length(q); push!(q, first(q))
-		# pick a vector which maximizes the surface of the projected loop
-		w = SVector{3}(sum(q[i][j]*q[i+1][k]-q[i][k]-q[i+1][j] for i in 1:n)
-			for (j,k) in ((2,3),(3,1),(1,2))); w/= norm(w)
-		v = abs(w[1]) < abs(w[2]) ?
-			(abs(w[1]) < abs(w[3]) ? SA[0,w[3],-w[2]] : SA[w[2],-w[1],0]) :
-			(abs(w[2]) < abs(w[3]) ? SA[w[3],0,-w[1]] : SA[w[2],-w[1],0])
-		u = cross(v, w); v = cross(w, u)
-		# we need to reverse orientation, the simplest is to do it here:
-		pts = [ SA[dot(v,p), dot(u,p)] for p in mesh.points[loop] ]
-		tri = triangulate_loop(pts, loop)
-		for (a,b,c) in tri; push!(mesh.triangles, (a,b,c)); end
-	end#»»
-end
-
 # Affine map ««2
 """    Affine3
 
@@ -1691,7 +1644,6 @@ function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}#««
 		end
 		p, axp = q, axq
 	end
-	close_caps!(mesh)
 	return (mesh.points, mesh.triangles)
 end#»»
 """    extrude(trajectory, profile, atol)
@@ -1716,7 +1668,7 @@ function extrude(trajectory, profile, atol)
 		closed && push!(slist, (n+length(path), n+1))
 	end#»»
 	extra = maximum(maximum(p[1] for p in loop) for loop in profile)
-	println("plist=$plist\nslist=$slist\nextra=$extra\n")
+# 	println("plist=$plist\nslist=$slist\nextra=$extra\n")
 	v = VoronoiDiagram(plist, slist; extra)
 	return [ extrude_loop(v, loop, atol) for loop in profile ]
 end

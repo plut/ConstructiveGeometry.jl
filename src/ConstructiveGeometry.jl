@@ -1334,7 +1334,8 @@ end
 @inline children(s::PathExtrude) = (s.profile,)
 function mesh(g::MeshOptions, s::PathExtrude, (m,))
 	vlist = Voronoi.extrude(s.trajectory, paths(m), get(g, :atol))
-	v = [ surface(points, triangles) for (points, triangles) in vlist ]
+	v = [ (TriangleMeshes.close_loops!(points, triangles);
+		surface(points, triangles)) for (points, triangles) in vlist ]
 	return reduce(symdiff, v)
 end
 

@@ -1,4 +1,5 @@
 module TriangleMeshes
+using LinearAlgebra
 using StaticArrays
 using FastClosures
 using DataStructures # heappush!, 
@@ -405,6 +406,85 @@ function splitedges!(t::CTMesh{J,T,A}, maxlen; distance2=distance2) where{J,T,A}
 	elist[o_po] = distance2(ph, pr)
 	end
 	return t
+end
+
+# close_loops! ««2
+"""    close_loops!(mesh)
+
+Closes any open loops of unpaired edges in this surface,
+by repeatedly closing the pointiest triangle.
+Modifies the `triangles` list."""
+function close_loops!(points, triangles)
+	# find all unpaired edges ««
+	edges = [ Int[] for _ in eachindex(points) ]
+	for (a,b,c) in triangles
+		push!(edges[a], b); push!(edges[b], c); push!(edges[c], a)
+	end
+	sort!.(edges)
+	border = [ (i,j) for i in eachindex(points) for j in edges[i]
+		if isempty(searchsorted(edges[j], i)) ]
+	isempty(border) && return #»»
+# 	println("  border is $border")
+	#«« assemble in a set of loops
+	done = falses(size(border))
+	for i in eachindex(border)
+		done[i] && continue
+		loop = Int[] # loop of *existing* edges - we will need to reverse later...
+		while !done[i]
+			done[i] = true; push!(loop, border[i][1])
+			u = searchsorted(border, border[i][2]; by=first)
+			j = i
+			for k in u
+				k == first(loop) && @goto loopdone
+				!done[k] && (j = k; break)
+			end
+			i = j
+		end
+		@label loopdone
+		n = length(loop)
+# 		println("(clockwise) loop of $n points is $loop")
+		# since we will repeatedly remove points from the loop,
+		# re-encode it as a chained list:
+		# loop[i] = i-th point of the loop (index into points)
+		# nextidx[i] = next point of the loop (index into thispoint)
+		# vlist[i] = loop[nextidx[i]] - loop[i] = vector from loop[i]
+		# clist[i] = cosine of (vlist[previdx[i]], vlist[i]) = cos at loop[i]
+		nextidx = [2:n; 1 ]
+		previdx = [n; 1:n-1 ]
+		vlist = points[loop] .- points[loop[nextidx]]
+		vlist ./= norm.(vlist)
+		clist = dot.(vlist, vlist[previdx])
+		# now repeatedly close n triangles
+		while n ≥ 3
+# 			println("\e[7m eliminating one point\e[m")
+# 			for i in 1:n
+# 				@printf("\e[38;5;8m[%d] %d->%d: [%.3g, %.3g, %.3g]  c=%.3g\e[m\n",
+# 					i, loop[i], loop[nextidx[i]],
+# 					vlist[i][1], vlist[i][2], vlist[i][3], clist[i])
+# 			end
+			i2 = argmin(view(clist, 1:n))
+			i1, i3 = previdx[i2], nextidx[i2]
+# 			println("  pointiest angle found at $i2: $(loop[[i1,i2,i3]])= $(clist[i2])")
+# 			println("add triangle ", (loop[i1],loop[i3],loop[i2]))
+			push!(triangles, (loop[i1],loop[i3],loop[i2]))
+			# connect i1 to i3
+			nextidx[i1] = i3; previdx[i3] = i1
+			vlist[i1] = points[loop[i3]] - points[loop[i1]]
+			clist[i1] = dot(vlist[i1], vlist[previdx[i1]])
+			clist[i3] = dot(vlist[i3], vlist[i1])
+			# move entry n in place of i2
+			if i2 < n
+				n1, n3 = previdx[n], nextidx[n]
+				nextidx[n1] = i2; previdx[i2] = n1
+				nextidx[i2] = n3; previdx[n3] = i2
+				vlist[i2] = vlist[n]
+				clist[i2] = clist[n]
+				loop[i2] = loop[n]
+			end
+			# update vlist accordingly
+			n-= 1
+		end
+	end#»»
 end
 
 #  »»1
