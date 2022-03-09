@@ -201,6 +201,12 @@ png("swept_cube", s); # hide
 path_extrude
 ```
 
+```@repl 0
+s = G.path_extrude([[[0,0.],[3,0],[5,1]]])*(G.square(10)-([1,2]+G.square(3)));
+png("path_extrude", s); # hide
+```
+![example: single-path extrusion of a shape](path_extrude.png)
+
 ## User-defined volume deformations
 ```@docs
 deform
