@@ -1615,7 +1615,7 @@ struct RandomColor{D} <: AbstractTransform{D}
 end
 @inline mesh(g::MeshOptions, c::RandomColor{3}, (m,)) =
 	VolumeMesh(TriangleMesh(vertices(m), faces(m),
-		rand(Colors.RGB{N0f8}, size(faces(m)))))
+		Colors.RGBA{N0f8}.(rand(Colors.RGB{N0f8}, size(faces(m))))))
 """
     randomcolor(s...)
 

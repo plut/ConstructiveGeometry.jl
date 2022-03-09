@@ -202,7 +202,7 @@ path_extrude
 ```
 
 ```@repl 0
-s = G.path_extrude([[[0,0.],[3,0],[5,1]]])*(G.square(10)-([1,2]+G.square([6,5])));
+s = path_extrude([[[0,0.],[3,0],[5,1]]])*(square(10)-([1,2]+square([6,5])));
 png("path_extrude", s); # hide
 ```
 ![example: single-path extrusion of a shape](path_extrude.png)
