@@ -333,7 +333,7 @@ end
 @inline MeshType(::MeshOptions{T,C},::AbstractGeometry{2}) where{T,C} =
 	FullMesh{ShapeMesh{T},Shapes.PolygonXor{T},C}
 @inline raw(m::ShapeMesh) = m.poly
-@inline Base.empty(::Type{<:ShapeMesh{T}}) where{T} =
+@inline Base.empty(::ShapeMesh{T}) where{T} =
 	ShapeMesh{T}(Shapes.PolygonXor{T}([]))
 
 """
@@ -510,7 +510,7 @@ end
 @inline vertices(s::VolumeMesh) = TriangleMeshes.vertices(s.mesh)
 @inline faces(s::VolumeMesh) = TriangleMeshes.faces(s.mesh)
 @inline attributes(s::VolumeMesh) = TriangleMeshes.attributes(s.mesh)
-@inline empty(::Type{VolumeMesh{T,A}}) where{T,A} =
+@inline Base.empty(::VolumeMesh{T,A}) where{T,A} =
 	VolumeMesh(TriangleMesh{T,A}([],[],[]))
 @inline AbstractTrees.printnode(io::IO, s::VolumeMesh) =
 	print(io, "VolumeMesh # ", length(vertices(s)), " vertices, ",
@@ -1339,8 +1339,7 @@ end
 function mesh(g::MeshOptions, s::PathExtrude, (m,))
 	s = surface(Voronoi.extrude(s.trajectory, paths(m), get(g, :atol))...)
 	TriangleMeshes.close_loops!(s.mesh, _DEFAULT_COLOR)
-	# FIXME: needs to remove infinitely-thin faces etc.
-	return s
+	return csgunion(s, empty(s))
 end
 
 """    path_extrude(trajectory)*profile

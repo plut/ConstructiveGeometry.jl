@@ -934,7 +934,8 @@ end#»»
 
 function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	np, ns = length(points), length(segments)
-	v = VoronoiDiagram{J,T}(CornerTable{J}(Delaunay, points), points, segments)
+	v = VoronoiDiagram{J,T}(CornerTable{J}(Delaunay, points; extra),
+		points, segments)
 
 	# update geometric information ««
 	for e in eachedge(v)
