@@ -28,8 +28,13 @@ The following formats are supported: `.stl` (ASCII)
 and `.ply` (ASCII) for volumes;
 `.svg` for shapes.
 
+Note that this saves only the main mesh of the object;
+any highlighted meshes produced by the [highlight operation](@ref Highlight)
+are discarded.
+
 Image file formats (`.png`, `.pdf`) are also supported;
 they are delegated to `Makie`'s `plot` function.
+For these formats the highlighted parts of the object are preserved.
 
 ## OpenSCAD output
 

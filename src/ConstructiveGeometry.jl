@@ -18,7 +18,7 @@ import Colors: Colors, Colorant
 import Makie: Makie, surface, plot, plot!, SceneLike, mesh
 
 import Base: show, print
-import Base: union, intersect, setdiff, copy, isempty, merge
+import Base: union, intersect, setdiff, symdiff, copy, isempty, merge
 import Base: *, +, -, ∈, inv, sign, iszero
 
 import AbstractTrees: AbstractTrees, children
@@ -151,7 +151,10 @@ Interface:
 """
 
 abstract type AbstractGeometry{D} end
-@inline children(::AbstractGeometry) = AbstractGeometry[]
+@inline children(t::AbstractGeometry) =
+	error("children() not defined for type ", typeof(t))
+abstract type AbstractGeometryLeaf{D} <: AbstractGeometry{D} end
+@inline children(::AbstractGeometryLeaf) = AbstractGeometry[]
 @inline AbstractTrees.printnode(io::IO, s::AbstractGeometry) =
 	print(io, typeof(s).name.name)
 
@@ -177,7 +180,7 @@ Derived types should implement the following methods:
 
 FIXME: this type is currently unused, should it be removed?
 """
-abstract type AbstractMesh{D,T} <: AbstractGeometry{D} end
+abstract type AbstractMesh{D,T} <: AbstractGeometryLeaf{D} end
 @inline Base.map!(f, m::AbstractMesh) = vertices(m) .= f.(vertices(m))
 # Empty unions and intersects««2
 """
@@ -224,13 +227,13 @@ struct MeshOptions{T<:Real,C,P<:NamedTuple}
 	# at least `atol`, `rtol` and `symmetry`, but user data is allowed here:
 	parameters::P
 	color::C
-	@inline MeshOptions{T}(p::P,c::C) where{T,C,P} = new{T,C,P}(p,c)
-	@inline MeshOptions{T}(;kwargs...) where{T} =
-		MeshOptions{T}(merge(_DEFAULT_PARAMETERS, kwargs.data), _DEFAULT_COLOR)
+	@inline (M::Type{<:MeshOptions{T}})(p::P,c::C) where{T,C,P} = new{T,C,P}(p,c)
 end
 
-const MeshColor = Colors.RGBA{N0f8}
-const _DEFAULT_COLOR = MeshColor(.3,.4,.5) # bluish gray
+@inline Base.merge(g::MeshOptions{T,C}; kwargs...) where{T,C} =
+	MeshOptions{T,C}(merge(g.parameters, kwargs.data), g.color)
+const _DEFAULT_COLOR = Colors.RGBA{N0f8}(.3,.4,.5) # bluish gray
+const _DEFAULT_OPTIONS = MeshOptions{Float64}(NamedTuple(), _DEFAULT_COLOR)
 const _DEFAULT_PARAMETERS = (
 	atol = 0.1, rtol = .005, symmetry = 1,
 )
@@ -254,7 +257,7 @@ end
 @inline auxtype(::Type{FullMesh{T,U,A}}) where{T,U,A} = Pair{A,U}
 
 @inline fullmesh(s::AbstractGeometry; kwargs...) =
-	mesh(MeshOptions{Float64}(;kwargs...), s)
+	mesh(merge(_DEFAULT_OPTIONS;kwargs...), s)
 
 """
     mesh(g::MeshOptions, object)
@@ -300,7 +303,6 @@ function gridcells(g::MeshOptions, vertices, maxgrid)
 end
 
 #————————————————————— Primitive objects —————————————————————————————— ««1
-
 # Explicit case: ShapeMesh««1
 """
     ShapeMesh{T}
@@ -359,7 +361,7 @@ Interpolates `n` points of the Bézier curve parametrized by points
 	Bezier.interpolate(Bezier.BezierCurve(p0,p1,p2,p3),n) # [points..., bezier()...]
 
 # Square««1
-struct Square{T} <: AbstractGeometry{2}
+struct Square{T} <: AbstractGeometryLeaf{2}
 	size::SVector{2,T}
 end
 @inline scad_info(s::Square) = (:square, (size=s.size,))
@@ -388,7 +390,7 @@ An axis-parallel square or rectangle  with given `size`
 	translate(center-SA[one_half(a),one_half(b)])*_square(a,b,nothing,anchor)
 
 # Circle««1
-struct Circle{T} <: AbstractGeometry{2}
+struct Circle{T} <: AbstractGeometryLeaf{2}
 	radius::T
 	circumscribed::Bool
 end
@@ -465,7 +467,7 @@ and inscribed otherwise.
 @inline circle(a::Real; circumscribed=false) = Circle(a, circumscribed)
 
 # Stroke ««1
-struct Stroke{T} <: AbstractGeometry{2}
+struct Stroke{T} <: AbstractGeometryLeaf{2}
 	points::Vector{SVector{2,T}}
 	width::Float64
 	ends::Symbol
@@ -525,14 +527,14 @@ end
 @inline TriangleMesh(g::MeshOptions{T}, points, faces,
 	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{F,T,A} =
 	TriangleMesh{T,A}(SVector{3,T}.(points), faces, attrs)
-@inline VolumeMesh(g::MeshOptions{T,C}, points, faces) where{T,C} =
-	VolumeMesh(TriangleMesh{T,C}(SVector{3,T}.(points), faces,
+@inline VolumeMesh(g::MeshOptions{T,A}, points, faces) where{T,A} =
+	VolumeMesh(TriangleMesh{T,A}(SVector{3,T}.(points), faces,
 		fill(g.color, size(faces))))
 @inline mesh(g::MeshOptions, s::VolumeMesh, _) =
 	VolumeMesh(g, vertices(s), faces(s))
 
-@inline MeshType(::MeshOptions{T,C},::AbstractGeometry{3}) where{T,C} =
-	FullMesh{VolumeMesh{T},TriangleMesh{T,Nothing},C}
+@inline MeshType(::MeshOptions{T,A},::AbstractGeometry{3}) where{T,A} =
+	FullMesh{VolumeMesh{T,A},TriangleMesh{T,Nothing},A}
 @inline raw(m::VolumeMesh) = TriangleMesh{Float64,Nothing}(
 	m.mesh.vertices, m.mesh.faces, fill(nothing, size(m.mesh.faces)))
 
@@ -567,13 +569,12 @@ function surface(vertices, faces)
 			SA[dot(u,vertices[i]), dot(v,vertices[i])] for i in f ])
 		push!(triangles, tri...)
 	end
-	return VolumeMesh(TriangleMesh{Float64,MeshColor}(vertices, triangles,
-		fill(_DEFAULT_COLOR, size(triangles))))
+	return VolumeMesh(_DEFAULT_OPTIONS, vertices, triangles)
 end
 @inline surface(s::AbstractGeometry{3}) = fullmesh(s).main
 
 # Cube««1
-struct Cube{T} <: AbstractGeometry{3}
+struct Cube{T} <: AbstractGeometryLeaf{3}
 	size::SVector{3,T}
 end
 @inline scad_info(s::Cube) = (:cube, (size=s.size,))
@@ -616,7 +617,7 @@ If `center` is `true` then the cube is centered.
 
 
 # Sphere««1
-struct Sphere{T} <: AbstractGeometry{3}
+struct Sphere{T} <: AbstractGeometryLeaf{3}
 	radius::T
 	circumscribed::Bool
 end
@@ -833,10 +834,13 @@ be used.
 # rotate««2
 """
     rotate(θ, [center=center], [solid...])
-    rotate(θ, axis=axis, [center=center], [solid...])
 
 Rotation around the Z-axis (in trigonometric direction, i.e.
 counter-clockwise).
+
+    rotate(θ, axis=axis, [center=center], [solid...])
+
+Rotation around any axis, given by a vector directing this axis.
 """
 @inline rotate(θ::Number, s...; axis=nothing, kwargs...) =
 	operator(_rotate1, (todegrees(θ), axis,), s...; kwargs...)
@@ -1333,10 +1337,10 @@ struct PathExtrude <: AbstractGeometry{3}
 end
 @inline children(s::PathExtrude) = (s.profile,)
 function mesh(g::MeshOptions, s::PathExtrude, (m,))
-	vlist = Voronoi.extrude(s.trajectory, paths(m), get(g, :atol))
-	v = [ (TriangleMeshes.close_loops!(points, triangles);
-		surface(points, triangles)) for (points, triangles) in vlist ]
-	return reduce(symdiff, v)
+	s = surface(Voronoi.extrude(s.trajectory, paths(m), get(g, :atol))...)
+	TriangleMeshes.close_loops!(s.mesh, _DEFAULT_COLOR)
+	# FIXME: needs to remove infinitely-thin faces etc.
+	return s
 end
 
 """    path_extrude(trajectory)*profile
@@ -1829,7 +1833,7 @@ Shorthand for `setdiff(union(a...), union(b...))`.
                 y::AbstractVector{<:Union{AbstractGeometry,EmptyUnion}}) =
 	setdiff(union(x...), union(y...))
 
-# Xor (used by extrusion) ««2
+# Xo(used by extrusion) ««2
 @inline symdiff(s1::S, s2::S) where {S<:VolumeMesh} =
 	VolumeMesh(TriangleMeshes.boolean(3, s1.mesh, s2.mesh))
 # Convex hull ««1

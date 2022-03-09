@@ -31,6 +31,7 @@ using .CornerTables
 import .CornerTables: triangulation
 
 const DEFAULT_ATOL=1e-1
+const DEFAULT_INDEX=Int32
 
 # CONVENTIONS FOR EDGES ««1
 # as a triangulation: next is (head->left), prev is (left->tail)
@@ -99,6 +100,15 @@ function isincircle(a,b,c,x)
 	@assert !isleft(a,c,b) "incircle: triangle ($a,$b,$c) has wrong orientation"
 	m = SA[a[1] a[2] norm²(a); b[1] b[2] norm²(b); c[1] c[2] norm²(c)]
 	return det(m) > 0
+end
+
+"""    polyarea(points): computes polygon area by shoelace formula """
+function polyarea(points)
+	a = det2(last(points), first(points))
+	for i in 2:length(points)
+		a+= det2(points[i-1], points[i])
+	end
+	return a/2
 end
 
 # Approximation of parabolic arc««2
@@ -657,7 +667,7 @@ Returns a triangulation of this set of points,
 as a list of triples of integers."""
 function triangulate(points; kw...)
 	np = length(points)
-	t = CornerTable{Int32}(points; kw...)
+	t = CornerTable{DEFAULT_INDEX}(points; kw...)
 	# remove all superfluous nodes & cells ««
 	# the nodes are sorted this way:
 	# - inner nodes
@@ -920,7 +930,7 @@ function addsegment!(v::VoronoiDiagram, c::Cell)#««
 end#»»
 # Constructor ««2
 @inline VoronoiDiagram(points::AbstractVector{P}, segments=[];kw...) where{P} =
-	VoronoiDiagram{Int32,float(eltype(P))}(points, segments; kw...)
+	VoronoiDiagram{DEFAULT_INDEX,float(eltype(P))}(points, segments; kw...)
 
 function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	np, ns = length(points), length(segments)
@@ -1578,7 +1588,7 @@ function edgepoints(v::VoronoiDiagram, mesh::Mesh,
 	return append!(mesh, seg)
 end#»»
 
-# Extrusion of a polygonal loop««2
+# Extrusion of one or several polygonal loops««2
 function extrude_vertical(v::VoronoiDiagram, mesh, axp, axq, atol)#««
 # 	println("\e[48;5;88mextrude a vertical face on $(axp.side) at r=$(axp.r): $(axp.z)->$(axq.z)\e[m")
 	@assert axp.side == axq.side
@@ -1594,7 +1604,7 @@ function extrude_vertical(v::VoronoiDiagram, mesh, axp, axq, atol)#««
 		end
 	end
 end#»»
-function extrude_sloped(v::VoronoiDiagram{J}, mesh, ax1, ax2, atol) where{J}#««
+function extrude_sloped(v::VoronoiDiagram, mesh, ax1, ax2, atol)#««
 # 	println("\e[7mextrude a sloped face on side $(ax1.side): $(ax1.r),$(ax1.z)->$(ax2.r),$(ax2.z)\e[m")
 	@assert ax1.side == ax2.side
 	rev = ax1.side
@@ -1616,13 +1626,12 @@ function extrude_sloped(v::VoronoiDiagram{J}, mesh, ax1, ax2, atol) where{J}#«�
 		end
 	end
 end#»»
-"""    extrude_loop(v, loop)
+"""    extrude_loop(v, mesh, loop, atol)
 
-Extrudes a loop of points [xi, yi] along the polygonal path(s);
-returns (points, triangulation).
+Extrudes a loop of points [xi, yi] along the polygonal path(s).
+Updates `mesh` with the extra information.
 """
-function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}#««
-	mesh = Mesh{J,SVector{3,T}}()
+function extrude_loop(v::VoronoiDiagram, mesh, loop, atol)#««
 	p = last(loop)
 	axp = AxialExtrude(v, mesh, abs(p[1]), p[2], p[1]<0, atol)
 	for q in loop
@@ -1644,17 +1653,18 @@ function extrude_loop(v::VoronoiDiagram{J,T}, loop, atol) where{J,T}#««
 		end
 		p, axp = q, axq
 	end
-	return (mesh.points, mesh.triangles)
 end#»»
 """    extrude(trajectory, profile, atol)
 
  - `trajectory`: vector of paths, either open or closed
- - `profile`: vector of open loops
+ - `profile`: vector of closed loops
 
 Returns a vector of extrusions of each profile loop along the trajectory.
 Each extrusion is a (points, triangles) pair.
 """
-function extrude(trajectory, profile, atol)
+function extrude(
+		trajectory::AbstractVector{<:AbstractVector{<:AbstractVector{T}}},
+		profile::AbstractVector{<:AbstractVector{<:AbstractVector}}, atol) where{T}
 	# decompose trajectory to (points, segments):
 	plist = empty(first(trajectory))#««
 	slist = NTuple{2,Int}[]
@@ -1670,7 +1680,11 @@ function extrude(trajectory, profile, atol)
 	extra = maximum(maximum(p[1] for p in loop) for loop in profile)
 # 	println("plist=$plist\nslist=$slist\nextra=$extra\n")
 	v = VoronoiDiagram(plist, slist; extra)
-	return [ extrude_loop(v, loop, atol) for loop in profile ]
+	mesh = Mesh{DEFAULT_INDEX,SVector{3,T}}()
+	for loop in profile
+		extrude_loop(v, mesh, loop, atol)
+	end
+	return (mesh.points, mesh.triangles)
 end
 #»»1
 # Displaying and debugging ««1

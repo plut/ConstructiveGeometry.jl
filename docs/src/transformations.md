@@ -44,7 +44,7 @@ For non-invertible transformations, see [`project`](@ref).
 
 ### [Three-dimensional embeddings of two-dimensional objects](@id embed)
 As an exception, it is allowed to apply a (2d -> 3d) transformation
-to any three-dimensional object.
+to any two-dimensional object.
 The result of such a transformation is still two-dimensional
 (and will accordingly be rendered as a polygon),
 but the information about the embedding will be used when computing
@@ -258,6 +258,7 @@ png("color", s); # hide
 ```
 ![example: union of a sphere and a cube](color.png)
 
+### Highlight
 ```@docs
 highlight
 ```

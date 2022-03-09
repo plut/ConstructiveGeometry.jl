@@ -35,7 +35,7 @@ It is possible to display the objects either interactively with `GLMakie`,
 or as static images with `CairoMakie`;
 the latter is what is used to build the examples in this documentation.
 
-## Parameters
+## Meshing parameters
 
 The meshing of objects is governed by a few parameters:
  - `atol` and `rtol` determine the number of faces inserted in the mesh;

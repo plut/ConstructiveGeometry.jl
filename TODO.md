@@ -7,7 +7,10 @@
  * concrete type for polyline
  * operators 1d ↔ 2d: border, interior
  * `path_extrude(surface, profile) => path_extrude(∂surface)`
+ * `path(element1, element2, ...)`
 # Bug fixes
+ - [ ] `path_extrude` of shape with holes: hole extrusions are reversed
+  - [ ] instead of trying funny stuff with symdiff, we could just concatenate everything and do a self-union to regularize
  - [x] `matrix*set_parameters` etc.; `raise(.8)*mat*cone(3)*lozenge`...
  - [x] `raise` in 2d
  - [x] volume - volume - volume
@@ -91,7 +94,10 @@ For MeshIO: stl needs
   - [x] 3d (split triangles)
  - [ ] path type: e.g. take a rectangular path, round corners, then create the shape defined by 1-directional offset
  - [ ] ellipse
- - [ ] test if point is in shape and random sample of shapes
+ - [ ] geometry operations:
+  - [ ] point in shape,
+  - [ ] random sample of shape,
+  - [ ] area/volume of shape
  - [ ] add some relational definitions: mutual tangent, intersection, etc.
  - [ ] path sweep: use straight skeleton/medial axis for disappearing vertices
   - [x] compute medial axis

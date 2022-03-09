@@ -414,17 +414,18 @@ end
 Closes any open loops of unpaired edges in this surface,
 by repeatedly closing the pointiest triangle.
 Modifies the `triangles` list."""
-function close_loops!(points, triangles)
+function close_loops!(mesh, attr)
 	# find all unpaired edges ««
-	edges = [ Int[] for _ in eachindex(points) ]
-	for (a,b,c) in triangles
+	edges = [ Int[] for _ in eachindex(mesh.vertices) ]
+	for (a,b,c) in mesh.faces
 		push!(edges[a], b); push!(edges[b], c); push!(edges[c], a)
 	end
 	sort!.(edges)
-	border = [ (i,j) for i in eachindex(points) for j in edges[i]
+	border = [ (i,j) for i in eachindex(mesh.vertices) for j in edges[i]
 		if isempty(searchsorted(edges[j], i)) ]
 	isempty(border) && return #»»
 # 	println("  border is $border")
+	n1 = nfaces(mesh)
 	#«« assemble in a set of loops
 	done = falses(size(border))
 	for i in eachindex(border)
@@ -451,7 +452,7 @@ function close_loops!(points, triangles)
 		# clist[i] = cosine of (vlist[previdx[i]], vlist[i]) = cos at loop[i]
 		nextidx = [2:n; 1 ]
 		previdx = [n; 1:n-1 ]
-		vlist = points[loop] .- points[loop[nextidx]]
+		vlist = mesh.vertices[loop] .- mesh.vertices[loop[nextidx]]
 		vlist ./= norm.(vlist)
 		clist = dot.(vlist, vlist[previdx])
 		# now repeatedly close n triangles
@@ -466,10 +467,10 @@ function close_loops!(points, triangles)
 			i1, i3 = previdx[i2], nextidx[i2]
 # 			println("  pointiest angle found at $i2: $(loop[[i1,i2,i3]])= $(clist[i2])")
 # 			println("add triangle ", (loop[i1],loop[i3],loop[i2]))
-			push!(triangles, (loop[i1],loop[i3],loop[i2]))
+			push!(mesh.faces, (loop[i1],loop[i3],loop[i2]))
 			# connect i1 to i3
 			nextidx[i1] = i3; previdx[i3] = i1
-			vlist[i1] = points[loop[i3]] - points[loop[i1]]
+			vlist[i1] = mesh.vertices[loop[i3]] - mesh.vertices[loop[i1]]
 			clist[i1] = dot(vlist[i1], vlist[previdx[i1]])
 			clist[i3] = dot(vlist[i3], vlist[i1])
 			# move entry n in place of i2
@@ -485,6 +486,9 @@ function close_loops!(points, triangles)
 			n-= 1
 		end
 	end#»»
+	n2 = nfaces(mesh)
+	resize!(mesh.attributes, n2); mesh.attributes[n1+1:n2] .= attr
+	return mesh
 end
 
 #  »»1

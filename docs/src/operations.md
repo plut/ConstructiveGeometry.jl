@@ -16,14 +16,14 @@ png(name, s) = save(name*".png", Makie.plot(s));
 union(::AbstractGeometry,::AbstractGeometry)
 ```
 ```@repl 0
-s = union(cube(50), sphere(50));
+s = union(cube(50), sphere(50)); # equivalently: cube(50) ∪ sphere(50)
 png("union", s); # hide
 ```
 ![example: union of a sphere and a cube](union.png)
 
 N-ary union may be performed in this way:
 ```@repl 0
-s = union(([0,10i]+square(5) for i in 1:5)...);
+s = union(([0,10i]+square(5) for i in 1:5)...); # equivalently: ⋃(([0,10i]+square(5) for i in 1:5)...)
 png("n-union", s); # hide
 ```
 ![example: n-ary union](n-union.png)
@@ -31,7 +31,7 @@ png("n-union", s); # hide
 intersect(::AbstractGeometry{D},::AbstractGeometry{D}) where{D}
 ```
 ```@repl 0
-s = intersect(cube(50), sphere(50));
+s = intersect(cube(50), sphere(50)); # equivalently: cube(50) ∩ sphere(50)
 png("intersection", s); # hide
 ```
 ![example: intersection of a sphere and a cube](intersection.png)
@@ -39,7 +39,7 @@ png("intersection", s); # hide
 setdiff(::AbstractGeometry{D},::AbstractGeometry{D}) where{D}
 ```
 ```@repl 0
-s = setdiff(cube(50), [50,0,0]+sphere(50));
+s = setdiff(cube(50), [50,0,0]+sphere(50)); # equivalently: cube(50) - sphere(50)
 png("setdiff", s); # hide
 ```
 ![example: difference of a sphere and a cube](setdiff.png)
