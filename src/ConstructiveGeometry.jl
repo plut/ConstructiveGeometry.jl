@@ -1023,20 +1023,22 @@ end
 	prism_mesh(g, 0, s.height, s.twist, s.scale, m)
 
 """
+    prism(h, s...; twist, scale) # preferred form
+    prism(h; twist, scale) * s
     linear_extrude(h, s...; twist, scale)
     linear_extrude(h) * s...
 
-Linear extrusion to height `h`.
+Build a prism (linear extrusion) of height `h` on the given base shape.
 """
-@inline linear_extrude(height, s...; center=false, twist=0, scale=1) =
-	operator(_linear_extrude, (height, center, twist, scale), s...)
-@inline _linear_extrude(h,c,t,s::Real,x) = _linear_extrude(h,c,t,SA[s,s],x)
-@inline function _linear_extrude(height, center, twist, scale::AbstractVector,
+@inline prism(height, s...; center=false, twist=0, scale=1) =
+	operator(_prism, (height, center, twist, scale), s...)
+@inline _prism(h,c,t,s::Real,x) = _prism(h,c,t,SA[s,s],x)
+@inline function _prism(height, center, twist, scale::AbstractVector,
 		s::AbstractGeometry{2})
 	m = Prism(height, twist, scale, s)
 	center ? translate([0,0,-one_half(height)], m) : m
 end
-@inline prism(height, s...; kwargs...) = linear_extrude(height, s...; kwargs...)
+linear_extrude = prism
 
 # Cylinder ««2
 #     cylinder(h, (r1, r2) [, center=false])
@@ -1059,13 +1061,13 @@ and inscribed otherwise.
 
 """
 @inline cylinder(h::Real, r::Real;center::Bool=false, circumscribed=false) =
-	let c = linear_extrude(h)*circle(r;circumscribed)
+	let c = prism(h)*circle(r;circumscribed)
 	center ? lower(one_half(h))*c : c
 	end
 
 function cylinder(h::Real, r1::Real, r2::Real; center::Bool = false, circumscribed=false)
 	a1, a2 = minmax(r1, r2)
-	m = linear_extrude(h, scale=a1/a2)*circle(a2;circumscribed)
+	m = prism(h, scale=a1/a2)*circle(a2;circumscribed)
 	b = 2(r1<r2)
 	return SA[0,0,one_half(h)*(b-center)] + SA[1 0 0;0 1 0;0 0 1-b]*m
 end
@@ -1112,7 +1114,7 @@ and radius `r` around the origin.
 	cone(SA[0,0,h], r; circumscribed)
 
 # Rotate extrusion««1
-struct RotateExtrude{T,X} <: AbstractTransform{3}
+struct Revolution{T,X} <: AbstractTransform{3}
 	angle::Angle{_UNIT_DEGREE,T}
 	slide::X
 	child::AbstractGeometry{2}
@@ -1151,14 +1153,14 @@ function ladder_triangles(n1, n2, start1, start2)
 	return triangles
 end
 
-# _rotate_extrude««2
+# _revolution««2
 """
-    _rotate_extrude(point, data, parameters)
+    _revolution(point, data, parameters)
 
 Extrudes a single point, returning a vector of 3d points
 (x,y) ↦ (x cosθ, x sinθ, y).
 """
-function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle, slide) where{T}
+function _revolution(g::MeshOptions, p::StaticVector{2,T}, angle, slide) where{T}
 	@assert p[1] ≥ 0
 	# special case: point is on the y-axis; returns a single point:
 	iszero(p[1]) && iszero(slide) && return [SA[p[1], p[1], p[2]]]
@@ -1177,7 +1179,7 @@ function _rotate_extrude(g::MeshOptions, p::StaticVector{2,T}, angle, slide) whe
 end
 
 # Meshing ««2
-function mesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
+function mesh(g::MeshOptions{T}, s::Revolution, (m,)) where{T}
 	# right half of child:
 	m1 = intersect(Shapes.HalfPlane(SA[1,0],0), m.poly)
 	pts2 = Shapes.vertices(m1)
@@ -1185,13 +1187,13 @@ function mesh(g::MeshOptions{T}, s::RotateExtrude, (m,)) where{T}
 	peri = Shapes.loops(m1) # oriented ↺
 	n = length(pts2)
 	
-	pts3 = _rotate_extrude(g, pts2[1], s.angle, s.slide)
+	pts3 = _revolution(g, pts2[1], s.angle, s.slide)
 	firstindex = [1]
 	arclength = Int[length(pts3)]
 	@debug "newpoints[$(pts2[1])] = $(length(pts3))"
 	for p in pts2[2:end]
 		push!(firstindex, length(pts3)+1)
-		newpoints = _rotate_extrude(g, p, s.angle, s.slide)
+		newpoints = _revolution(g, p, s.angle, s.slide)
 		@debug "newpoints[$p] = $(length(newpoints))"
 		push!(arclength, length(newpoints))
 		pts3 = vcat(pts3, newpoints)
@@ -1230,16 +1232,19 @@ end
 
 # Interface ««2
 """
+    revolution([angle = 360°], shape...; slide=0)
+    revolution([angle = 360°]; [slide=0]) * shape
     rotate_extrude([angle = 360°], shape...; slide=0)
     rotate_extrude([angle = 360°]; [slide=0]) * shape
 
-Similar to OpenSCAD's `rotate_extrude` primitive.
+Similar to OpenSCAD's `rotatre_extrude` primitive.
 
 The `slide` parameter is a displacement along the `z` direction.
 """
-@inline rotate_extrude(angle::Number, s...; slide=0) =
-	operator(RotateExtrude, (todegrees(angle), slide,), s...)
-@inline rotate_extrude(s...; kwargs...) = rotate_extrude(360°, s...; kwargs...)
+@inline revolution(angle::Number, s...; slide=0) =
+	operator(Revolution, (todegrees(angle), slide,), s...)
+@inline revolution(s...; kwargs...) = revolution(360°, s...; kwargs...)
+rotate_extrude = revolution
 
 
 # Sweep (surface and volume)««1
@@ -1293,20 +1298,8 @@ Extrudes the given `shape` by
 1) rotating perpendicular to the path (rotating the unit *y*-vector to the direction *z*), and 
 2) sweeping it along the `path`, with the origin on the path.
 
-# Extended help
-!!! warning "Swept surfaces: limitations"
+---
 
-    The `sweep` feature currently has two main limitations:
-    1. the trajectory may only contain closed loops (no open paths);
-    2. the extrusion of each profile vertex must preserve this topology.
-
-    Both of these restrictions are due to the `clipper` library, which
-    [does not support single-side offset](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm).
-    For an (**experimental**) remedy, see `path_extrude`.
-"""
-function sweep end
-
-"""
     sweep(transform, volume)
 
 Sweeps the given `volume` by applying the `transform`:
@@ -1319,7 +1312,28 @@ defining an affine transform.
  - nsteps:  upper bound on the number of steps for subdividing the [0,1] interval
  - gridsize: subdivision for marching cubes
  - isolevel: optional distance to add/subtract from swept volume
+
+# Extended help
+!!! warning "Swept surfaces: limitations"
+
+    The `sweep` feature currently has two main limitations:
+    1. the trajectory may only contain closed loops (no open paths);
+    2. the extrusion of each profile vertex must preserve this topology.
+
+    Both of these restrictions are due to the `clipper` library, which
+    [does not support single-side offset](http://www.angusj.com/delphi/clipper/documentation/Docs/Units/ClipperLib/Types/EndType.htm).
+    For an (**experimental**) remedy, see `path_extrude`.
+
+!!! warning "Complexity of swept volume"
+    Volume sweep is a costly operation,
+    implemented using a marching cubes algorithm on a grid defined
+    by `gridsize`.
+		Thus, its complexity is **cubic** in the parameter `gridsize`.
+
+FIXME: unify `gridsize` and offset's `maxgrid` parameters.
 """
+function sweep end
+
 @inline sweep(path, s...; kwargs...) =
 	operator(_sweep, (path,), s...; kwargs...)
 
@@ -1927,7 +1941,7 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline minkowski(a::AbstractGeometry{D}, b::AbstractGeometry{D}) where{D} =
 	MinkowskiSum{D,D}(a, b)
 @inline minkowski(a::AbstractGeometry{3}, b::AbstractGeometry{2}) =
-	minkowski(a,linear_extrude(0)*b)
+	minkowski(a,prism(0)*b)
 # 	MinkowskiSum{3,2}(a,b)
 @inline minkowski(a::AbstractGeometry{2}, b::AbstractGeometry{3})=minkowski(b,a)
 
@@ -1966,23 +1980,23 @@ Mixing dimensions is allowed (and returns a three-dimensional object).
 @inline Base.:*(a::Transform,b::Real) = a*scale(b)
 @inline Base.:*(a::Transform,z::Complex) = a*mult_matrix(_to_matrix(z))
 
-@inline ×(a::Real, x::AbstractGeometry) = linear_extrude(a, x)
+@inline ×(a::Real, x::AbstractGeometry) = prism(a, x)
 ×(a::AbstractVector{<:Real}, x::AbstractGeometry) =
 	if length(a) == 1
-		linear_extrude(a[1], x)
+		prism(a[1], x)
 	elseif length(a) == 2
-		raise(a[1], linear_extrude(a[2]-a[1], x))
+		raise(a[1], prism(a[2]-a[1], x))
 	else
 		throw("vector × AbstractGeometry only defined for lengths 1 and 2")
 	end
 
 @inline +(a::Angle, x::AbstractGeometry) = rotate(a, x)
-@inline ×(a::Angle, x::AbstractGeometry) = rotate_extrude(a, x)
+@inline ×(a::Angle, x::AbstractGeometry) = revolution(a, x)
 @inline ×(a::AbstractVector{<:Angle}, x::AbstractGeometry) =
 	if length(a) == 1
-		rotate_extrude(a[1], x)
+		revolution(a[1], x)
 	elseif length(a) == 2
-		rotate(a[1], rotate_extrude(a[2]-a[1], x))
+		rotate(a[1], revolution(a[2]-a[1], x))
 	else
 		throw("vector{Angle} × AbstractGeometry only defined for lengths 1 and 2")
 	end
@@ -2689,7 +2703,8 @@ export offset, opening, closing, hull, minkowski
 export mult_matrix, translate, scale, rotate, reflect, raise, lower
 export project, slice, half
 export decimate, loop_subdivide, refine
-export linear_extrude, prism, rotate_extrude, sweep, deform, wrap
+export linear_extrude, prism, revolution, rotate_extrude
+export sweep, deform, wrap, path_extrude
 export color, randomcolor, highlight, set_parameters
 export mesh, stl, svg
 export ×

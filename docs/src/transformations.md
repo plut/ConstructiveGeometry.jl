@@ -147,7 +147,7 @@ png("linear_extrude_twist", s2); # hide
 ```
 ![example: linear extrusion of a L-shape](linear_extrude.png)
 ![example: linear extrusion with twist](linear_extrude_twist.png)
-### Revolution (rotatoinal extrusion)
+### Revolution (rotational extrusion)
 ```@docs
 rotate_extrude
 ```
