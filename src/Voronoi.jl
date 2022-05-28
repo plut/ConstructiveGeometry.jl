@@ -605,7 +605,7 @@ function tripoint((p1,q1)::Segment, (p2,q2)::Segment, (p3,q3)::Segment)#««
 			b1 =-position_whichbranch(pos12, q1) # minus signs because L=1,R=2
 			b2 =-position_whichbranch(pos23, q2)
 			b3 = position_whichbranch(pos13, q3)
-			any(iszero, (b1,b2,b3)) && continue
+			any(iszero, int.((b1,b2,b3))) && continue
 			r = sqrtp((s⋅(a2,a3,a1))*(s⋅(a3,a1,a2))*(a1+a2+a3)/(s⋅(a1,a2,a3)))/2
 			return r, b1, b2, b3
 		end
@@ -937,6 +937,7 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 	v = VoronoiDiagram{J,T}(CornerTable{J}(Delaunay, points; extra),
 		points, segments)
 
+	display(v)
 	# update geometric information ««
 	for e in eachedge(v)
 		e < opposite(v, e) && edgedata!(v, e)
@@ -945,6 +946,7 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 		nodedata!(v, q)
 	end # »»
 
+	display(v)
 	ncells!(v, ncells(v) + ns)
 	triangulation(v).anyedge[np+4:end] .= 0
 	# incrementally add all segments ««
@@ -972,8 +974,8 @@ function VoronoiDiagram{J,T}(points, segments; extra=0) where{J,T}#««
 # 	resize!(points, np)
 # 	# »»
 
-# 	println("\e[1;7m before splitting segments:\e[m"); display(v)
-#
+	println("\e[1;7m before splitting segments:\e[m"); display(v)
+
 	# split segments in two
 	for s in segments, a in s; v.neighbours[a]+=one(J); end
 	splitsegments!(v)
@@ -1130,8 +1132,8 @@ function nodedata!(v::VoronoiDiagram, q::Node)#««
 	noderadius!(v, q=>r)
 	p = evaluate(s1,b1,r)
 	any(isnan, p) && return
-	@assert evaluate(s1,b1,r) ≈ evaluate(s2,b2,r)
-	@assert evaluate(s2,b2,r) ≈ evaluate(s3,b3,r)
+# 	@assert evaluate(s1,b1,r) ≈ evaluate(s2,b2,r)
+# 	@assert evaluate(s2,b2,r) ≈ evaluate(s3,b3,r)
 	geometricnode!(v, q=>
 		isstraight(s1) ? evaluate(s1, b1, r) :
 		isstraight(s2) ? evaluate(s2, b2, r) :

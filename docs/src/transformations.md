@@ -137,27 +137,27 @@ png("closing", s); # hide
 ## Extrusion
 ### Prism (linear extrusion)
 ```@docs
-linear_extrude
+prism
 ```
 ```@repl 0
-s1 = linear_extrude(10)*[square(10,5), square(5,15)];
-png("linear_extrude", s1); # hide
-s2 = linear_extrude(20, twist=45, scale=.8)*[square(10,5), square(5,15)];
-png("linear_extrude_twist", s2); # hide
+s1 = prism(10)*[square(10,5), square(5,15)];
+png("prism", s1); # hide
+s2 = prism(20, twist=45, scale=.8)*[square(10,5), square(5,15)];
+png("prism_twist", s2); # hide
 ```
-![example: linear extrusion of a L-shape](linear_extrude.png)
-![example: linear extrusion with twist](linear_extrude_twist.png)
+![example: linear extrusion of a L-shape](prism.png)
+![example: linear extrusion with twist](prism_twist.png)
 ### Revolution (rotational extrusion)
 ```@docs
-rotate_extrude
+revolution
 ```
 ```@repl 0
-s1 = rotate_extrude(245)*[square(10,5), square(5,15)];
-png("rotate_extrude", s1); # hide
-s2 = rotate_extrude(720, slide=30)*translate([10,0])*square(5);
+s1 = revolution(245)*[square(10,5), square(5,15)];
+png("revolution", s1); # hide
+s2 = revolution(720, slide=30)*translate([10,0])*square(5);
 png("slide", s2); # hide
 ```
-![example: rotation extrusion of a L-shape](rotate_extrude.png)
+![example: rotation extrusion of a L-shape](revolution.png)
 ![example: rotational extrusion with slide](slide.png)
 
 The number of samples used for a revolution depends on the radius

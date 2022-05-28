@@ -235,7 +235,7 @@ end
 const _DEFAULT_COLOR = Colors.RGBA{N0f8}(.3,.4,.5) # bluish gray
 const _DEFAULT_OPTIONS = MeshOptions{Float64}(NamedTuple(), _DEFAULT_COLOR)
 const _DEFAULT_PARAMETERS = (
-	atol = 0.1, rtol = .005, symmetry = 1,
+	atol = 0.1, rtol = .005, symmetry = 1, icosphere = 1000,
 )
 
 @inline MeshOptions(g::MeshOptions{T}, p::NamedTuple) where{T} =
@@ -664,12 +664,136 @@ function sphere_nvertices(g::MeshOptions, r)
 	return max(6, base)
 end
 
+"""
+Returns (points, triangles) for an icosphere of radius `r`:
+an icosahedron with each face subdivided into `n`^2 small triangles.
+"""
+function icosphere_points(r::T, n) where{T<:Real}#««
+	# to each of the 20 faces we map the numbers for the three edges + vertices
+	# (the edge label is negative when edge is reversed)
+	elabel = (
+	  (1,-5,21),(2,-1,22),(3,-2,23),(4,-3,24),(5,-4,25),
+		(6,-21,-15),(7,-22,-11),(8,-23,-12),(9,-24,-13),(10,-25,-14),
+		(11,-6,-26),(12,-7,-27),(13,-8,-28),(14,-9,-29),(15,-10,-30),
+		(16,26,-20),(17,27,-16),(18,28,-17),(19,29,-18),(20,30,-19))
+	# (lhs, rhs) vertices of each edge
+	edges = (
+		(11,1),(11,2),(11,3),(11,4),(11,5), (1,6),(2,7),(3,8),(4,9),(5,10),
+		(1,7),(2,8),(3,9),(4,10),(5,6), (7,12),(8,12),(9,12),(10,12),(6,12),
+		(1,5),(2,1),(3,2),(4,3),(5,4), (6,7),(7,8),(8,9),(9,10),(10,6))
+	z, r = sqrt(.2), sqrt(.8)
+	vertices = resize!([
+		SA[r*cosd(0), r*sind(0), z],
+		SA[r*cosd(72), r*sind(72), z],
+		SA[r*cosd(144), r*sind(144), z],
+		SA[r*cosd(216), r*sind(216), z],
+		SA[r*cosd(288), r*sind(288), z],
+		SA[r*cosd(324), r*sind(324), -z],
+		SA[r*cosd(36), r*sind(36), -z],
+		SA[r*cosd(108), r*sind(108), -z],
+		SA[r*cosd(180), r*sind(180), -z],
+		SA[r*cosd(252), r*sind(252), -z],
+		SA[0,0,1.], SA[0,0,-1.]], 10*n^2+2);
+	triangles = sizehint!(NTuple{3,Int}[], 20*n^2)
+	# labeling of points:
+	# 1:12 = (12) points of the icosahedron
+	# 13:30n-18 = 30(n-1) on edges
+	#    i.e. edge e is 13+(n-1)(e-1):12+(n-1)e
+	# 30n-19:10n^2+2 = 20(n-1)(n-2)/2 inside faces  ((n-1)(n-2)/2 is integer)
+	#    i.e. face f has F(f):F(f+1)-1, F(f) = 30*n-19+(n-1)(n-2)/2*(f-1)
+	for e in 1:30, k in 1:n-1 # interpolate edge points
+		v1, v2 = edges[e]
+		vertices[12+(n-1)*(e-1)+k] = ((n-k)*vertices[v1] + k*vertices[v2])
+	end
+	for f in 1:20
+		# we allocate an array for all the (n+1)(n+2)/2 points inside this face
+		# (since we return a Θ(n^2) array eventually this does not add
+		# complexity)
+		idx = Vector{Int}(undef, (n+1)*(n+2)÷2)
+		e1, e2, e3 = elabel[f]
+		# \ side and top corner: vertices 1, k(k+1)÷2 ««
+		if e1 > 0
+			idx[1] = edges[e1][1]
+			for k in 1:n-1
+				idx[(k+1)*(k+2)÷2] = 12+(n-1)*(e1-1)+k
+			end
+		else
+			e1 = -e1
+			idx[1] = edges[e1][2]
+			for k in 1:n-1
+				idx[(k+1)*(k+2)÷2] = 12+(n-1)*(e1-1)+(n-k)
+			end
+		end#»»
+		# / side and bottom-left corner: vertices (n²+n+2)/2, k^2-k+2 ««
+		if e2 > 0
+			idx[(n^2+n+2)÷2] = edges[e2][1]
+			for k in 1:n-1
+				idx[(n-k)*(n-k+1)÷2+1] = 12+(n-1)*(e2-1)+k
+			end
+		else
+			e2 = -e2
+			idx[(n^2+n+2)÷2] = edges[e2][2]
+			for k in 1:n-1
+				idx[(n-k)*(n-k+1)÷2+1] = 12+(n-1)*(e2-1)+(n-k)
+			end
+		end#»»
+		# _ side and bottom-right corner: vertices (n+1)(n+2)÷2, (n²+n+2)÷2+k««
+		if e3 > 0
+			idx[(n+1)*(n+2)÷2] = edges[e3][1]
+			for k in 1:n-1
+				idx[(n+1)*(n+2)÷2 - k] = 12+(n-1)*(e3-1)+k
+			end
+		else
+			e3 = -e3
+			idx[(n+1)*(n+2)÷2] = edges[e3][2]
+			for k in 1:n-1
+				idx[(n+1)*(n+2)÷2 - k] = 12+(n-1)*(e3-1)+(n-k)
+			end
+		end#»»
+		# central vertices««
+		f0 = 30*n-18 + (n-1)*(n-2)*(f-1)÷2 # offset for this face
+		v1, v2, v3 = vertices[idx[SA[1, (n^2+n+2)÷2, (n+1)*(n+2)÷2]]]
+		for k in 1:n-2
+			# build row (k²+3k+6)÷2 : (k²+5k+4)÷2
+			idx[(k^2+3*k+6)÷2:(k^2+5*k+4)÷2] .= f0+(k^2-k+2)÷2 : f0+k*(k+1)÷2
+			for i in 1:k
+				vertices[f0+k*(k-1)÷2+i] = (n-k-1)*v1 + (k-i+1)*v2 + i*v3
+			end
+		end#»»
+		# triangulate this face««
+		v = 1
+		for k in 1:n
+			# write triangles between rows k and k+1
+			# row k starts at v=(k^2-k+2)÷2
+			# row k+1 starts at w=(k^2+k+2)÷2
+			w = (k^2+k+2)÷2
+			# △:  (w+i, w+i+1, v+i) i=0:k-1
+			# ▽: (w+i+1, v+i+1, v+i) i=0:k-2
+			for i in 0:k-2
+				push!(triangles, (idx[w+i], idx[w+i+1], idx[v+i]),
+					(idx[w+1+i], idx[v+1+i], idx[v+i]))
+			end
+			push!(triangles, (idx[w+k-1], idx[w+k], idx[v+k-1]))
+			v=w
+		end#»»
+	end
+	for i in 13:length(vertices)
+		v = vertices[i]; vertices[i]/= √(v'*v)
+	end
+	return (vertices, triangles)
+end#»»
+
 function mesh(g::MeshOptions{T}, s::Sphere, _) where{T}
 	n = sphere_nvertices(g, s.radius)
 	r = s.circumscribed ? s.radius/sqrt(1-8π/√3/(n-2)) : s.radius
-	plist = fibonacci_sphere_points(T(r), n)
-	(pts, faces) = convex_hull(plist)
-	return VolumeMesh(g, pts, faces)
+	if n < get(g, :icosphere) # Fibonacci case
+		plist = fibonacci_sphere_points(T(r), n)
+		(pts, faces) = convex_hull(plist)
+		return VolumeMesh(g, pts, faces)
+	else # Icosphere case
+		(pts, faces) = icosphere_points(T(r), isqrt(n ÷ 10))
+		return VolumeMesh(g, pts, faces)
+	end
 end
 
 # Interface ««2

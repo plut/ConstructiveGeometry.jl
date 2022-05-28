@@ -237,6 +237,7 @@ function convex_hull(p::AbstractVector{<:StaticVector{3,T}}) where{T}
 		h = PH.get(poly, i)
 		pts = PH.incidentpointindices(poly, i) # vector of indices of points
 		vlist = [SVector{3,T}(PH.get(poly, j)) for j in pts]
+		length(vlist) ≥ 3 || continue
 		for t in triangulate_face( vlist;
 				direction = h.a,
 				map = [j.value for j in pts])
