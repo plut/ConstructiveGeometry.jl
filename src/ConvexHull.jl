@@ -5,9 +5,10 @@ using StaticArrays
 import Polyhedra # for convex hull
 import GLPK
 
-module LibTriangle
-	using Triangle
-end
+# module LibTriangle
+# 	using Triangle
+# end
+include("LibTriangle.jl"); using .LibTriangle
 include("Projectors.jl")
 using .Projectors
 # using MiniQhull
@@ -65,7 +66,7 @@ function triangulate_face(points::AbstractVector{<:StaticVector{3}};
 	for (i, p) in pairs(points)
 		points2d[i,:] .= project2d(axis, p)
 	end
-	tri = LibTriangle.basic_triangulation(points2d, map)
+	tri = LibTriangle.triangulation(points2d, map)
 	return [(t[1], t[2], t[3]) for t in tri]
 end
 # Polyhedra interface««1

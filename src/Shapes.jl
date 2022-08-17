@@ -13,7 +13,7 @@ using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers
 using FastClosures
-using Triangle
+# using Triangle
 using DataStructures # SortedSet
 import Clipper
 
@@ -447,11 +447,12 @@ function point_in_polygon(poly; orientation=orientation(poly))#««
 end#»»
 # triangulates a simple loop
 function triangulate(v::AbstractVector{<:SVector{2,<:Real}})
-	tri = basic_triangulation(
-		Matrix{Float64}([transpose.(v)...;]),
-		collect(1:length(v)))
-	return orientation(v) ? [ (t[1], t[2], t[3]) for t in tri ] :
-	 [(t[1], t[3], t[2]) for t in tri ]
+	triangles = LibTriangle.triangulation(v; reverse = !orientation(v))
+# 	tri = basic_triangulation(
+# 		Matrix{Float64}([transpose.(v)...;]),
+# 		collect(1:length(v)))
+# 	return orientation(v) ? [ (t[1], t[2], t[3]) for t in tri ] :
+# 	 [(t[1], t[3], t[2]) for t in tri ]
 end
 function triangulate(m::PolygonXor)#««
 # 	v = vertices(m)
@@ -467,22 +468,26 @@ function triangulate(m::PolygonXor)#««
 		holes = [ point_in_polygon(p; orientation=false) for p in paths(m)[h] ]
 		push!(h, k)
 		plist = paths(m)[h]
-		edges = Matrix{Int}(undef, sum(length.(plist)), 2)
+# 		edges = Matrix{Int}(undef, sum(length.(plist)), 2)
+		edges = Matrix{NTuple{2,Int}}(undef, sum(length.(plist)))
 		c = 0
 		labels = [peri[h]...;]
 		for p in plist
 			n = length(p)
 			for i in 1:n-1
-				edges[c+i,:] = labels[[c+i,c+i+1]]
+				edges[c+i] = (labels[c+i], labels[c+i+1])
+# 				edges[c+i,:] = labels[[c+i,c+i+1]]
 			end
-			edges[c+n,:] = labels[[c+n,c+1]]
+# 			edges[c+n,:] = labels[[c+n,c+1]]
+				edges[c+n] = (labels[c+n], labels[c+1])
 			c+= n
 		end
 		v = [plist...;]
-		triangles = constrained_triangulation(
-			Matrix{Float64}([transpose.(v)...;]),
-			labels, edges, fill(true, size(edges,1)),
-			[ p[i] for p in holes, i in 1:2 ])
+		triangles = LibTriangle.triangulation(plist, labels, edges, holes)
+# 		triangles = constrained_triangulation(
+# 			Matrix{Float64}([transpose.(v)...;]),
+# 			labels, edges, fill(true, size(edges,1)),
+# 			[ p[i] for p in holes, i in 1:2 ])
 		tri = [tri; [ (t[1], t[2], t[3]) for t in triangles ]]
 	end
 	return tri

@@ -232,6 +232,7 @@ end
 
 @inline Base.merge(g::MeshOptions{T,C}; kwargs...) where{T,C} =
 	MeshOptions{T,C}(merge(g.parameters, kwargs.data), g.color)
+const MeshColor = Colors.RGBA{N0f8}
 const _DEFAULT_COLOR = Colors.RGBA{N0f8}(.3,.4,.5) # bluish gray
 const _DEFAULT_OPTIONS = MeshOptions{Float64}(NamedTuple(), _DEFAULT_COLOR)
 const _DEFAULT_PARAMETERS = (
@@ -1746,7 +1747,7 @@ Colors objects `s...` in the given color.
 @inline color(c::Colors.RGBA, s...) = operator(Color, (c,), s...)
 @inline color(c::Colors.RGB, s...) = color(Colors.RGBA(c,1.), s...)
 @inline color(c::Union{Symbol,AbstractString}, s...) =
-	color(parse(MeshColor, c), s...)
+	color(parse(Colorant, c), s...)
 @inline color(c::Union{Symbol,AbstractString}, a::Real, s...) =
 	color(Colors.coloralpha(parse(Colorant, c), a), s...)
 

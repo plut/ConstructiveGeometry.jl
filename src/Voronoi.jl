@@ -22,10 +22,11 @@ using LinearAlgebra
 # using Random
 using Printf
 using HypergeometricFunctions
-module LibTriangle
-	using Triangle
-end
+# module LibTriangle
+# 	using Triangle
+# end
 
+include("LibTriangle.jl"); using .LibTriangle
 include("CornerTables.jl")
 using .CornerTables
 import .CornerTables: triangulation
@@ -146,16 +147,17 @@ end
 
 # Triangulation via libtriangle««2
 function triangulate_loop(points, idx)
-	n = length(idx)
-# 	for (p,i) in zip(points, idx)
-# 		println("$(p[1])\t$(p[2])\t$i")
-# 	end
-	vmat = Float64[ p[j] for p in points, j in 1:2 ]
-	elist = Int[ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
-# 	println("vmat=",vmat)
-# 	println("idx=",idx)
-# 	println("elist=",elist)
-	return LibTriangle.constrained_triangulation(vmat, idx, elist)
+	return LibTriangle.triangulation(points, idx)
+# 	n = length(idx)
+# # 	for (p,i) in zip(points, idx)
+# # 		println("$(p[1])\t$(p[2])\t$i")
+# # 	end
+# 	vmat = Float64[ p[j] for p in points, j in 1:2 ]
+# 	elist = Int[ idx[mod1(i+j,n)] for j in 1:n, i in 0:1]
+# # 	println("vmat=",vmat)
+# # 	println("idx=",idx)
+# # 	println("elist=",elist)
+# 	return LibTriangle.constrained_triangulation(vmat, idx, elist)
 end
 
 # Separators (parametrized bisectors) ««1

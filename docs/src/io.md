@@ -3,6 +3,16 @@
 Loading and saving of files can be done through the `FileIO` functions
 `load` and `save`.
 
+!!! warning "`FileIO` compatibility"
+
+    The `FileIO` module contains a
+    [hard-coded central map of file types to modules](
+    https://github.com/JuliaIO/FileIO.jl/blob/master/src/registry.jl),
+    and the PLY and STL slots are already taken by `MeshIO`.
+    In order to be able to register our `load` functions,
+    the `ConstructiveGeometry.__init__` function overrides
+    a couple of entries in `FileIO`'s hash table.
+
 ## File loading
 
 Files can be loaded in this way:
