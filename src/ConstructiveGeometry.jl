@@ -681,22 +681,22 @@ function icosphere_points(r::T, n) where{T<:Real}#««
 		(11,1),(11,2),(11,3),(11,4),(11,5), (1,6),(2,7),(3,8),(4,9),(5,10),
 		(1,7),(2,8),(3,9),(4,10),(5,6), (7,12),(8,12),(9,12),(10,12),(6,12),
 		(1,5),(2,1),(3,2),(4,3),(5,4), (6,7),(7,8),(8,9),(9,10),(10,6))
-	z, r = sqrt(.2), sqrt(.8)
+	z, ρ = sqrt(.2), sqrt(.8)
 	vertices = resize!([
-		SA[r*cosd(0), r*sind(0), z],
-		SA[r*cosd(72), r*sind(72), z],
-		SA[r*cosd(144), r*sind(144), z],
-		SA[r*cosd(216), r*sind(216), z],
-		SA[r*cosd(288), r*sind(288), z],
-		SA[r*cosd(324), r*sind(324), -z],
-		SA[r*cosd(36), r*sind(36), -z],
-		SA[r*cosd(108), r*sind(108), -z],
-		SA[r*cosd(180), r*sind(180), -z],
-		SA[r*cosd(252), r*sind(252), -z],
+		SA[ρ*T(cosd(0)), ρ*T(sind(0)), z],
+		SA[ρ*T(cosd(72)), ρ*T(sind(72)), z],
+		SA[ρ*T(cosd(144)), ρ*T(sind(144)), z],
+		SA[ρ*T(cosd(216)), ρ*T(sind(216)), z],
+		SA[ρ*T(cosd(288)), ρ*T(sind(288)), z],
+		SA[ρ*T(cosd(324)), ρ*T(sind(324)), -z],
+		SA[ρ*T(cosd(36)), ρ*T(sind(36)), -z],
+		SA[ρ*T(cosd(108)), ρ*T(sind(108)), -z],
+		SA[ρ*T(cosd(180)), ρ*T(sind(180)), -z],
+		SA[ρ*T(cosd(252)), ρ*T(sind(252)), -z],
 		SA[0,0,1.], SA[0,0,-1.]], 10*n^2+2);
 	triangles = sizehint!(NTuple{3,Int}[], 20*n^2)
-	# labeling of points:
-	# 1:12 = (12) points of the icosahedron
+	# labeling of icosphere vertices:
+	# 1:12 = (12) vertices of the icosahedron
 	# 13:30n-18 = 30(n-1) on edges
 	#    i.e. edge e is 13+(n-1)(e-1):12+(n-1)e
 	# 30n-19:10n^2+2 = 20(n-1)(n-2)/2 inside faces  ((n-1)(n-2)/2 is integer)
@@ -778,7 +778,7 @@ function icosphere_points(r::T, n) where{T<:Real}#««
 		end#»»
 	end
 	for i in 13:length(vertices)
-		v = vertices[i]; vertices[i]/= √(v'*v)
+		v = vertices[i]; vertices[i] = v * r/ √(v'*v)
 	end
 	return (vertices, triangles)
 end#»»
@@ -791,7 +791,7 @@ function mesh(g::MeshOptions{T}, s::Sphere, _) where{T}
 		(pts, faces) = convex_hull(plist)
 		return VolumeMesh(g, pts, faces)
 	else # Icosphere case
-		(pts, faces) = icosphere_points(T(r), isqrt(n ÷ 10))
+		(pts, faces) = icosphere_points(T(r), ceil(Int, sqrt(n ÷ 10)))
 		return VolumeMesh(g, pts, faces)
 	end
 end
@@ -1713,10 +1713,12 @@ mesh(g::MeshOptions, s::SetParameters) =
 	mesh(MeshOptions(g, s.parameters), s.child)
 
 """
-    set_parameters(;atol, rtol, symmetry) * solid...
+    set_parameters(;atol, rtol, symmetry, icosphere) * solid...
 
 A transformation which passes down the specified parameter values to its
 child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
+
+See `meshing.md` for documentation about specific parameters.
 """
 @inline set_parameters(s...; parameters...) =
 	operator(SetParameters, (parameters.data,), s...)

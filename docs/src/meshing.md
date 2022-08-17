@@ -128,10 +128,22 @@ with the approximation being worse for small-radius spheres.
 
 ### [Spheres](@id sphere_vertices)
 
-Spheres are rendered as [Fibonacci
+Small spheres are rendered as [Fibonacci
 spheres](http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/).
 This produces a more regular mesh than latitude-longitude grids
 (in particular, the grid does not have singularities at the poles).
+
+Larger spheres are rendered as subdivided icosahedra.
+Although slightly less regular than Fibonacci sphere,
+this model is more efficient to compute
+(the combinatoric can be decided in advance,
+whereas a Fibonacci sphere requires a convex hull computation);
+moreover, with the current version of Polyhedra.jl/GLPK,
+the convex hull computation fails for larger spheres.
+The cutoff number of vertices between Fibonacci and icosahedral sphere
+can be set using the `icosphere` parameter:
+`set_parameters(icosphere=0)*sphere(10)`
+will always use the icosahedral algorithm.
 
 A sphere is approximated by an inscribed polyhedron with ``n`` vertices.
 Such a polyhedron has ``2n-4`` triangular faces;

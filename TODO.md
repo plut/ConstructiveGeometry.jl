@@ -239,8 +239,7 @@ For MeshIO: stl needs
  - [ ] deformation https://libigl.github.io/tutorial/#chapter-4-shape-deformation
  - [ ] https://student.cs.uwaterloo.ca/~cs779/Gallery/Winter2018/anietoro/doc/
  - [x] add a display method that shows the tree
- - [ ] icosphere (from Blender)
- - [ ] sphere made from extruding a half-circle
+ - [x] icosphere (from Blender)
  - [ ] improve `unit_n_gon` to take advantage of symmetries
  - [ ] Annotations in 2d
  - [ ] Annotations in 3d (this might depend on the visualizer though)
