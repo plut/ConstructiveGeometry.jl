@@ -135,18 +135,6 @@ spheres](http://extremelearning.com.au/evenly-distributing-points-on-a-sphere/).
 This produces a more regular mesh than latitude-longitude grids
 (in particular, the grid does not have singularities at the poles).
 
-Larger spheres are rendered as subdivided icosahedra.
-Although slightly less regular than Fibonacci sphere,
-this model is more efficient to compute
-(the combinatoric can be decided in advance,
-whereas a Fibonacci sphere requires a convex hull computation);
-moreover, with the current version of Polyhedra.jl/GLPK,
-the convex hull computation fails for larger spheres.
-The cutoff number of vertices between Fibonacci and icosahedral sphere
-can be set using the `icosphere` parameter:
-`set_parameters(icosphere=0)*sphere(10)`
-will always use the icosahedral algorithm.
-
 A sphere is approximated by an inscribed polyhedron with ``n`` vertices.
 Such a polyhedron has ``2n-4`` triangular faces;
 the average area of a face is ``\frac{4π r^2}{2n-4} = \frac{2π r^2}{n-2}``,
@@ -165,6 +153,20 @@ n ≈ 2 + (π/√3)/(\textrm{max}(\texttt{rtol},\texttt{atol}/r)).
 With the default values for `atol` and `rtol`:
  - small spheres have approximately ``2+18r`` vertices (and always at least 6 vertices);
  - large spheres have 365 vertices.
+
+Larger spheres are rendered as subdivided icosahedra.
+Although slightly less regular than a Fibonacci sphere,
+this model is more efficient to compute:
+the combinatoric can be decided in advance,
+whereas a Fibonacci sphere requires a convex hull computation.
+Moreover, with the version of Polyhedra.jl/GLPK currently used by this
+module, the convex hull computation fails for larger spheres.
+The cutoff number of vertices between Fibonacci and icosahedral spheres
+(by default 1000 vertices) can be set using the `icosphere` parameter:
+`set_parameters(icosphere=0)*sphere(10)`
+will always use the icosahedral algorithm,
+while `set_parameters(icosphere=typemax(Int))*sphere(1000)`
+will always use (at your own risk!) the Fibonacci algorithm.
 
 ## [Symmetry](@id symmetry)
 
@@ -191,6 +193,16 @@ Three-dimensional objects are represented as a triangle mesh,
 in a way compatible with LibIGL's functions.
 The triangles are oriented so that their normal vector points outside the
 volume of the object.
+
+!!! warning "speed"
+    This is not very efficient when performing repeated constructive geometry
+    operations: for each operation, a conversion must be performed
+    to the linked-list data structure used by LibIGL.
+    It is a development goal of this module to be faster by using our own
+    implementation for CSG operations. Work on this topic is quite
+    advanced, but in need of a practical 2d segment intersection
+    algorithm (implementing this ourselves is a real pain): this is a
+    topic on which any help would be extremely welcome!
 
 ## Explicitly instantiating meshes
 
