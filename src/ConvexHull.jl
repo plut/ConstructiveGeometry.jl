@@ -62,10 +62,7 @@ function triangulate_face(points::AbstractVector{<:StaticVector{3}};
 	# this common case deserves a shortcut:
 	N == 3 && return [(map[1], map[2], map[3])]
 
-	points2d = Matrix{Float64}(undef, N, 2)
-	for (i, p) in pairs(points)
-		points2d[i,:] .= project2d(axis, p)
-	end
+	points2d = [ project2d(axis, p) for p in points ]
 	tri = LibTriangle.triangulation(points2d, map)
 	return [(t[1], t[2], t[3]) for t in tri]
 end
