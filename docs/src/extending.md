@@ -27,13 +27,13 @@ parameters:
  - `children_meshes` is a list (vector or tuple) of meshes computed
    for the contents of `children(object)`.
 
-This method must return a `FullMesh` object, which in turns contains:
- - a main mesh: this is the mesh which will be used when outputting e.g. a STL file;
- - a vector of auxiliary meshes, representing any [highlighted](@ref Highlight) parts of the object.
-
-The main mesh can be either a `ShapeMesh` (i.e. an exclusive union of
-closed polygonal loops) or a `VolumeMesh` (i.e. the volume delimited by a
-closed triangulated surface). These types are also the types
+This method must return a subtype of `AbstractMesh{D}`, namely
+either a `ShapeMesh` (for 2d objects) or a `VolumeMesh` (for 3d objects).
+These types are, in turn, thin wrappers for mesh types
+handled by appropriate submodules (namely
+the exclusive union of closed polygonal loops /
+the volume delimited by a closed triangulated surface).
+These are also the types
 returned by the [`polygon()`](@ref Polygon) and [`surface()`](@ref Surface)
 primitives.
 
@@ -57,11 +57,23 @@ Defining a new primitive object has two main parts:
 On top of this, several methods may be added as syntactic sugar
 to help the user define objects of this new type.
 
+This is exactly how e.g. `Cube` is defined:
+```julia
+struct Cube{T} <: AbstractGeometry{3}
+	size::SVector{3,T}
+end
+mesh(g::MeshOptions{T}, s::Cube, _) where{T} =
+	# children are not used here
+	# VolumeMesh is constructed from default attributes, vertices, triangles:
+	VolumeMesh(g, cube_vertices(T.(s.size)), cube_triangles)
+```
+
 ## Defining a new transformation
 
 1. If this transformation applies to a single object,
    then define a new concrete subtype of `AbstractTransform{D}`
-   with a single `child` field;
+   with a single `child` field: this will enable the multiplicative
+   syntax for applying this transformation to an object;
 
 2. otherwise, define a new concrete subtype of `AbstractGeometry{D}`
    and extend the `children` method to the new type,
@@ -80,8 +92,8 @@ This function is a shortcut to define the multiplicative syntax
 for an object transformation. It has two main methods:
  - `operator(Constructor, parameters, solid)` (where `parameters` is a tuple)
    is the same as `Constructor(parameters..., solid)`;
- - `operator(Constructor, parameters)` returns an encapsulation
-   such that `operator(Constructor, parameters) * solid`
+ - `operator(Constructor, parameters)` returns an encapsulation `F`
+   such that `F * solid`
    is again interpreted as `Constructor(parameters..., solid)`.
 
 For example, multiplicative syntax can be given to a transformation

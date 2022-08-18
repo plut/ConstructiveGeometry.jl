@@ -38,9 +38,12 @@ the latter is what is used to build the examples in this documentation.
 ## Meshing parameters
 
 The meshing of objects is governed by a few parameters:
- - `atol` and `rtol` determine the number of faces inserted in the mesh;
- - `symmetry` allows to impose a given rotational symmetry to circles and
-   cylinders.
+ - `atol` and `rtol` determine the [number of faces](@ref atol_rtol)
+   inserted in the mesh;
+ - `symmetry` allows to impose a given [rotational symmetry](@ref symmetry)
+   to circles and cylinders;
+ - `icosphere` is the threshold above which spheres will be [rendered as
+   subdivided icosahedra](@ref sphere_vertices) instead of Fibonacci spheres.
 
 To set values other than the defaults for an object,
 apply the `set_parameters` transform to that object:
@@ -51,7 +54,6 @@ circle(2)
 ```
 
 ```@repl 0
-pwd()
 s = union(set_parameters(atol=1,symmetry=1)*circle(1),
 [2,0]+set_parameters(atol=1,symmetry=8)*circle(1),
 [4,0]+set_parameters(atol=1e-3)*circle(1));
@@ -164,7 +166,7 @@ With the default values for `atol` and `rtol`:
  - small spheres have approximately ``2+18r`` vertices (and always at least 6 vertices);
  - large spheres have 365 vertices.
 
-## Symmetry
+## [Symmetry](@id symmetry)
 
 In addition to `atol` and `rtol`,
 the `symmetry` parameter allows forcing the number of vertices

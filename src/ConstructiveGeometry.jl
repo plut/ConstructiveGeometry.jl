@@ -525,12 +525,9 @@ end
 @inline apply(f::AffineMap, m::VolumeMesh, d=signdet(f.a, 3)) =
 	VolumeMesh(apply(f, m.mesh, d))
 
-@inline TriangleMesh(g::MeshOptions{T}, points, faces,
-	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{F,T,A} =
-	TriangleMesh{T,A}(SVector{3,T}.(points), faces, attrs)
-@inline VolumeMesh(g::MeshOptions{T,A}, points, faces) where{T,A} =
-	VolumeMesh(TriangleMesh{T,A}(SVector{3,T}.(points), faces,
-		fill(g.color, size(faces))))
+@inline VolumeMesh(g::MeshOptions{T}, points, faces,
+	attrs::AbstractVector{A} = fill(g.color, size(faces))) where{T,A} =
+	VolumeMesh(TriangleMesh{T,A}(SVector{3,T}.(points), faces, attrs))
 @inline mesh(g::MeshOptions, s::VolumeMesh, _) =
 	VolumeMesh(g, vertices(s), faces(s))
 
@@ -585,13 +582,12 @@ end
 		SA[u,0,0], SA[u,0,w], SA[u,v,0], SA[u,v,w]]
 
 mesh(g::MeshOptions{T}, s::Cube, _) where{T} =
-	VolumeMesh(TriangleMesh(g,
-	cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
+	VolumeMesh(g, cube_vertices(T(s.size[1]), T(s.size[2]), T(s.size[3])),
 	[ # 12 triangular faces:
 	 (6, 5, 7), (7, 8, 6), (7, 3, 4), (4, 8, 7),
 	 (4, 2, 6), (6, 8, 4), (5, 1, 3), (3, 7, 5),
 	 (2, 1, 5), (5, 6, 2), (3, 1, 2), (2, 4, 3),
-	]))
+	])
 
 """
     cube(size; origin, center=false)
@@ -1505,7 +1501,7 @@ function mesh(g::MeshOptions, s::Deformation{3}, (m,))
 	mref = TriangleMeshes.splitedges(m.mesh, get(g,:atol)^2;
 		distance2=s.distance2)
 	vlist = [ (@assert s.isvalid(v); s.transform(v)) for v in mref.vertices ]
-	return self_union(VolumeMesh(TriangleMesh(g, vlist, mref.faces, mref.attributes)))
+	return self_union(VolumeMesh(g, vlist, mref.faces, mref.attributes))
 end
 
 """
