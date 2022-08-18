@@ -13,7 +13,7 @@ using LinearAlgebra
 using StaticArrays
 using FixedPointNumbers
 using FastClosures
-# using Triangle
+include("LibTriangle.jl"); using .LibTriangle
 using DataStructures # SortedSet
 import Clipper
 
