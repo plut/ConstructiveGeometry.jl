@@ -2383,7 +2383,8 @@ function save(::format"SVG", io::IO, m::ShapeMesh)
 	end
 	print(io, """ " /> </svg>\n""")
 end
-Base.show(io::IO, ::MIME"image/svg+xml", s::AbstractGeometry{2})= save_svg(io,s)
+Base.show(io::IO, ::MIME"image/svg+xml", s::AbstractGeometry{2}) =
+	save(format"SVG"(), io, s)
 # Viewing««1
 @inline Base.display(m::AbstractGeometry) = AbstractTrees.print_tree(m)
 
@@ -2833,7 +2834,7 @@ export decimate, loop_subdivide, refine
 export linear_extrude, prism, revolution, rotate_extrude
 export sweep, deform, wrap, path_extrude
 export color, randomcolor, highlight, set_parameters
-export mesh, stl, svg
+export mesh
 export ×
 
 # »»1
