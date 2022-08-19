@@ -1,6 +1,6 @@
 push!(LOAD_PATH, "src/", "../src/")
 using Documenter
-using ConstructiveGeometry
+include("../src/ConstructiveGeometry.jl"); using .ConstructiveGeometry
 makedocs(
 	pages = [
 		"index.md",
