@@ -9,6 +9,7 @@
  * `path_extrude(surface, profile) => path_extrude(∂surface)`
  * `path(element1, element2, ...)`
 # Bug fixes
+ - [ ] in GLMakie, (non-convex) polygons are incorrectly triangulated
  - [ ] `path_extrude` of shape with holes: hole extrusions are reversed
   - [ ] instead of trying funny stuff with symdiff, we could just concatenate everything and do a self-union to regularize
  - [x] `matrix*set_parameters` etc.; `raise(.8)*mat*cone(3)*lozenge`...

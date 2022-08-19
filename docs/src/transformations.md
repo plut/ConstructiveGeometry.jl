@@ -10,15 +10,23 @@ using CairoMakie
 png(name, s) = save(name*".png", Makie.plot(s));
 ```
 
-All single-object transformations accept two possible syntaxes:
+All single-object transformations accept three possible syntaxes:
 ```julia
     transform(parameters, solid1, solid2, ...)
     transform(parameters) * solid1
+    solid1 |> transform(parameters)
 ```
-The second, multiplicative form allows easy chaining of transformations:
+(The third form is standard Julia syntax for function application).
+The second and third forms allow easy chaining of transformations
+in either direction:
 ```julia
     transform1(param1) * transform2(param2) * solid
+    solid |> transform2(param2) |> transform1(param1)
 ```
+(It is obviously not recommended to mix both syntaxes together.
+However, note that in this case, multiplication takes syntactic priority
+over function application).
+
 This form may also be applied to several solids by either wrapping them in a
 `union`, or equivalently, by applying it to a `Vector` of such objects:
 ```julia

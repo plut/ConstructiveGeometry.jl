@@ -447,7 +447,9 @@ function point_in_polygon(poly; orientation=orientation(poly))#««
 end#»»
 # triangulates a simple loop
 function triangulate(v::AbstractVector{<:SVector{2,<:Real}})
-	triangles = LibTriangle.triangulation(v; reverse = !orientation(v))
+	triangles = LibTriangle.triangulation(v, [],
+		[((i,i+1) for i in 1:length(v)-1)...; (length(v), 1)];
+		reverse = !orientation(v))
 # 	tri = basic_triangulation(
 # 		Matrix{Float64}([transpose.(v)...;]),
 # 		collect(1:length(v)))
@@ -479,7 +481,7 @@ function triangulate(m::PolygonXor)#««
 				edges[c+n] = (labels[c+n], labels[c+1])
 			c+= n
 		end
-		push!(tri, LibTriangle.triangulation([plist...;], labels, edges, holes)...)
+		push!(tri, LibTriangle.triangulation([plist...;], labels, edges, [], holes)...)
 	end
 	return tri
 end#»»
