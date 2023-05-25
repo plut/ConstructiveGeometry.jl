@@ -125,7 +125,7 @@ end
 		ends = :fill,
 		miter_limit = 2.,
 		precision = 0.2
-		)::Vector{Vector{Path{2,Float64}}} where{T}
+		)::Vector{Vector{Path{2,Float64}}}
 	# “Simultaneously” computes offset for several offset values.
 	# Used by path_extrude().
 	c = Clipper.ClipperOffset(miter_limit, precision*_CLIPPER_ONE)

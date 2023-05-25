@@ -231,7 +231,7 @@ struct MeshOptions{T<:Real,C,P<:NamedTuple}
 end
 
 @inline Base.merge(g::MeshOptions{T,C}; kwargs...) where{T,C} =
-	MeshOptions{T,C}(merge(g.parameters, kwargs.data), g.color)
+	MeshOptions{T,C}(merge(g.parameters, values(kwargs)), g.color)
 const MeshColor = Colors.RGBA{N0f8}
 const _DEFAULT_COLOR = Colors.RGBA{N0f8}(.3,.4,.5) # bluish gray
 const _DEFAULT_OPTIONS = MeshOptions{Float64}(NamedTuple(), _DEFAULT_COLOR)
@@ -260,6 +260,16 @@ end
 @inline fullmesh(s::AbstractGeometry; kwargs...) =
 	mesh(merge(_DEFAULT_OPTIONS;kwargs...), s)
 
+@inline Base.show(io::IO, ::MIME"text/plain", m::FullMesh) =
+	AbstractTrees.print_tree(io, m)
+@inline AbstractTrees.printnode(io::IO, m::FullMesh) = 
+	print(io, "FullMesh # ", length(m.aux), " aux meshes")
+@inline children(m::FullMesh) = (m.main, m.aux...,)
+
+@inline AbstractTrees.printnode(io::IO, p::Pair{<:Any,TriangleMesh}) =
+	print(io, first(p), "=> ",
+		length(TriangleMeshes.vertices(last(p))), " vertices, ",
+		length(TriangleMeshes.faces(last(p))), " faces")
 """
     mesh(g::MeshOptions, object)
 
@@ -1718,7 +1728,7 @@ child. Roughly similar to setting `\$fs` and `\$fa` in OpenSCAD.
 See `meshing.md` for documentation about specific parameters.
 """
 @inline set_parameters(s...; parameters...) =
-	operator(SetParameters, (parameters.data,), s...)
+	operator(SetParameters, (values(parameters),), s...)
 
 # Color ««2
 struct Color{D,C<:Colorant} <: AbstractTransform{D}
