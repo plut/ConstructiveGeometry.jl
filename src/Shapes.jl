@@ -476,12 +476,16 @@ function triangulate(m::PolygonXor)#««
 		for p in plist
 			n = length(p)
 			for i in 1:n-1
-				edges[c+i] = (labels[c+i], labels[c+i+1])
+				edges[c+i] = (c+i, c+i+1)
+# 				edges[c+i] = (labels[c+i], labels[c+i+1])
 			end
-				edges[c+n] = (labels[c+n], labels[c+1])
+				edges[c+n] = (c+n, c+1)
+# 				edges[c+n] = (labels[c+n], labels[c+1])
 			c+= n
 		end
-		push!(tri, LibTriangle.triangulation([plist...;], labels, edges, [], holes)...)
+		t1 = LibTriangle.triangulation([plist...;], [], edges, [], holes)
+		append!(tri, (labels[t[1]], labels[t[2]], labels[t[3]]) for t in t1)
+# 		push!(tri, LibTriangle.triangulation([plist...;], labels, edges, [], holes)...)
 	end
 	return tri
 end#»»
