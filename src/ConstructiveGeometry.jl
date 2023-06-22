@@ -236,8 +236,11 @@ const MeshColor = Colors.RGBA{N0f8}
 const _DEFAULT_COLOR = Colors.RGBA{N0f8}(.3,.4,.5) # bluish gray
 const _DEFAULT_OPTIONS = MeshOptions{Float64}(NamedTuple(), _DEFAULT_COLOR)
 const _DEFAULT_PARAMETERS = (
-	atol = 0.1, rtol = .005, symmetry = 1, icosphere = 1000,
+	atol = 0.1, rtol = .005, symmetry = 1, icosphere = 10,
 )
+# TEMPORARY: since convex hull computation currently takes forever
+# (due to some string generation in the `Polyhedra` package!),
+# all spheres are icospheres by default (instead of default 1000).
 
 @inline MeshOptions(g::MeshOptions{T}, p::NamedTuple) where{T} =
 	MeshOptions{T}(merge(g.parameters, p), g.color)
@@ -257,6 +260,12 @@ end
 # 	FullMesh{T,U,A}(main, aux)
 @inline auxtype(::Type{FullMesh{T,U,A}}) where{T,U,A} = Pair{A,U}
 
+"""    fullmesh(geometry; kwargs...)
+
+Computes the full mesh (a `FullMesh` object) for this geometric object.
+Named parameters may be passed; this is equivalent to prefixing
+by a `set_parameters` object (i.e. the standard parameters `atol`,
+`rtol`, `symmetry`, `icosphere` etc. are supported."""
 @inline fullmesh(s::AbstractGeometry; kwargs...) =
 	mesh(merge(_DEFAULT_OPTIONS;kwargs...), s)
 
@@ -784,7 +793,7 @@ function icosphere_points(r::T, n) where{T<:Real}#««
 			v=w
 		end#»»
 	end
-	for i in 13:length(vertices)
+	for i in 1:length(vertices)
 		v = vertices[i]; vertices[i] = v * r/ √(v'*v)
 	end
 	return (vertices, triangles)
@@ -855,15 +864,15 @@ struct AffineTransform{D,A,B} <: AbstractTransform{D}
 	child::AbstractGeometry{D}
 end
 # AffineTransform(f, child) constructor is defined
-@inline mesh(g::MeshOptions, s::AffineTransform{3}, (m,)) = apply(s.f, m)
-
-function mesh(g::MeshOptions, s::AffineTransform{2}, (m,))
-	if hassize(s.f, (2,2))
-		return ShapeMesh(s.f(poly(m)), m.position)
-	elseif hassize(s.f,(3,3))
-		return ShapeMesh(poly(m), compose(SAffineMap3(s.f), position(m)))
-	elseif hassize(s.f,(3,2)) # pad by one column:
-		f = SAffineMap3(AffineMap([s.f.a SA[0;0;1]], s.f.b))
+@inline mesh(::MeshOptions, s::AffineTransform, (m,)) = affine_mesh(s.f, m)
+@inline affine_mesh(f::AffineMap, m::AbstractGeometry{3}) = apply(f, m)
+function affine_mesh(f::AffineMap, m::AbstractGeometry{2})
+	if hassize(f, (2,2))
+		return ShapeMesh(f(poly(m)), m.position)
+	elseif hassize(f,(3,3))
+		return ShapeMesh(poly(m), compose(SAffineMap3(f), position(m)))
+	elseif hassize(f,(3,2)) # pad by one column:
+		f = SAffineMap3(AffineMap([f.a SA[0;0;1]], f.b))
 		return ShapeMesh(poly(m), compose(f, position(m)))
 	end
 	throw(DimensionMismatch("linear map * shape should have dimension (2,2) or (3,3)"))
@@ -990,6 +999,50 @@ Rotation given by Euler angles (ZYX; same ordering as OpenSCAD).
 @inline rotate(angles, s...; kwargs...) =
 	mult_matrix(Rotations.RotZYX(todegrees.(angles)...), s...; kwargs...)
 
+
+# Affine copies ««1
+struct AffineCopies{D,A,B} <: AbstractTransform{D}
+	v::Vector{AffineMap{A,B}}
+	child::AbstractGeometry{D}
+end
+@inline mesh(g::MeshOptions, s::AffineCopies, (m,)) =
+	reduce(csgunion, affine_mesh(f, m) for f in s.v)
+
+"""    affine_copies([f1, f2...])
+
+Union of affine images of a given object. When meshing,
+the mesh of the child object is computed only once."""
+affine_copies(v, s::AbstractGeometry) = AffineCopies(collect(v), s)
+@inline matrix_copies(v, s...) = operator(affine_copies, (v,), s...)
+"""    translate_copies([v1, v2, ...])
+
+Union of translations of a given object. When meshing,
+the mesh of the child object is computed only once.
+
+TODO:
+ - merge with `translate()`,
+ - merge with `+` overload.
+"""
+@inline translate_copies(v, s...) =
+	matrix_copies((AffineMap(I,b) for b ∈ v), s...)
+
+"""    rotate_copies([θ1, θ2, ...])
+
+Union of rotations of a given object.
+When meshing, the mesh of the child object is computed only once.
+
+TODO: a simple way to rotate by a given rotation group.
+`rotate_group` perhaps?
+"""
+@inline rotate_copies(v, s...; axis = nothing) =
+	operator(_rotate1_copies, (todegrees(θ), axis), s...)
+@inline _rotate1_copies(v, ::Nothing, s::AbstractGeometry{2}) =
+	matrix_copies(Rotations.Angle2d.(float.(v)), s)
+@inline _rotate1_copies(v, axis::AbstractVector{<:Number},
+	s::AbstractGeometry{3}) =
+	matrix_copies((Rotations.AngleAxis(θ, axis...) for θ ∈ v), s)
+@inline _rotate1_copies(v, ::Nothing, s::AbstractGeometry{3}) =
+	matrix_copies(Rotations.RotZ.(float.(v)), s)
 
 # Projection««1
 struct Project <: AbstractTransform{2}
@@ -1706,7 +1759,7 @@ until no edge is longer than `maxlen`.
 """
 @inline refine(maxlen::Real, s...) = operator(Refine, (maxlen,), s...)
 
-# SetParameters etc.««1
+# SetParameters, color etc.««1
 # SetParameters ««2
 struct SetParameters{D} <: AbstractTransform{D}
 	parameters
@@ -2395,11 +2448,8 @@ Base.show(io::IO, ::MIME"image/svg+xml", s::AbstractGeometry{2}) =
 @inline Base.display(m::AbstractGeometry) = AbstractTrees.print_tree(m)
 
 # TODO: figure out how to rewrite the following using native Makie recipes
-@inline plot(g::AbstractGeometry; kwargs...) =
-	plot!(Makie.Scene(), g; kwargs...)
-
-@inline plot!(scene::SceneLike, s::AbstractGeometry; kwargs...)=
-	plot!(scene, fullmesh(s); kwargs...)
+@inline plot(g::AbstractGeometry; kwargs...) = plot(fullmesh(g); kwargs...)
+@inline plot(g::FullMesh; kwargs...) = plot!(Makie.Scene(), g; kwargs...)
 
 function plot!(scene::SceneLike, m::FullMesh; kwargs...)
 	rawmain = raw(m.main)

@@ -1,4 +1,5 @@
 # 1d paths
+ * Composed operators!
  * use `AbstractGeometry{1}` for this!
  * concrete subtypes include segments, circular arcs, splines, loop closing
  * allow moves to be relative as well as absolute
