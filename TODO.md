@@ -1,12 +1,15 @@
 # 1d paths
  * Composed operators!
- * use `AbstractGeometry{1}` for this!
  * concrete subtypes include segments, circular arcs, splines, loop closing
+ * use `AbstractGeometry{1}` for this!
  * allow moves to be relative as well as absolute
+ * allow symbolic centering of cubes etc.
+ * ellipsoids (`sphere(a,b,c)`)
  * circular arc: defined either by angle+center+radius, sagitta+endpoints...
  * meshing methods produce polylines
  * concrete type for polyline
  * operators 1d ↔ 2d: border, interior
+ * fill holes (in 2d and in 3d)
  * `path_extrude(surface, profile) => path_extrude(∂surface)`
  * `path(element1, element2, ...)`
 # Bug fixes
@@ -68,8 +71,8 @@ For MeshIO: stl needs
  - [ ] overload `extrude()` (for paths, angles, numbers)
  - [ ] move doc examples to `WGLMakie`
  - [ ] remove `ConvexHull.jl` dependency (use method from `igl` instead?)
- - [ ] `linear_extrude` / `prism` ?
- - [ ] `rotate_extrude` / `revolution` ?
+ - [x] `linear_extrude` / `prism` ?
+ - [x] `rotate_extrude` / `revolution` ?
  - [ ] replace ad-hoc `plot` methods by correct `Makie` interface
  - [x] make meshing type-stable
  - [x] update `iglwrap` and use latest version
@@ -88,9 +91,12 @@ For MeshIO: stl needs
  - [ ] document how to extend (e.g. new object type)
 # New features
 ## Geometry
- - [ ] `multiply`: dispose copies of a mesh (better than `union` because
+ - [x] `multiply`: dispose copies of a mesh (better than `union` because
    we compute the child mesh only once)
+   - [ ] `symmetrize(m, s...) = union(s..., mirror(m, s...))`
+     find some easy syntax allowing also `symmetrize(m)*s`
  - [ ] replace `attributes` by a pointer to the original colored object; this could allow detecting edges etc.
+  - [ ] and detected edges would be protected from decimation
  - [x] `refine`: shorten all edges until no longer than given length
   - [ ] 2d (just divide edges)
   - [x] 3d (split triangles)
@@ -144,10 +150,10 @@ For MeshIO: stl needs
    - OpenSCAD: `src/FreetypeRenderer.cc`, `::render` function
    - [ ] use `Pango` for text and `FreeType` for fonts
  - [x] Bézier curves (used as path for `path_extrude`, `stroke`, `polygon`)
- - [ ] `symmetrize(m, s...) = union(s..., mirror(m, s...))`
-   find some easy syntax allowing also `symmetrize(m)*s`
  - [ ] 2d Minkowski difference
 ## Misc.
+ - [ ] use snap rounding from CGAL to re-introduce our own mesh boolean
+   functions?
  - [x] `surface(volume)` = instantiate as a mesh (avoids recomputation)
  - [ ] `plot(...; zoom=...)`
 ## Attachments

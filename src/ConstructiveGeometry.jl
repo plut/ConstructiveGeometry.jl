@@ -2450,6 +2450,9 @@ Base.show(io::IO, ::MIME"image/svg+xml", s::AbstractGeometry{2}) =
 # TODO: figure out how to rewrite the following using native Makie recipes
 @inline plot(g::AbstractGeometry; kwargs...) = plot(fullmesh(g); kwargs...)
 @inline plot(g::FullMesh; kwargs...) = plot!(Makie.Scene(), g; kwargs...)
+# TODO: this is a workaround for a possible Makie bug — `mesh!` plots
+# nothing, while `mesh()` works correctly:
+@inline Makie_mesh_bang(::SceneLike, a...; kw...) = Makie.mesh(a...; kw...)
 
 function plot!(scene::SceneLike, m::FullMesh; kwargs...)
 	rawmain = raw(m.main)
@@ -2476,9 +2479,9 @@ function plot!(scene::SceneLike, m::TriangleMesh; kwargs...)
 	end
 	fmat = collect(1:size(vmat, 1))
 	attr = [ a[fld1(i,3)] for i in 1:size(vmat, 1)]
-	Makie.mesh!(scene, vmat, fmat, color=attr; # opaque!
+	Makie_mesh_bang(scene, vmat, fmat, color=attr; # opaque!
 		lightposition=Makie.Vec3f0(5e3,1e3, 10e3), kwargs... )
-	return scene
+# 	return scene
 end
 
 function plot!(scene::SceneLike, m::TriangleMesh{<:Real,Nothing};
@@ -2488,7 +2491,7 @@ function plot!(scene::SceneLike, m::TriangleMesh{<:Real,Nothing};
 	v = TriangleMeshes.vertices(m); f = TriangleMeshes.faces(m);
 	vmat = [ p[j] for p in v, j in 1:3 ]
 	fmat = [ q[j] for q in f, j in 1:3 ]
-	Makie.mesh!(scene, vmat, fmat; transparency=true,
+	Makie_mesh_bang(scene, vmat, fmat; transparency=true,
 		lightposition=Makie.Vec3f0(5e3,1e3,10e3), kwargs...)
 end
 
@@ -2509,10 +2512,10 @@ function plot!(scene::SceneLike, p::Shapes.PolygonXor;
 	v = Shapes.vertices(p)
 	tri = Shapes.triangulate(p)
 	m = [ t[j] for t in tri, j in 1:3 ]
-	Makie.mesh!(scene, v, m,
+	Makie_mesh_bang(scene, v, m,
 		specular=Makie.Vec3f0(0,0,0), diffuse=Makie.Vec3f0(0,0,0),
 		color=color; kwargs...)
-	return scene
+# 	return scene
 end
 
 # OpenSCAD output««1
